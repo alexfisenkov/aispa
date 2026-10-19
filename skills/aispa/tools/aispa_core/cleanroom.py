@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -234,6 +235,34 @@ _CONFIG = ("[core]\n\trepositoryformatversion = 0\n\tfilemode = "
            + "\n\tbare = false\n\tlogallrefupdates = false\n\tautocrlf = false\n\teol = lf\n").encode()
 
 
+def _remove_owned_clone(owned):
+    """Remove only this preparation's new directory, including Git readonly blobs."""
+    if is_link(owned):
+        if owned.is_symlink():
+            owned.unlink()
+        else:
+            owned.rmdir()
+        return
+
+    def retry_generated_file(function, name, error):
+        path = Path(name)
+        failure = error[1]
+        if not isinstance(failure, PermissionError) or function not in (os.unlink, os.remove):
+            raise failure
+        _no_links(path, owned)
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise failure
+        # Python 3.11 Windows chmod has no follow_symlinks option. In that
+        # runtime the component guard above refuses every link/junction first.
+        options = {"follow_symlinks": False} if os.chmod in os.supports_follow_symlinks else {}
+        os.chmod(path, info.st_mode | stat.S_IWUSR, **options)
+        function(path)
+
+    if owned.exists():
+        shutil.rmtree(owned, onerror=retry_generated_file)
+
+
 def prepare(store, state):
     """Clone exact current HEAD without local objects, credentials or working files."""
     _require(store.run is not None and state.get("run") == store.run.name, "Нет активного прогона")
@@ -268,13 +297,7 @@ def prepare(store, state):
         return receipt
     except Exception:
         # owned is newly made by this call. Never remove any caller-provided path.
-        if is_link(owned):
-            if owned.is_symlink():
-                owned.unlink()
-            else:
-                owned.rmdir()  # Remove a junction itself, never recurse into its target.
-        elif owned.exists():
-            shutil.rmtree(owned)
+        _remove_owned_clone(owned)
         raise
 
 
@@ -355,6 +378,34 @@ def _guard_path(value, source, clone):
     raise Invalid("Слишком длинная цепочка ссылок в пути clean-run")
 
 
+def _argument_words(argument, *, windows):
+    """Extract guard candidates without interpreting Windows backslashes as escapes."""
+    try:
+        words = shlex.split(argument, posix=not windows)
+    except ValueError:
+        return set()
+    return {word.strip('"\'') if windows else word for word in words}
+
+
+def _literal_paths(argument, *, windows):
+    """Keep shell literals verbatim and also recognize valid Python path escapes."""
+    candidates = set()
+    for match in re.finditer(r'''(?i:(?:br|rb|r|u|b)?)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')''', argument):
+        literal = match.group()
+        quote_at = min(i for i, char in enumerate(literal) if char in "\"'")
+        candidates.add(literal[quote_at + 1:-1])
+        try:
+            value = ast.literal_eval(literal)
+        except (ValueError, SyntaxError):
+            continue
+        if isinstance(value, str) and (not windows or not any(ord(char) < 32 for char in value)):
+            candidates.add(value)
+        # cmd/PowerShell do not decode Python's \t, \f, etc. Do not invent
+        # invalid Windows filenames from their ordinary backslash paths. The
+        # original literal is still checked, and valid decoded paths remain.
+    return candidates
+
+
 def _guard_command(command, source, clone, environment):
     """Reject detectable source paths, not arbitrary programmatic file access."""
     executable = command[0]
@@ -375,23 +426,9 @@ def _guard_command(command, source, clone, environment):
             start = searchable.find(needle, start + len(needle))
         if "=" in argument:
             candidates.add(argument.split("=", 1)[1])
-        try:
-            candidates.update(shlex.split(argument))
-            if os.name == "nt":
-                candidates.update(part.strip('"\'') for part in shlex.split(argument, posix=False))
-        except ValueError:
-            pass
+        candidates.update(_argument_words(argument, windows=os.name == "nt"))
         # Python -c, shell -c and JavaScript -e commonly contain quoted paths.
-        for match in re.finditer(r'''(?i:(?:br|rb|r|u|b)?)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')''', argument):
-            literal = match.group()
-            quote_at = min(i for i, char in enumerate(literal) if char in "\"'")
-            candidates.add(literal[quote_at + 1:-1])
-            try:
-                value = ast.literal_eval(literal)
-            except (ValueError, SyntaxError):
-                value = literal[quote_at + 1:-1]
-            if isinstance(value, str):
-                candidates.add(value)
+        candidates.update(_literal_paths(argument, windows=os.name == "nt"))
         for value in candidates:
             if value.startswith("file://"):
                 from urllib.parse import unquote, urlsplit

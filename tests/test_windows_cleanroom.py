@@ -1,6 +1,6 @@
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import subprocess
 import sys
@@ -52,6 +52,52 @@ class _Fixture:
 
 
 class CleanroomAdapterTests(_Fixture, unittest.TestCase):
+    def test_windows_guard_lexer_never_manufactures_drive_relative_paths(self):
+        absolute = r"C:\hostedtoolcache\windows\Python\3.13.12\x64\python.exe"
+        spaced = r"C:\Program Files\Python 🙂\python.exe"
+        for argument, expected in ((absolute, absolute), ('"' + spaced + '"', spaced),
+                                   (r".venv\Scripts\python.exe", r".venv\Scripts\python.exe"),
+                                   (r"C:source.py", r"C:source.py")):
+            with self.subTest(argument=argument):
+                self.assertEqual(cleanroom._argument_words(argument, windows=True), {expected})
+        self.assertTrue(PureWindowsPath(next(iter(cleanroom._argument_words(absolute, windows=True)))).is_absolute())
+        self.assertEqual(cleanroom._argument_words("'/tmp/a b.py'", windows=False), {"/tmp/a b.py"})
+
+    def test_windows_shell_literals_do_not_manufacture_python_control_characters(self):
+        path = r"C:\temp\file"
+        for command in ('type "' + path + '"', "Get-Content '" + path + "'"):
+            with self.subTest(command=command):
+                self.assertEqual(cleanroom._literal_paths(command, windows=True), {path})
+        # Real Python escaped literals must still expose the actual source path
+        # to the guard, even when the source spelling is hidden by \x escapes.
+        encoded = r"'C:\x5csource\x5capp.py'"
+        self.assertIn(r"C:\source\app.py", cleanroom._literal_paths(encoded, windows=True))
+        self.assertIn(encoded[1:-1], cleanroom._literal_paths(encoded, windows=True))
+        # POSIX permits control characters in names; its existing decoding stays.
+        self.assertIn("/tmp/a\tb", cleanroom._literal_paths(r"'/tmp/a\tb'", windows=False))
+
+    def test_prepare_failure_removes_real_generated_git_clone_only(self):
+        original = (self.root / "app.py").read_bytes()
+        head = self.git("rev-parse", "HEAD")
+        observed = []
+
+        def fail_after_clone(store, *_args, **_kwargs):
+            owned = list((store.home / "cleanrooms").iterdir())
+            self.assertEqual(len(owned), 1)
+            objects = [p for p in (owned[0] / "repo/.git/objects").rglob("*") if p.is_file()]
+            self.assertTrue(objects, "failure must happen after real Git objects are created")
+            for obj in objects:
+                obj.chmod(0o444)
+            observed.extend(objects)
+            raise RuntimeError("fail after clone")
+
+        with patch.object(cleanroom, "_artifact", side_effect=fail_after_clone), self.assertRaisesRegex(RuntimeError, "after clone"):
+            self.prepare()
+        self.assertTrue(observed)
+        self.assertEqual(list((self.store.home / "cleanrooms").iterdir()), [])
+        self.assertEqual((self.root / "app.py").read_bytes(), original)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+
     def test_run_delegates_to_portable_runner_without_changing_contract(self):
         expected = (b"output", 7, False, True, False)
         with patch.object(cleanroom.process_runner, "run", return_value=expected) as run:
@@ -73,6 +119,16 @@ class CleanroomAdapterTests(_Fixture, unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "native Windows cleanroom integration")
 class WindowsCleanroomTests(_Fixture, unittest.TestCase):
+    def test_windows_shell_path_literals_outside_source_are_not_falsely_rejected(self):
+        clone = self.prepare()
+        environment = cleanroom._environment(clone.parent / "home")
+        for command in ('type "C:\\temp\\file"', "Get-Content 'C:\\temp\\file'"):
+            cleanroom._guard_command(["cmd.exe", "/d", "/c", command], self.root, clone, environment)
+        escaped_source = repr(str(self.root / "app.py")).replace("app.py", r"\x61pp.py")
+        with self.assertRaises(Invalid):
+            cleanroom._guard_command([sys.executable, "-c", "open(" + escaped_source + ")"],
+                                     self.root, clone, environment)
+
     def test_actual_clean_environment_uses_isolated_homes_and_utf8(self):
         clone = self.prepare()
         with patch.dict(os.environ, {"SECRET_TOKEN": "private-sentinel-test", "PYTHONPATH": "bad-modules",

@@ -339,10 +339,11 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(updates.check(self.package)["installReason"], "git_checkout")
             with self.assertRaises(Invalid):
                 updates.prepare(self.package)
-        shutil.rmtree(self.package / ".git")
-        (self.package / ".aispa").mkdir()
+        containing_runs = self.package.parent / "contains-runs"
+        self.write_package(containing_runs, self.old)
+        (containing_runs / ".aispa").mkdir()
         with self.assertRaises(Invalid):
-            updates.prepare(self.package)
+            updates.prepare(containing_runs)
 
     def test_git_probe_failure_in_checkout_fails_closed(self):
         repo = self.root / "broken-repo"
