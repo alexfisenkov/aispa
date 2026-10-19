@@ -12,9 +12,28 @@ import uuid
 
 from . import VERSION, SCHEMA
 
+COMMON_INPUTS = {"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".gitignore", "package.json",
+                 "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb", "pyproject.toml",
+                 "uv.lock", "poetry.lock", "Pipfile", "Pipfile.lock", "Cargo.toml", "Cargo.lock", "go.mod",
+                 "go.sum", "tsconfig.json", "jsconfig.json", "Makefile", "Dockerfile", "compose.yaml"}
+
+
+def common_input(name):
+    return "/" not in name and (name in COMMON_INPUTS or name.startswith("requirements") and name.endswith(".txt"))
+
 
 class Invalid(ValueError):
     pass
+
+
+def canonical_zone(value):
+    """One spelling for relative task paths before matching or fingerprinting."""
+    if not isinstance(value, str) or not value.strip() or "\\" in value or "\0" in value:
+        raise Invalid("Некорректная зона задачи")
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or (path.parts and path.parts[0] in (".git", ".aispa")):
+        raise Invalid("Некорректная зона задачи")
+    return path.as_posix()
 
 
 def timestamp():
@@ -157,8 +176,10 @@ class Journal:
             raise Invalid("Нужен доступный Git-репозиторий с коммитом HEAD")
         return result.stdout
 
-    def code(self):
+    def code(self, zones=None, include_common=False):
         """Hash project files, respecting Git ignores, excluding only AISpa accounting."""
+        if zones is not None:
+            zones = [canonical_zone(z) for z in zones]
         top = Path(os.fsdecode(self.git("rev-parse", "--show-toplevel")).strip()).resolve()
         if top != self.root:
             raise Invalid("--root должен указывать на корень Git-репозитория")
@@ -169,6 +190,11 @@ class Journal:
                 continue
             name = os.fsdecode(raw)
             if name == ".aispa" or name.startswith(".aispa/"):
+                continue
+            common = common_input(name)
+            if zones is not None and not (include_common and common) and not any(
+                z in ("", ".") or name == z.rstrip("/") or name.startswith(z.rstrip("/") + "/") for z in zones
+            ):
                 continue
             path = self.root / name
             if path.is_symlink():

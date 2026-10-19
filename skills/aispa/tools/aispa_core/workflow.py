@@ -7,9 +7,11 @@ import time
 
 from .contracts import (active, add_requirements, artifact_valid, basis, definition,
                         evidence_rows, gate_valid, plan_basis, report_header, require,
-                        validate_plan, verified)
+                        validate_plan, verified, task_basis, task_verified, task_closure)
 from .store import Invalid, timestamp
 from . import timing
+from .team import TaskPipeline, task_proof_valid
+from . import project_context
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -25,11 +27,19 @@ def read_input(path):
 
 
 class Workflow:
+    read_input = staticmethod(read_input)
+
     def __init__(self, store, state):
         self.store, self.s = store, state
+        self.pipeline = TaskPipeline(self)
 
     def save(self, event):
         self.store.append(self.s, event)
+        if self.s.get("projectContext", {}).get("initialized"):
+            try:
+                project_context.refresh(self.store, self.s)
+            except (OSError, Invalid) as error:
+                raise Invalid("Событие записано, но память проекта не обновилась. Выполните context-refresh без повтора операции") from error
 
     def running(self):
         require(self.s["status"] == "running", "Прогон закрыт или приостановлен; сначала resume")
@@ -60,6 +70,9 @@ class Workflow:
         require(req is not None and source is not None, "Неизвестное требование или бриф")
         require(bool(quote.strip()) and quote in self.store.text(source), "Решение требует дословной цитаты из дополнения владельца")
         require(brief != req.get("brief"), "Изменение объёма требует нового дополнения к брифу")
+        order = {item["id"]: index for index, item in enumerate(self.s["briefs"])}
+        previous = req.get("decision", {}).get("brief", req.get("brief"))
+        require(order[brief] > order.get(previous, -1), "Решение об объёме должно быть новее предыдущего решения по требованию")
         req["scope"] = {"drop": "dropped", "defer": "deferred", "restore": "active"}[action]
         req["decision"] = {"brief": brief, "quote": quote, "action": action}
         self.s["sealed"] = False
@@ -113,13 +126,14 @@ class Workflow:
         require(gate_valid(self.store, self.s, "coverage"), "Покрытие брифа не подтверждено или устарело")
         text = read_input(path)
         tasks = validate_plan(self.s, json.loads(text))
+        self.pipeline.validate_replan(tasks)
         old = {t["id"]: t for t in self.s["tasks"]}
         contract = basis(self.store, self.s, "coverage")
         for task in tasks:
             previous = old.get(task["id"])
             task["origin"] = contract
             if previous and definition(previous) == definition(task) and previous.get("origin") == contract:
-                for key in ("status", "proof", "note", *timing.FIELDS):
+                for key in ("status", "phase", "proof", "note", *timing.FIELDS):
                     if key in previous:
                         task[key] = previous[key]
             elif previous:
@@ -128,6 +142,7 @@ class Workflow:
                     if key in previous:
                         task[key] = previous[key]
         self.s["tasks"] = tasks
+        self.pipeline.prepare()
         self.s["gates"]["plan"] = {"passed": True, "basis": basis(self.store, self.s, "plan"),
                                      "report": self.store.artifact("plans", text.encode(), ".json")}
         self.s["stage"] = "build"
@@ -148,8 +163,13 @@ class Workflow:
         self.build_ready()
         task = self.task(tid)
         require(task["status"] in ("pending", "blocked"), "Задача уже запущена или завершена")
+        self.pipeline.start_guard(tid)
         require(context == basis(self.store, self.s, "task", tid), "Пакет контекста задачи устарел")
-        require(all(self.task(dep)["status"] == "completed" for dep in task["dependsOn"]), "Зависимости задачи ещё не завершены")
+        closure = {t["id"] for t in task_closure(self.s, tid)} - {tid}
+        require(all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure) for dep in task["dependsOn"]),
+                "Зависимости задачи не приняты или доказательства устарели; включите актуального преемника в dependsOn")
+        entry = self.s.setdefault("waveEntries", {}).get(str(task["wave"]))
+        opening = not entry or entry["plan"] != plan_basis(self.s)
         for prior in {t["wave"] for t in self.s["tasks"] if t["wave"] < task["wave"]}:
             require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"] if t["wave"] == prior),
                     "Предыдущая волна ещё выполняется")
@@ -158,7 +178,12 @@ class Workflow:
                     and artifact_valid(self.store, review["report"])
                     and all(artifact_valid(self.store, a) for a in review.get("artifacts", [])),
                     "Нет актуальной сверки всего брифа после предыдущей волны")
+            if opening and prior == max(t["wave"] for t in self.s["tasks"] if t["wave"] < task["wave"]):
+                require(review["basis"] == basis(self.store, self.s, "wave"), "Последняя сверка волны устарела; повторите общую проверку")
+        if opening:
+            self.s["waveEntries"][str(task["wave"])] = {"plan": plan_basis(self.s), "openedAt": timestamp()}
         task["status"] = "running"
+        task["phase"] = "implementation"
         timing.start(task, timestamp())
         task["attempts"] = task.get("attempts", 0) + 1
         task.pop("proof", None)
@@ -175,6 +200,7 @@ class Workflow:
 
     def reset(self, tid):
         self.running()
+        self.pipeline.reset_guard(tid)
         affected = {tid}; self.task(tid)
         while True:
             next_set = affected | {t["id"] for t in self.s["tasks"] if set(t["dependsOn"]) & affected}
@@ -188,16 +214,25 @@ class Workflow:
                 task["status"] = "pending"
                 task.pop("proof", None)
         self.s["waves"] = {}
+        self.s["waveEntries"] = {}
         self.save("tasks-reset:" + ",".join(sorted(affected)))
 
-    def verify(self, command, timeout):
+    def verify(self, command, timeout, task_id=None):
         self.running()
         require(command and all(isinstance(x, str) for x in command), "Нужна команда проверки после --")
         require(not SECRET.search(" ".join(command)), "Секреты нельзя передавать аргументами команды")
-        code = self.store.code()
+        attempt = None
+        if task_id:
+            self.task(task_id)
+            attempt = self.s.get("taskHistory", {}).get(task_id, [None])[-1]
+            require(attempt is not None, "Сначала подготовьте команду задачи")
+        code = task_basis(self.store, self.s, task_id) if task_id else self.store.code()
         started = time.monotonic()
-        self.s["verification"] = None
-        self.s["activity"] = {"kind": "verification", "startedAt": timestamp()}
+        if attempt is not None:
+            attempt["verification"] = None
+        else:
+            self.s["verification"] = None
+        self.s["activity"] = {"kind": "verification", "task": task_id, "startedAt": timestamp()}
         self.save("verification-started")
         try:
             result = subprocess.run(command, cwd=self.store.root, capture_output=True, timeout=timeout)
@@ -213,30 +248,26 @@ class Workflow:
             output = "AISpa withheld the entire output because it may contain a secret.\n"
             rc = 125
         artifact = self.store.artifact("evidence", output.encode() or b"(no output)\n", ".log")
-        self.s["verification"] = {"command": command, "exitCode": rc, "code": code,
-                                  "changedCode": code != self.store.code(), "output": artifact,
-                                  "durationSeconds": round(time.monotonic() - started, 3), "at": timestamp()}
+        after = task_basis(self.store, self.s, task_id) if task_id else self.store.code()
+        receipt = {"command": command, "exitCode": rc, "code": code, "changedCode": code != after,
+                   "output": artifact, "durationSeconds": round(time.monotonic() - started, 3), "at": timestamp()}
+        if attempt is not None:
+            receipt.update(task=task_id, attempt=attempt["id"], candidate=code)
+            attempt["verification"] = receipt
+        else:
+            self.s["verification"] = receipt
         self.s.pop("activity", None)
         self.save("verification-executed")
-        return verified(self.store, self.s)
+        return task_verified(self.store, self.s, task_id) if task_id else verified(self.store, self.s)
 
     def complete_task(self, tid, path):
-        self.build_ready()
-        task = self.task(tid)
-        require(task["status"] == "running", "Задача не выполняется")
-        require(verified(self.store, self.s), "Нет успешной проверки текущего кода")
-        text = read_input(path); report = json.loads(text)
-        report_header(self.store, self.s, report, "task", tid)
-        artifacts, failures = evidence_rows(self.store, report, {(tid, c) for c in task["criteria"]})
-        require(not failures and not report["unmapped"], "Задача не прошла проверку всех критериев")
-        task["status"] = "completed"
-        timing.stop(task, timestamp(), completed=True)
-        task["proof"] = {"basis": report["basis"], "report": self.store.artifact("reviews", text.encode(), ".json"),
-                         "artifacts": artifacts}
-        self.save("task-completed:" + tid)
+        return self.pipeline.accept(tid, path)
 
     def wave(self, number, path):
         self.build_ready()
+        require(verified(self.store, self.s), "Нет актуальной общей проверки кода перед сверкой волны")
+        require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
+                "Приёмка одной из завершённых задач отсутствует, повреждена или устарела")
         members = [t for t in self.s["tasks"] if t["wave"] == number]
         require(members and all(t["status"] in ("completed", "blocked") for t in members), "Волна ещё не закончилась")
         text = read_input(path); report = json.loads(text)
@@ -256,12 +287,17 @@ class Workflow:
         self.build_ready()
         require(verified(self.store, self.s), "Нет успешной проверки текущего кода")
         require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"]), "Есть незавершённые задачи без результата или блокера")
+        require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
+                "Не все завершённые задачи имеют действительную цепочку приёмки")
         for number in {t["wave"] for t in self.s["tasks"]}:
             checkpoint = self.s.get("waves", {}).get(str(number))
             require(checkpoint and checkpoint["passed"] and checkpoint["plan"] == plan_basis(self.s)
                     and artifact_valid(self.store, checkpoint["report"])
                     and all(artifact_valid(self.store, a) for a in checkpoint.get("artifacts", [])),
                     "Не все волны прошли сверку с полным брифом")
+        last_wave = max(t["wave"] for t in self.s["tasks"])
+        require(self.s["waves"][str(last_wave)]["basis"] == basis(self.store, self.s, "wave"),
+                "Итоговая сверка последней волны устарела")
         text = read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "acceptance")
         expected = {(r["id"], c) for r in active(self.s) for c in r["acceptance"]}
@@ -287,6 +323,7 @@ class Workflow:
         self.store.git("rev-parse", "HEAD")
         for task in self.s["tasks"]:
             if task["status"] == "completed":
+                require(task_proof_valid(self.store, self.s, task["id"]), "Устарела или повреждена цепочка проверки задачи")
                 proof = task.get("proof", {})
                 require(artifact_valid(self.store, proof.get("report", {})) and all(
                     artifact_valid(self.store, a) for a in proof.get("artifacts", [])), "Повреждены доказательства задачи")

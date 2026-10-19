@@ -101,7 +101,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .tag{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:500;white-space:nowrap;border:1px solid var(--line)}
 .tag .dot{width:7px;height:7px}
 .tag.implemented{background:var(--paper);color:var(--ink)}.tag.implemented .dot{background:var(--graphite)}
-.tag.unfinished{background:var(--graphite);color:#fff;border-color:var(--graphite)}.tag.unfinished .dot{background:#fff}
+.tag.needs_check,.tag.unfinished{background:var(--graphite);color:#fff;border-color:var(--graphite)}.tag.needs_check .dot,.tag.unfinished .dot{background:#fff}
 .tag.unplanned{background:var(--white);color:var(--muted);border-color:var(--silver)}.tag.unplanned .dot{background:var(--silver)}
 .tag.off{background:var(--white);color:var(--faint)}.tag.off .dot{border:1.5px solid var(--faint)}
 .empty{padding:22px 4px;border-top:1px solid var(--line);font-size:14px;color:var(--faint)}
@@ -264,7 +264,7 @@ var DOT={running:['#FFFFFF','0'],paused:['transparent','2px solid #C7C9CC'],bloc
  stale:['transparent','2px dashed #C7C9CC'],unavailable:['transparent','2px dashed #C7C9CC']};
 var STAGES=[['brief','Бриф'],['requirements','Требования и ядро'],['spec','Спецификация'],['coverage','Сверка покрытия'],
  ['plan','План'],['build','Задачи и волны'],['acceptance','Приёмка']];
-var IMPL={implemented:'Реализовано по задачам',unfinished:'Не завершено',unplanned:'Ещё нет в плане'};
+var IMPL={implemented:'Реализовано по задачам',unfinished:'Не завершено',unplanned:'Ещё нет в плане',needs_check:'Нужна повторная проверка'};
 var SCOPE={dropped:'Снято по решению владельца',deferred:'Отложено по решению владельца'};
 var TASK={completed:'Реализовано',running:'В работе',pending:'Ожидает',blocked:'Препятствие'};
 var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
@@ -342,7 +342,7 @@ function renderActivity(d,status){
  }
  var running=d.tasks.filter(function(t){return t.status==='running'});
  running.forEach(function(t){var row=h('div','active-task'),text=h('div');
-  text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · волна '+t.wave));
+  text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · волна '+t.wave+(t.phaseLabel?' · '+t.phaseLabel:'')));
   var time=h('span','mono task-time');time.id='active-time-'+t.id;row.append(text,time);box.append(row);});
  if(!running.length&&!d.activity){
   var next=d.tasks.find(function(t){return t.status==='pending'&&t.dependsOn&&t.dependsOn.every(function(id){
@@ -408,7 +408,7 @@ function render(d){
   ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')),b=h('div','task-body');
    b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?'Требования: '+t.requirements.join(', '):'Без привязки к требованиям'));
    var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(
-    t.status==='running'&&d.status!=='running'?'Приостановлена':TASK[t.status]||UNKNOWN));
+   t.status==='running'&&d.status!=='running'?'Приостановлена':t.status==='running'&&t.phaseLabel?t.phaseLabel:TASK[t.status]||UNKNOWN));
    var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,clock);
    row.append(h('span','task-id mono',t.id),b,right);box.append(row)});w.append(hd,box);wv.append(w)});
  var rb=$('remaining');rb.replaceChildren();var any=false;
@@ -438,7 +438,7 @@ async function refresh(){
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.1.0-alpha.2',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.1.0-alpha.3',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[

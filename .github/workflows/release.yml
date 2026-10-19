@@ -1,0 +1,100 @@
+name: AISpa release assets
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+concurrency:
+  group: aispa-release-${{ github.event.release.id }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'alexfisenkov/aispa'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      AISPA_RELEASE_TAG: ${{ github.event.release.tag_name }}
+      AISPA_RELEASE_ID: ${{ github.event.release.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.AISPA_RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Build and validate the exact published tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          tag = os.environ["AISPA_RELEASE_TAG"]
+          commit = subprocess.check_output([
+              "git", "rev-parse", "--verify", "--end-of-options",
+              "refs/tags/" + tag + "^{commit}",
+          ], text=True).strip()
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if commit != head or commit != os.environ["GITHUB_SHA"]:
+              raise SystemExit("Release tag, event commit and checkout do not match")
+          output = Path(os.environ["RUNNER_TEMP"]) / "aispa-release"
+          subprocess.run([
+              "python", "tools/package_update.py", "--commit", commit,
+              "--output", str(output),
+          ], check=True)
+          manifest = json.loads((output / "aispa-update.json").read_text())
+          version = tag[1:] if tag.startswith("v") else tag
+          if manifest["version"] != version or manifest["commit"] != commit:
+              raise SystemExit("Tag must equal the package version, optionally prefixed with v")
+          if {path.name for path in output.iterdir()} != {"aispa.zip", "aispa-update.json"}:
+              raise SystemExit("Unexpected release asset set")
+          PY
+      - name: Upload the two assets without replacing existing files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$AISPA_RELEASE_ID" > "$RUNNER_TEMP/aispa-release-before.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          release = json.loads((Path(os.environ["RUNNER_TEMP"]) / "aispa-release-before.json").read_text())
+          if (release["id"] != int(os.environ["AISPA_RELEASE_ID"])
+                  or release["tag_name"] != os.environ["AISPA_RELEASE_TAG"]
+                  or release["draft"] or not release["published_at"]):
+              raise SystemExit("The existing published release does not match the event")
+          if {asset["name"] for asset in release["assets"]} & {"aispa.zip", "aispa-update.json"}:
+              raise SystemExit("Release assets already exist; automatic replacement is forbidden")
+          PY
+          gh release upload "$AISPA_RELEASE_TAG" \
+            "$RUNNER_TEMP/aispa-release/aispa.zip" \
+            "$RUNNER_TEMP/aispa-release/aispa-update.json" \
+            --repo "$GITHUB_REPOSITORY"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$AISPA_RELEASE_ID" > "$RUNNER_TEMP/aispa-release-after.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          temporary = Path(os.environ["RUNNER_TEMP"])
+          release = json.loads((temporary / "aispa-release-after.json").read_text())
+          for name in ("aispa.zip", "aispa-update.json"):
+              matches = [asset for asset in release["assets"] if asset["name"] == name]
+              if (len(matches) != 1 or matches[0]["state"] != "uploaded"
+                      or matches[0]["size"] != (temporary / "aispa-release" / name).stat().st_size):
+                  raise SystemExit("Release asset read-back failed: " + name)
+          print("Both release assets are uploaded and match their local sizes")
+          PY

@@ -2,7 +2,7 @@
 import re
 from pathlib import Path
 
-from .store import Invalid, confined, digest, file_hash
+from .store import Invalid, confined, digest, file_hash, COMMON_INPUTS, common_input, canonical_zone
 
 
 def require(condition, message):
@@ -19,7 +19,41 @@ def active(state):
 
 
 def definition(task):
-    return {k: task[k] for k in ("id", "title", "requirements", "dependsOn", "zones", "criteria", "wave")}
+    return {**{k: task[k] for k in ("id", "title", "requirements", "dependsOn", "zones", "criteria", "wave")},
+            "readZones": task.get("readZones", [])}
+
+
+def task_closure(state, task_id):
+    tasks = {t["id"]: t for t in state["tasks"]}
+    found, visiting = {}, set()
+    def visit(tid):
+        require(tid in tasks and tid not in visiting, "Неизвестная или циклическая зависимость задачи")
+        if tid in found:
+            return
+        visiting.add(tid)
+        for dep in tasks[tid]["dependsOn"]:
+            visit(dep)
+        visiting.remove(tid)
+        found[tid] = tasks[tid]
+    visit(task_id)
+    return list(found.values())
+
+
+def task_contract(state, task_id):
+    return digest({"scope": scope_basis(state), "spec": state["spec"],
+                   "closure": [{k: v for k, v in definition(t).items() if k != "wave"}
+                               for t in task_closure(state, task_id)]})
+
+
+def task_basis(store, state, task_id):
+    closure = task_closure(state, task_id)
+    attempt = (state.get("taskHistory", {}).get(task_id) or [{}])[-1]
+    zones = sorted({z for task in closure for z in task["zones"] + task.get("readZones", [])})
+    return digest({"run": state["run"], "contract": task_contract(state, task_id),
+                   "attempt": attempt.get("id"), "roles": attempt.get("roles", {}),
+                   "code": store.code(zones, include_common=True), "readSet": zones,
+                   "dependencies": [{"id": t["id"], "status": t["status"], "proof": t.get("proof")}
+                                    for t in closure if t["id"] != task_id]})
 
 
 def scope_basis(state):
@@ -37,12 +71,10 @@ def basis(store, state, kind, task_id=None):
         return digest({"scope": scope_basis(state), "spec": state["spec"]})
     if kind == "plan":
         return plan_basis(state)
-    body = {"plan": plan_basis(state), "code": store.code()}
     if kind == "task":
-        task = next((t for t in state["tasks"] if t["id"] == task_id), None)
-        require(task is not None, "Неизвестная задача")
-        body["task"] = definition(task)
-    elif kind in ("acceptance", "wave"):
+        return task_basis(store, state, task_id)
+    body = {"plan": plan_basis(state), "code": store.code()}
+    if kind in ("acceptance", "wave"):
         body["progress"] = [{"id": t["id"], "status": t["status"], "proof": t.get("proof")} for t in state["tasks"]]
     else:
         raise Invalid("Неизвестный вид проверки")
@@ -69,6 +101,14 @@ def verified(store, state):
     check = state["verification"]
     return bool(check and check["exitCode"] == 0 and check["code"] == store.code()
                 and not check.get("changedCode") and artifact_valid(store, check["output"]))
+
+
+def task_verified(store, state, task_id):
+    attempt = (state.get("taskHistory", {}).get(task_id) or [{}])[-1]
+    check = attempt.get("verification")
+    return bool(check and check["exitCode"] == 0 and not check.get("changedCode")
+                and check["candidate"] == task_basis(store, state, task_id)
+                and artifact_valid(store, check["output"]))
 
 
 def add_requirements(store, state, items):
@@ -116,20 +156,32 @@ def validate_plan(state, items):
                 "Нужен уникальный ID задачи вида T01")
         require(nonempty(raw.get("title")), "У задачи нет названия")
         reqs, deps, zones, criteria = (raw.get(k) for k in ("requirements", "dependsOn", "zones", "criteria"))
+        reads = raw.get("readZones", [])
         for values, label in ((reqs, "requirements"), (deps, "dependsOn"), (zones, "zones"), (criteria, "criteria")):
             require(isinstance(values, list) and all(nonempty(x) for x in values)
                     and len(values) == len(set(values)), "Некорректный список: " + label)
         require(reqs and set(reqs) <= available, "Задача ссылается на отсутствующее или снятое требование")
         require(zones and criteria, "Задаче нужны зоны и критерии")
-        for zone in zones:
-            require(not Path(zone).is_absolute() and ".." not in Path(zone).parts
-                    and not zone.startswith((".git", ".aispa")) and "\\" not in zone,
-                    "Некорректная зона задачи")
+        require(isinstance(reads, list) and all(nonempty(x) for x in reads), "readZones должен быть списком путей")
+        zones = list(dict.fromkeys(canonical_zone(z) for z in zones))
+        reads = list(dict.fromkeys(canonical_zone(z) for z in reads))
         tasks[tid] = {"id": tid, "title": raw["title"], "requirements": reqs,
-                      "dependsOn": deps, "zones": [z.rstrip("/") for z in zones],
+                      "dependsOn": deps, "zones": zones,
+                      "readZones": reads,
                       "criteria": criteria, "status": "pending"}
     covered = {r for t in tasks.values() for r in t["requirements"]}
     require(available <= covered, "В плане потеряны требования: " + ", ".join(sorted(available - covered)))
+    graph = dict(state, tasks=list(tasks.values()))
+    closures = {tid: task_closure(graph, tid) for tid in tasks}
+    common = COMMON_INPUTS | {z for t in tasks.values() for z in t["zones"] if common_input(z)}
+    readsets = {tid: sorted(common | {z for t in closure for z in t["zones"] + t.get("readZones", [])})
+                for tid, closure in closures.items()}
+    values = list(tasks.values())
+    for i, left in enumerate(values):
+        for right in values[i + 1:]:
+            ordered = left["id"] in {t["id"] for t in closures[right["id"]]} or right["id"] in {t["id"] for t in closures[left["id"]]}
+            conflict = overlap(left["zones"], readsets[right["id"]]) or overlap(right["zones"], readsets[left["id"]])
+            require(not conflict or ordered, "Запись/чтение задач %s и %s пересекаются: добавьте явную dependsOn" % (left["id"], right["id"]))
     visiting = set()
 
     def wave(tid):

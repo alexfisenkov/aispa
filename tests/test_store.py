@@ -37,6 +37,16 @@ class StorageTests(unittest.TestCase):
             self.store.append(state, "note")
         self.assertEqual(self.store.load()["notes"], ["Первое решение"])
 
+    def test_zone_aliases_hash_real_files_and_reject_reserved_paths(self):
+        self.repository()
+        before = self.store.code(["./app.py"])
+        self.assertEqual(before, self.store.code(["app.py"]))
+        (self.root / "app.py").write_text("print('changed')\n")
+        self.assertNotEqual(before, self.store.code(["./app.py"]))
+        for zone in ("./.aispa/context", "./.git/config", "src/../app.py"):
+            with self.subTest(zone=zone), self.assertRaises(Invalid):
+                self.store.code([zone])
+
     def test_second_writer_cannot_enter(self):
         with self.store.lock():
             with self.assertRaises(Invalid):

@@ -104,3 +104,11 @@ test('user content is text and cannot become HTML',async()=>{
 test('unknown status is not passed off as a known result',async()=>{
  const f=await fixture('',sample('unsupported'));assert.equal(f.text('label'),'Состояние не определено');
 });
+test('current work names the recorded critic phase',async()=>{
+ const d=sample();d.tasks[0].phase='critic2';d.tasks[0].phaseLabel='Второй критик';
+ const f=await fixture('',d);assert.match(f.text('currentActivity'),/Второй критик/);assert.match(f.text('waves'),/Второй критик/);
+});
+test('stale task proof is visibly awaiting a new check',async()=>{
+ const d=sample();d.requirements[0].implementation='needs_check';
+ const f=await fixture('',d);assert.match(f.text('requirements'),/Нужна повторная проверка/);
+});

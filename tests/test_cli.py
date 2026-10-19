@@ -41,11 +41,11 @@ class CliTests(unittest.TestCase):
         return json.loads(r.stdout)
 
     def init(self, cli=CLI):
-        state = self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", cli=cli)
+        state = self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", "--runtime", "codex", cli=cli)
         self.run = self.root / ".aispa" / state["runDirectory"]
         self.inbox = self.root / ".aispa/inbox"
         self.inbox.mkdir()
-        self.git("add", ".gitignore")
+        self.git("add", ".gitignore", "AGENTS.md")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "ignore local records")
 
     def input(self, value):
@@ -70,8 +70,31 @@ class CliTests(unittest.TestCase):
             process.stdout.close()
 
     def test_mode_is_explicit(self):
-        self.call("init", "--slug", "example", "--title", "Example", expected=2)
+        self.call("init", "--slug", "example", "--title", "Example", "--runtime", "codex", expected=2)
         self.assertFalse((self.root / ".aispa/active.json").exists())
+
+    def test_runtime_is_explicit(self):
+        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", expected=2)
+        self.assertFalse((self.root / ".aispa/active.json").exists())
+
+    def test_init_does_not_write_through_ignore_symlink(self):
+        external = Path(self.temp.name) / "external-ignore"
+        external.write_text("keep this unchanged\n")
+        (self.root / ".gitignore").symlink_to(external)
+        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", expected=2)
+        self.assertEqual(external.read_text(), "keep this unchanged\n")
+        self.assertFalse((self.root / ".aispa/active.json").exists())
+
+    def test_context_receipts_and_derived_memory_are_current(self):
+        self.init()
+        result = self.call("decision", "Use standard library")
+        self.assertNotIn("requirements", result)
+        self.assertIn("Use standard library", (self.root / ".aispa/context/decisions.md").read_text())
+        result = self.call("context", "--kind", "coverage", "--write")
+        self.assertNotIn("briefs", result)
+        packet = json.loads(Path(result["absolutePath"]).read_text())
+        self.assertEqual(packet["basis"], result["basis"])
+        self.assertLessEqual(len((self.root / ".aispa/context/memory.md").read_text()), 8000)
 
     def test_empty_finish_fails_with_nonzero_exit(self):
         self.init()
@@ -86,7 +109,8 @@ class CliTests(unittest.TestCase):
         (copy / "assets/dashboard.html").write_text("changed template")
         self.call("decision", "Новая запись", cli=cli, expected=2)
         pinned = self.run / "runtime/tools/aispa.py"
-        state = self.call("decision", "Новая запись", cli=pinned)
+        self.call("decision", "Новая запись", cli=pinned)
+        state = self.call("status", cli=pinned)
         self.assertEqual(state["decisions"][0]["text"], "Новая запись")
 
     def test_full_cli_scenario(self):
@@ -103,16 +127,32 @@ class CliTests(unittest.TestCase):
             "dependsOn": [], "zones": ["app.py"], "criteria": ["Выводит ready"]}]))
         ctx = self.context("task", "--task", "T01")
         self.call("start", "T01", "--context", ctx["basis"])
-        self.call("verify", "--", sys.executable, "-c",
+        for role in ("worker", "critic1", "critic2", "acceptor"):
+            self.call("assign", "T01", "--role", role, "--runtime", "codex", "--native-id", "synthetic-" + role, "--session", "test-session")
+        self.call("verify", "--task", "T01", "--", sys.executable, "-c",
                   "import subprocess,sys; assert subprocess.check_output([sys.executable,'app.py'],text=True).strip()=='ready'; print('checked')")
 
         def proof(kind, rid, extra=()):
             ctx = self.context(kind, *extra)
-            return {"basis": ctx["basis"], "reviewer": "synthetic", "independent": True,
-                    "unmapped": [], "checks": [{"requirement": rid, "criterion": "Выводит ready",
-                    "status": "passed", "artifact": ctx["verification"]["output"]["file"], "note": "Проверено тестовой командой"}]}
+            role = extra[extra.index("--role") + 1] if "--role" in extra else None
+            checks = ctx.get("expectedChecks", [{"requirement": rid, "criterion": "Выводит ready"}])
+            report = {"basis": ctx["basis"], "reviewer": ctx["actors"][role] if role else "synthetic", "independent": True,
+                      "unmapped": [], "checks": [dict(c, status="passed", artifact=ctx["verification"]["output"]["file"], note="Проверено тестовой командой") for c in checks]}
+            if role in ("critic1", "critic2"):
+                report["findings"] = []
+            if role == "critic2":
+                report.update(previousReport=ctx["rounds"][0]["report"]["sha256"], repairReceipt=None, resolutions=[])
+            if role == "acceptor":
+                report.update(previousReport=ctx["rounds"][1]["report"]["sha256"], inheritedProofs=ctx["inheritedProofs"],
+                    trace=[{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
+                            "note": "Сопоставлено с брифом", "artifact": ctx["verification"]["output"]["file"]} for r in ctx["traceRequirements"]])
+            return report
 
-        self.call("complete", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01"))))
+        self.call("submit", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "worker"))))
+        self.call("critic", "T01", "--round", "1", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic1"))))
+        self.call("critic", "T01", "--round", "2", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic2"))))
+        self.call("complete", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "acceptor"))))
+        self.call("verify", "--", sys.executable, "app.py")
         self.call("wave", "1", "--file", self.input(proof("wave", "R01")))
         self.call("acceptance", "--file", self.input(proof("acceptance", "R01")))
         state = self.call("finish")

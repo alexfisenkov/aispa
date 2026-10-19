@@ -71,18 +71,38 @@ class WorkflowTests(unittest.TestCase):
                             for r in self.state["requirements"] if r["scope"] == "active"]
         self.assertTrue(self.flow.coverage(self.file(report)))
 
-    def verify(self):
+    def verify(self, tid=None):
         self.assertTrue(self.flow.verify([sys.executable, "-c",
-                                         "import subprocess,sys; r=subprocess.check_output([sys.executable,'app.py'],text=True); assert r.strip()=='ready'; print('runtime passed')"], 10))
+                                         "import subprocess,sys; r=subprocess.check_output([sys.executable,'app.py'],text=True); assert r.strip()=='ready'; print('runtime passed')"], 10, tid))
+
+    def attempt(self, tid="T01"):
+        return self.state["taskHistory"][tid][-1]
+
+    def task_report(self, tid, role, **extra):
+        attempt = self.attempt(tid)
+        report = self.header("task", tid)
+        report["reviewer"] = attempt["actors"][role]
+        report["checks"] = [{"requirement": rid, "criterion": c, "status": "passed",
+                             "artifact": attempt["verification"]["output"]["file"], "note": "Синтетическое наблюдение"}
+                            for rid, c in sorted(self.flow.pipeline.expected_checks(tid, role))]
+        report.update(extra)
+        return self.file(report)
 
     def completed(self, tid="T01"):
         self.flow.start(tid, basis(self.store, self.state, "task", tid))
+        for role in ("worker", "critic1", "critic2", "acceptor"):
+            self.flow.pipeline.assign(tid, role, "codex", tid + role + self.attempt(tid)["id"], "synthetic-session")
+        self.verify(tid)
+        self.flow.pipeline.submit(tid, self.task_report(tid, "worker"))
+        self.flow.pipeline.review(tid, 1, self.task_report(tid, "critic1", findings=[]))
+        self.flow.pipeline.review(tid, 2, self.task_report(tid, "critic2", findings=[],
+            previousReport=self.attempt(tid)["rounds"][0]["report"]["sha256"], repairReceipt=None, resolutions=[]))
+        evidence = self.attempt(tid)["verification"]["output"]["file"]
+        trace = [{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
+                  "note": "Сопоставлено с исходником", "artifact": evidence} for r in self.flow.pipeline.trace_requirements(tid)]
+        self.flow.complete_task(tid, self.task_report(tid, "acceptor", trace=trace,
+            inheritedProofs=self.flow.pipeline.inherited_proofs(tid), previousReport=self.attempt(tid)["rounds"][1]["report"]["sha256"]))
         self.verify()
-        report = self.header("task", tid)
-        report["checks"] = [{"requirement": tid, "criterion": c, "status": "passed",
-                             "artifact": self.state["verification"]["output"]["file"], "note": "Синтетическое доказательство"}
-                            for c in self.flow.task(tid)["criteria"]]
-        self.flow.complete_task(tid, self.file(report))
 
     def assessment(self, kind="acceptance", failed=None):
         failed = failed or {}
@@ -136,10 +156,13 @@ class WorkflowTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             validate_plan(self.state, tasks)
 
-    def test_same_zone_is_serialised(self):
+    def test_same_zone_requires_explicit_order(self):
         self.prepare(secondary=True)
         tasks = [t.copy() for t in self.state["tasks"]]
         tasks[0]["zones"] = ["src"]; tasks[1]["zones"] = ["src/export"]
+        with self.assertRaises(Invalid):
+            validate_plan(self.state, tasks)
+        tasks[1]["dependsOn"] = ["T01"]
         checked = validate_plan(self.state, tasks)
         self.assertEqual([t["wave"] for t in checked], [1, 2])
 
@@ -153,6 +176,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(self.flow.wave(1, self.file(self.assessment("wave", {"R02": "not_tested"}))))
         self.flow.start("T02", basis(self.store, self.state, "task", "T02"))
         self.assertEqual(self.flow.task("T02")["status"], "running")
+
+    def test_zone_aliases_cannot_bypass_conflicts_or_reserved_paths(self):
+        self.prepare(secondary=True)
+        tasks = [t.copy() for t in self.state["tasks"]]
+        tasks[0]["zones"] = ["./src//./app.py"]
+        tasks[1]["readZones"] = ["src/app.py"]
+        with self.assertRaises(Invalid):
+            validate_plan(self.state, tasks)
+        tasks[1]["dependsOn"] = ["T01"]
+        checked = validate_plan(self.state, tasks)
+        self.assertEqual(checked[0]["zones"], ["src/app.py"])
+        tasks[0]["zones"] = ["./.aispa/events"]
+        with self.assertRaises(Invalid):
+            validate_plan(self.state, tasks)
+        tasks[0]["zones"] = [".github/workflows/checks.yml"]
+        self.assertEqual(validate_plan(self.state, tasks)[0]["zones"], tasks[0]["zones"])
 
     def test_acceptance_cannot_skip_wave_review(self):
         self.prepare(); self.completed()
@@ -264,16 +303,28 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.state["remaining"]["checks"][0]["requirement"], "R02")
         self.assertEqual(self.state["requirements"][1]["scope"], "active")
 
-    def test_reset_removes_implementation_claim(self):
-        self.accepted(); self.flow.reset("T01")
-        self.assertEqual(project(self.store, self.state)["requirements"][0]["implementation"], "unfinished")
-        self.assertFalse(gate_valid(self.store, self.state, "acceptance"))
+    def test_reset_cannot_discard_used_review_budget(self):
+        self.accepted()
+        with self.assertRaises(Invalid):
+            self.flow.reset("T01")
+        self.assertEqual(len(self.attempt()["rounds"]), 2)
 
-    def test_changed_task_is_reopened(self):
+    def test_scope_decision_cannot_replay_same_or_older_owner_source(self):
+        self.prepare(secondary=True)
+        self.flow.brief(self.file("Экспорт отложить", "later.md"))
+        self.flow.scope("R02", "defer", "B002", "Экспорт отложить")
+        with self.assertRaises(Invalid):
+            self.flow.scope("R02", "restore", "B002", "Экспорт отложить")
+        self.flow.brief(self.file("Вернуть экспорт", "latest.md"))
+        self.flow.scope("R02", "restore", "B003", "Вернуть экспорт")
+        with self.assertRaises(Invalid):
+            self.flow.scope("R02", "defer", "B002", "Экспорт отложить")
+
+    def test_changed_reviewed_task_requires_owner_attempt(self):
         self.accepted()
         task = self.state["tasks"][0].copy(); task["criteria"] = ["Новый критерий"]
-        self.flow.plan(self.file([task]))
-        self.assertEqual(self.flow.task("T01")["status"], "pending")
+        with self.assertRaises(Invalid):
+            self.flow.plan(self.file([task]))
 
     def test_user_pause_is_respected(self):
         self.prepare(); self.flow.close("paused", "Владелец попросил остановиться")
@@ -281,6 +332,13 @@ class WorkflowTests(unittest.TestCase):
             self.flow.start("T01", basis(self.store, self.state, "task", "T01"))
         self.flow.resume()
         self.flow.start("T01", basis(self.store, self.state, "task", "T01"))
+
+    def test_context_conflict_after_save_does_not_invite_replaying_event(self):
+        self.state["projectContext"] = {"initialized": True}
+        with patch("aispa_core.workflow.project_context.refresh", side_effect=Invalid("conflicting path")):
+            with self.assertRaisesRegex(Invalid, "Событие записано.*context-refresh"):
+                self.flow.brief(self.file("One owner request"))
+        self.assertEqual(len(self.store.load()["briefs"]), 1)
 
     def test_requirement_missing_from_register_blocks_acceptance(self):
         self.prepare(); self.completed()
