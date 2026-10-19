@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import uuid
 
 from . import VERSION, SCHEMA
@@ -31,13 +32,17 @@ def file_hash(path):
 
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("w", encoding="utf-8") as stream:
-        json.dump(value, stream, ensure_ascii=False, indent=2)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(tmp, path)
+    fd, name = tempfile.mkstemp(prefix=".aispa-write-", dir=path.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def confined(base, name):
@@ -56,6 +61,8 @@ class Journal:
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.home = self.root / ".aispa"
+        if self.home.is_symlink():
+            raise Invalid(".aispa не должна быть символической ссылкой")
         self.run = None
 
     @contextmanager
@@ -78,10 +85,10 @@ class Journal:
             raise Invalid("Имя прогона: латинские буквы, цифры и дефис")
         if (self.home / "active.json").exists():
             old = self.load()
-            if old["status"] not in ("accepted", "cancelled"):
+            if old["status"] not in ("accepted", "delivered_with_remaining", "cancelled"):
                 raise Invalid("Предыдущий прогон не завершён; продолжите его или явно отмените")
         ident = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + slug + "-" + uuid.uuid4().hex[:8]
-        self.run = self.home / "runs" / ident
+        self.run = confined(self.home, "runs/" + ident)
         self.run.mkdir(parents=True)
         state = {"schema": SCHEMA, "version": VERSION, "run": ident, "title": title,
                  "status": "running", "stage": "brief", "createdAt": timestamp(),
@@ -95,7 +102,7 @@ class Journal:
         try:
             pointer = json.loads((self.home / "active.json").read_text())
             self.run = confined(self.home / "runs", pointer["run"])
-            lines = (self.run / "events.jsonl").read_text().splitlines()
+            lines = confined(self.run, "events.jsonl").read_text().splitlines()
         except (OSError, ValueError, KeyError) as e:
             raise Invalid("Не удалось прочитать журнал; init нужен только для нового проекта") from e
         previous = None
@@ -120,7 +127,7 @@ class Journal:
         return state
 
     def append(self, state, event):
-        history = self.run / "events.jsonl"
+        history = confined(self.run, "events.jsonl")
         lines = history.read_text().splitlines() if history.exists() else []
         previous = json.loads(lines[-1])["hash"] if lines else None
         state["updatedAt"] = timestamp()

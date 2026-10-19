@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AISpa — состояние</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;max-width:960px;margin:32px auto;padding:0 20px;color:#222;background:#fafafa}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid #ccc;padding:8px;vertical-align:top}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}small{color:#555}button{font:inherit;padding:8px 16px}
+</style>
+<main>
+<h1>AISpa</h1>
+<small>0.1.0-alpha.1 · временный экран состояния · дизайн в разработке</small>
+<h2 id="title">Загрузка…</h2>
+<p id="status" role="status">Проверяю сохранённое состояние.</p>
+<p id="freshness"></p>
+<button type="button" id="refresh">Обновить</button>
+<h2>Требования</h2>
+<p>«Реализовано по задачам» ещё не означает, что требование принято.</p>
+<table><thead><tr><th>ID</th><th>Требование</th><th>Учёт</th></tr></thead><tbody id="requirements"></tbody></table>
+<h2>Остатки и решения</h2>
+<pre id="remaining"></pre>
+<pre id="decisions"></pre>
+</main>
+<script>
+const el = id => document.getElementById(id);
+const labels = {implemented:'Реализовано по задачам',unfinished:'Не завершено',unplanned:'Ещё нет в плане',
+  dropped:'Снято по решению владельца',deferred:'Отложено по решению владельца'};
+async function refresh(){
+  try {
+    const response = await fetch('status.json',{cache:'no-store'});
+    if(!response.ok) throw new Error('HTTP '+response.status);
+    const state = await response.json();
+    el('title').textContent=state.title;
+    el('status').textContent=state.label;
+    el('freshness').textContent='Последняя запись агента: '+state.updatedAt+' · Актуальность проверена: '+state.observedAt;
+    el('requirements').replaceChildren();
+    for(const item of state.requirements){
+      const row=document.createElement('tr');
+      for(const text of [item.id+(item.core?' · ядро':''),item.text,labels[item.scope]||labels[item.implementation]]){
+        const cell=document.createElement('td');cell.textContent=text;row.append(cell);
+      }
+      el('requirements').append(row);
+    }
+    el('remaining').textContent=JSON.stringify(state.remaining,null,2);
+    el('decisions').textContent=state.decisions.map(x=>x.text||x).join('\n');
+  }catch(error){el('status').textContent='Состояние недоступно. Запустите локальный сервер AISpa; отсутствие данных не означает готовность.';}
+}
+el('refresh').addEventListener('click',refresh);
+refresh();setInterval(refresh,5000);
+</script>
+</html>
