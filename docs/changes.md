@@ -321,3 +321,22 @@ FAIL, Claude Code/Cursor/Windows-host и общий выигрыш над дру
 Gitleaks, 99 относительных Markdown-ссылок, JSON-артефакты, отсутствие приватных
 путей, actionlint и diff-check проверены отдельно. Независимый аудит пересчитал
 все четыре нативных замера и подтвердил полноту 20 частей и 12/12 ответов.
+
+Финальная матрица [39302984234](https://github.com/alexfisenkov/aispa/actions/runs/39302984234)
+для `6d3921da03c697469c21f84ea55e739a1bfaddae` прошла все шесть строк:
+Windows/macOS/Linux, Python 3.11/3.13. В каждой строке 383 теста движка и
+15 тестов примера; Windows — 382 PASS / 1 POSIX-only SKIP, macOS/Linux —
+364 PASS / 19 Windows-only SKIP. По 25 JS-тестов прошли на каждой ОС.
+
+[Alpha.8](https://github.com/alexfisenkov/aispa/releases/tag/v0.1.0-alpha.8)
+опубликована из этого commit; [сборка ресурсов](https://github.com/alexfisenkov/aispa/actions/runs/39305206132)
+успешна. Скачанные ZIP и manifest побайтно совпали с воспроизводимой сборкой.
+Обновление alpha.7 → alpha.8, проверка 41 файла и откат прошли в отдельной
+копии на временном RAM-диске macOS: основной диск получил ENOSPC. Глобальные
+установки не менялись. Финальная запись результатов подготовлена из чистого
+GitHub-клона; код и тег проверенного выпуска не переписывались.
+[Машинные свидетельства](pilots/alpha.8/release-verification.json).
+
+После выпуска уточнены описание тестовой регистрации автора знаний и число
+производных Markdown-представлений: в alpha.8 их 11, включая idea.md и
+knowledge.md. Это документальные уточнения в main, не замена ресурсов Release.

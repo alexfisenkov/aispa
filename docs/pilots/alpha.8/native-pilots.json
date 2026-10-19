@@ -29,7 +29,8 @@
     "actualExampleTests": 15,
     "engineAcceptedReport": true,
     "workflowAcceptanceReports": "synthetic fixture; not a new complete model delivery",
-    "historicalCommandNotCurrentPass": true
+    "historicalCommandNotCurrentPass": true,
+    "engineRegistration": "Native content was generated in a fresh context; journal registration used a synthetic fixture session label, not a verified native-host session identity."
   },
   "planning": {
     "draftTasks": 3,
