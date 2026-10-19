@@ -54,7 +54,7 @@ class DiscoveryTests(unittest.TestCase):
     def write(self, name, text):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8", newline="\n")
         return path
 
     def collect(self):
@@ -106,7 +106,7 @@ class DiscoveryTests(unittest.TestCase):
             self.assertTrue(discovery.valid(self.store, self.state))
         self.assertFalse(set(names) & {row["path"] for row in evidence["sources"]})
         for path in (self.store.run / "discovery").iterdir():
-            self.assertNotIn("PRIVATE_VALUE_NEVER_CAPTURE", path.read_text())
+            self.assertNotIn("PRIVATE_VALUE_NEVER_CAPTURE", path.read_text(encoding="utf-8"))
 
     def test_embedded_secret_material_is_not_copied(self):
         self.write("docs/setup.md", "api_key = '" + "sk-" + "fixtureSecret0123456789abcdefgh'\n")
@@ -130,7 +130,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_symlink_source_and_parent_cannot_escape(self):
         with tempfile.TemporaryDirectory() as other:
             outside = Path(other)
-            (outside / "README.md").write_text("EXTERNAL_VALUE")
+            (outside / "README.md").write_text("EXTERNAL_VALUE", encoding="utf-8", newline="\n")
             (self.root / "architecture.md").symlink_to(outside / "README.md")
             (self.root / "doc").symlink_to(outside, target_is_directory=True)
             with patch.object(discovery, "_names", return_value=["architecture.md", "doc/README.md"]):
@@ -230,7 +230,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_artifact_tampering_is_not_valid(self):
         record_synthetic_discovery(self.store, self.state)
         ref = self.state["discovery"]["collection"]
-        (self.store.run / ref["file"]).write_text("{}")
+        (self.store.run / ref["file"]).write_text("{}", encoding="utf-8", newline="\n")
         self.assertFalse(discovery.valid(self.store, self.state, check_sources=False))
         self.assertFalse(discovery.view(self.store, self.state)["integrityValid"])
 

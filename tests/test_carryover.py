@@ -19,8 +19,8 @@ class CarryoverTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-carryover-test-")
         self.root = Path(self.temp.name) / "project"
         self.root.mkdir()
-        (self.root / ".gitignore").write_text(".aispa/\n")
-        (self.root / "app.py").write_text("print('fixture')\n")
+        (self.root / ".gitignore").write_text(".aispa/\n", encoding="utf-8", newline="\n")
+        (self.root / "app.py").write_text("print('fixture')\n", encoding="utf-8", newline="\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")):
             subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, check=True)
         self.store = Journal(self.root)
@@ -91,7 +91,7 @@ class CarryoverTests(unittest.TestCase):
                     {"requirement": rid, "criterion": criterion, "status": "passed", "note": "fixture",
                      "artifact": proof["file"]} for rid, criterion in sorted(team.expected_checks("T01", role))]}
             value.update(extra)
-            path.write_text(json.dumps(value))
+            path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
             return path
 
         team.submit("T01", report("worker"))
@@ -184,7 +184,7 @@ class CarryoverTests(unittest.TestCase):
         project_context.initialize(self.store, self.state, "codex")
         self.store.append(self.state, "context-initialized")
         project_context.refresh(self.store, self.state)
-        memory = (self.store.home / "context/carryover.md").read_text()
+        memory = (self.store.home / "context/carryover.md").read_text(encoding="utf-8")
         self.assertIn("Unresolved", memory)
         self.assertIn(report["sha256"], memory)
         third = self.next_run()[0]
@@ -194,7 +194,7 @@ class CarryoverTests(unittest.TestCase):
     def test_corrupt_failed_report_stops_capture(self):
         self.complete(fail_second=True)
         report = self.state["taskHistory"]["T01"][-1]["rounds"][1]["report"]
-        (self.store.run / report["file"]).write_text('{"findings": []}')
+        (self.store.run / report["file"]).write_text('{"findings": []}', encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             self.close()
 
@@ -280,7 +280,7 @@ class CarryoverTests(unittest.TestCase):
         receipt = carryover.decide(self.store, self.state, item["id"], "resolve")
         self.store.append(self.state, "resolved")
         original_receipt = (self.store.run / receipt["receipt"]["file"]).read_bytes()
-        (self.root / "app.py").write_text("print('regression')\n")
+        (self.root / "app.py").write_text("print('regression')\n", encoding="utf-8", newline="\n")
         reopened = carryover.unresolved(self.store, self.state)
         self.assertEqual(len(reopened), 1)
         self.assertEqual(reopened[0]["status"], "mapped")
@@ -403,13 +403,13 @@ class CarryoverTests(unittest.TestCase):
         original = brief.read_bytes()
         self.state["status"] = "cancelled"
         self.store.append(self.state, "closed")
-        brief.write_text("changed")
+        brief.write_text("changed", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             carryover.capture(self.store, self.state)
         brief.write_bytes(original)
         payload = carryover.capture(self.store, self.state)
         self.state = self.store.create("second", "Second")
-        brief.write_text("changed again")
+        brief.write_text("changed again", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             carryover.attach(self.store, self.state, payload)
         self.assertNotIn("carryover", self.state)
@@ -418,7 +418,7 @@ class CarryoverTests(unittest.TestCase):
         item = self.next_run()[0]
         receipt = carryover.decide(self.store, self.state, item["id"], "keep")
         path = self.store.run / receipt["receipt"]["file"]
-        path.write_text("{}")
+        path.write_text("{}", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             carryover.view(self.store, self.state)
 
@@ -472,7 +472,7 @@ class CarryoverTests(unittest.TestCase):
         payload = self.close()
         pointer = (self.store.home / "active.json").read_bytes()
         source = self.store.run / self.state["briefs"][0]["file"]
-        source.write_text("tampered after capture")
+        source.write_text("tampered after capture", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             self.store.create("failed-next", "Failed next", initializer=lambda state:
                               carryover.attach(self.store, state, payload))

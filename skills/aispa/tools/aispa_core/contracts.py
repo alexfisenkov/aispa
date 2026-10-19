@@ -96,6 +96,8 @@ def artifact_valid(store, artifact):
 
 def gate_valid(store, state, name):
     gate = state["gates"].get(name)
+    if not gate or not gate.get("passed"):
+        return False
     if name == "acceptance" and state.get("policy", {}).get("cleanClone"):
         from .cleanroom import valid
         from .blind import valid as blind_valid
@@ -185,7 +187,7 @@ def validate_plan(state, items):
     require(available <= covered, "В плане потеряны требования: " + ", ".join(sorted(available - covered)))
     graph = dict(state, tasks=list(tasks.values()))
     closures = {tid: task_closure(graph, tid) for tid in tasks}
-    common = COMMON_INPUTS | {z for t in tasks.values() for z in t["zones"] if common_input(z)}
+    common = {canonical_zone(z) for z in COMMON_INPUTS} | {z for t in tasks.values() for z in t["zones"] if common_input(z)}
     readsets = {tid: sorted(common | {z for t in closure for z in t["zones"] + t.get("readZones", [])})
                 for tid, closure in closures.items()}
     values = list(tasks.values())

@@ -4,13 +4,19 @@ description: Разработка проекта по исходному бри�
 disable-model-invocation: true
 argument-hint: "[идея проекта или файл с брифом]"
 metadata:
-  version: "0.1.0-alpha.4"
+  version: "0.1.0-alpha.5"
 ---
 
 # AISpa
 
 Веди проект от слов владельца до проверенного результата. Это
 экспериментальная версия; не представляй её стабильной.
+
+Команды примеров используют `python3` на macOS/Linux. В нативной Windows
+используй доступный Python 3.11+ (`python` или `py -3`), передавая launcher и
+его аргументы отдельно. Не вызывай отсутствующий python3/Store alias повторно.
+ОС и native runtime — разные параметры: Windows не меняет codex/claude-code/cursor.
+Команды PowerShell и ограничения — [references/runtimes.md](references/runtimes.md).
 
 ## Первое действие: проверить обновление
 

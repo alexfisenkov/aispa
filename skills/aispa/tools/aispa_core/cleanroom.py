@@ -4,26 +4,54 @@ The caller owns journal/state transitions. Save prepare() as ``cleanroom`` and
 execute() as ``cleanrun``. Only valid() is evidence of a current successful run.
 """
 import ast
-import hashlib
 import json
 import math
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
-import selectors
 import shlex
 import shutil
-import signal
-import stat
 import subprocess
+import sys
 import time
 import uuid
 
 from .store import Invalid, confined, digest, file_hash, timestamp
+from .portable import is_link, relative_name
+from . import git_snapshot, process_runner
 
 
 MAX_OUTPUT = 1024 * 1024
-SAFE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+
+def _windows_root():
+    """Read the installed Windows directory, not an arbitrary inherited value."""
+    import ctypes
+    from ctypes import wintypes
+    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api.GetWindowsDirectoryW.argtypes = [wintypes.LPWSTR, wintypes.UINT]
+    api.GetWindowsDirectoryW.restype = wintypes.UINT
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = api.GetWindowsDirectoryW(buffer, len(buffer))
+    if not length or length >= len(buffer):
+        raise OSError("Не удалось определить каталог Windows")
+    return Path(buffer.value)
+
+
+def _windows_safe_path():
+    windows = _windows_root()
+    directories = [Path(sys.executable).resolve().parent, windows / "System32",
+                   windows / "System32/WindowsPowerShell/v1.0"]
+    # Discover specific installed tool locations once; never copy the host PATH.
+    for name in ("git.exe", "node.exe", "pwsh.exe"):
+        found = shutil.which(name)
+        if found:
+            directories.append(Path(found).absolute().parent)
+    return os.pathsep.join(dict.fromkeys(str(p) for p in directories if p.is_dir()))
+
+
+SAFE_PATH = (_windows_safe_path() if os.name == "nt"
+             else "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
                     r"sk-[A-Za-z0-9_-]{20,}|\b\d{8,12}:[A-Za-z0-9_-]{30,}|"
                     r"-----BEGIN [^-]*PRIVATE KEY-----|"
@@ -51,28 +79,57 @@ def _no_links(path, base):
     _require(path.is_absolute() and path.is_relative_to(base), "Путь clean-clone выходит за пределы проекта")
     for part in (base, *reversed(path.parents), path):
         if part == base or part.is_relative_to(base):
-            _require(not part.is_symlink(), "Символическая ссылка в служебном пути clean-clone")
+            _require(not is_link(part), "Символическая ссылка в служебном пути clean-clone")
 
 
 def _environment(home):
     # No inherited tokens, SSH agent, user Git/package config, PYTHONPATH or PATH.
-    return {"PATH": SAFE_PATH, "HOME": str(home), "USERPROFILE": str(home),
+    result = {"PATH": SAFE_PATH, "HOME": str(home), "USERPROFILE": str(home),
             "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "CI": "1",
             "TMPDIR": str(home / "tmp"), "TMP": str(home / "tmp"), "TEMP": str(home / "tmp"),
             "XDG_CONFIG_HOME": str(home / "config"), "XDG_CACHE_HOME": str(home / "cache"),
             "XDG_DATA_HOME": str(home / "data"), "PYTHONNOUSERSITE": "1",
+            "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
             "GIT_CONFIG_COUNT": "0", "GIT_ATTR_NOSYSTEM": "1", "GIT_NO_REPLACE_OBJECTS": "1"}
+    if os.name == "nt":
+        windows = _windows_root()
+        result.update(SystemRoot=str(windows), WINDIR=str(windows),
+                      COMSPEC=str(windows / "System32/cmd.exe"), PATHEXT=".COM;.EXE;.BAT;.CMD",
+                      APPDATA=str(home / "AppData/Roaming"), LOCALAPPDATA=str(home / "AppData/Local"))
+    return result
 
 
-def _git(root, *args, home=None, allow_failure=False):
+def _which(name, environment):
+    if os.name != "nt":
+        return shutil.which(name, path=environment["PATH"])
+    # shutil.which on older Windows Python also consults caller cwd/PATHEXT.
+    # Resolve only in the explicit clean PATH with fixed executable extensions.
+    suffixes = ("",) if Path(name).suffix else (".exe", ".com", ".cmd", ".bat")
+    for directory in environment["PATH"].split(os.pathsep):
+        if not directory:
+            continue
+        for suffix in suffixes:
+            path = Path(directory) / (name + suffix)
+            if path.is_file():
+                return str(path)
+    return None
+
+
+def _git(root, *args, home=None, allow_failure=False, input_data=None):
     env = _environment(home or Path(os.devnull))
+    executable = _which("git", env) if os.name == "nt" else "git"
+    _require(executable is not None, "Не найден установленный Git для clean-clone")
+    if os.name == "nt":
+        _guard_path(executable, root, None)
     try:
         result = subprocess.run(
-            ["git", "-c", "core.hooksPath=" + os.devnull, "-c", "core.fsmonitor=false",
-             "-c", "core.attributesFile=" + os.devnull, "-C", str(root), *args],
-            capture_output=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+            [executable, "-c", "core.hooksPath=" + os.devnull, "-c", "core.fsmonitor=false",
+             "-c", "core.attributesFile=" + os.devnull, "-c", "core.longpaths=true",
+             "-c", "i18n.logOutputEncoding=utf-8", "-c", "core.quotepath=false", "-C", str(root), *args],
+            capture_output=True, env=env, timeout=60,
+            **({"input": input_data} if input_data is not None else {"stdin": subprocess.DEVNULL}))
     except (OSError, subprocess.TimeoutExpired) as error:
         raise Invalid("Не удалось выполнить Git для clean-clone") from error
     if result.returncode and not allow_failure:
@@ -82,10 +139,13 @@ def _git(root, *args, home=None, allow_failure=False):
 
 
 def _safe_name(name):
-    p = PurePosixPath(name)
-    _require(name and not p.is_absolute() and p.as_posix() == name and
-             not any(part in ("..", ".") or part.casefold() in (".git", ".aispa") for part in p.parts)
-             and "\\" not in name, "Небезопасный путь в Git tree")
+    try:
+        canonical = relative_name(name)
+    except ValueError as exc:
+        raise Invalid("Небезопасный путь в Git tree") from exc
+    p = PurePosixPath(canonical)
+    _require(canonical == name and not any(part.casefold() in (".git", ".aispa") for part in p.parts),
+             "Небезопасный путь в Git tree")
     return p
 
 
@@ -98,47 +158,15 @@ def _credential_name(name):
 
 
 def _records(root, *, scan_secrets=False, verify_head=False):
-    entries = _git(root, "ls-tree", "-rz", "--full-tree", "HEAD").stdout.split(b"\0")
-    object_format = _git(root, "rev-parse", "--show-object-format").stdout.decode().strip()
-    records = []
-    for entry in entries:
-        if not entry:
-            continue
-        meta, raw = entry.split(b"\t", 1)
-        mode, kind, oid = meta.split(b" ")
-        name = os.fsdecode(raw)
-        _safe_name(name)
-        _require(mode in (b"100644", b"100755") and kind == b"blob",
-                 "Clean-clone пока не поддерживает submodules и tracked symlinks")
-        _require(name != ".gitmodules", "Clean-clone пока не поддерживает submodules")
-        _require(not _credential_name(name), "Git tree содержит файл с возможными credentials")
-        p = root / name
-        _no_links(p, root)
-        _require(p.is_file() and stat.S_ISREG(p.stat().st_mode), "В clean-clone отсутствует обычный tracked-файл")
-        content_hash = hashlib.sha256()
-        git_hash = hashlib.new(object_format)
-        git_hash.update(("blob %d\0" % p.stat().st_size).encode())
-        tail = b""
-        with p.open("rb") as stream:
-            while chunk := stream.read(65536):
-                content_hash.update(chunk)
-                git_hash.update(chunk)
-                if scan_secrets:
-                    text = (tail + chunk).decode("utf-8", "replace")
-                    _require(not SECRET.search(text), "Git tree содержит возможный секрет")
-                    tail = chunk[-4096:]
-        if verify_head:
-            _require(git_hash.hexdigest().encode() == oid and
-                     bool(p.stat().st_mode & 0o111) == (mode == b"100755"),
-                     "Рабочий файл отличается от committed HEAD")
-        records.append([name, {"sha256": content_hash.hexdigest(),
-                               "executable": bool(p.stat().st_mode & 0o111)}])
-    return sorted(records)
+    # Every call verifies canonical content; legacy keyword arguments remain for
+    # callers and tests. The shared module owns Git attributes/EOL handling.
+    return git_snapshot.records(root, _git, secret_pattern=SECRET,
+                                credential_name=_credential_name)
 
 
 def _identity(root):
-    _require(not (root / ".git").is_symlink(), ".git не должна быть символической ссылкой")
-    top = Path(os.fsdecode(_git(root, "rev-parse", "--show-toplevel").stdout).strip()).resolve()
+    _require(not is_link(root / ".git"), ".git не должна быть символической ссылкой")
+    top = Path(_git(root, "rev-parse", "--show-toplevel").stdout.decode("utf-8").strip()).resolve()
     _require(top == root, "--root должен указывать на корень Git-репозитория")
     return {"head": _git(root, "rev-parse", "HEAD").stdout.decode().strip(),
             "tree": _git(root, "rev-parse", "HEAD^{tree}").stdout.decode().strip()}
@@ -148,11 +176,11 @@ def _source(store):
     identity = _identity(store.root)
     _require(_git(store.root, "check-ignore", "--no-index", ".aispa/", allow_failure=True).returncode == 0,
              "До clean-clone добавьте .aispa/ в Git ignore")
-    _require(not _git(store.root, "status", "--porcelain=v1", "-z", "--untracked-files=all",
-                      "--ignore-submodules=none").stdout,
-             "Clean-clone требует чистый committed HEAD: сохраните tracked и unignored изменения")
+    _require(_git(store.root, "rev-parse", "--show-object-format").stdout.strip() == b"sha1",
+             "Clean-clone пока поддерживает только Git object-format sha1")
     # Do not rely only on Git status: assume-unchanged/skip-worktree can hide edits.
     records = _records(store.root, scan_secrets=True, verify_head=True)
+    git_snapshot.ensure_clean_index(store.root, _git)
     commit = _git(store.root, "cat-file", "commit", "HEAD").stdout.decode("utf-8", "replace")
     _require(not SECRET.search(commit), "Commit содержит возможный секрет")
     return dict(identity, sourceCode=digest(records)), records
@@ -188,10 +216,10 @@ def _artifact(store, group, data, suffix):
 
 def _git_metadata(repo):
     gitdir = repo / ".git"
-    _require(gitdir.is_dir() and not gitdir.is_symlink(), "Подменён .git clean-clone")
+    _require(gitdir.is_dir() and not is_link(gitdir), "Подменён .git clean-clone")
     for parent, dirs, files in os.walk(gitdir, followlinks=False):
         for name in dirs + files:
-            _require(not (Path(parent) / name).is_symlink(), "Ссылка в .git clean-clone")
+            _require(not is_link(Path(parent) / name), "Ссылка в .git clean-clone")
     _require(not (gitdir / "objects/info/alternates").exists(), "Clean-clone использует внешние Git objects")
     # This configuration is written by prepare, never inherited from source.
     _require((gitdir / "config").read_bytes() == _CONFIG, "Изменена конфигурация clean-clone")
@@ -201,7 +229,9 @@ def _git_metadata(repo):
     _require(not attrs.exists() or attrs.read_bytes() == b"", "Изменены Git attributes clean-clone")
 
 
-_CONFIG = b"[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = false\n"
+_CONFIG = ("[core]\n\trepositoryformatversion = 0\n\tfilemode = "
+           + ("false" if os.name == "nt" else "true")
+           + "\n\tbare = false\n\tlogallrefupdates = false\n\tautocrlf = false\n\teol = lf\n").encode()
 
 
 def prepare(store, state):
@@ -225,8 +255,7 @@ def prepare(store, state):
         _git_metadata(repo)
         _require(_identity(repo) == {k: source[k] for k in ("head", "tree")}, "Клон получил другой commit")
         _require(_records(repo, scan_secrets=True) == records, "Содержимое клона отличается от исходного commit")
-        _require(not _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all").stdout,
-                 "Созданный clean-clone не чист")
+        git_snapshot.ensure_clean_index(repo, _git)
         for name, _record in records:
             a, b = (store.root / name).stat(), (repo / name).stat()
             _require((a.st_dev, a.st_ino) != (b.st_dev, b.st_ino), "Clean-clone разделяет файл с исходником")
@@ -239,8 +268,11 @@ def prepare(store, state):
         return receipt
     except Exception:
         # owned is newly made by this call. Never remove any caller-provided path.
-        if owned.is_symlink():
-            owned.unlink()
+        if is_link(owned):
+            if owned.is_symlink():
+                owned.unlink()
+            else:
+                owned.rmdir()  # Remove a junction itself, never recurse into its target.
         elif owned.exists():
             shutil.rmtree(owned)
         raise
@@ -260,8 +292,7 @@ def _check_prepared(store, state):
     _git_metadata(repo)
     _require(_identity(repo) == {k: source[k] for k in ("head", "tree")}, "Изменён HEAD clean-clone")
     _require(_records(repo, scan_secrets=True) == records, "Изменены файлы clean-clone")
-    _require(not _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all",
-                      "--ignore-submodules=none").stdout, "Clean-clone содержит tracked или unignored изменения")
+    git_snapshot.ensure_clean_index(repo, _git)
     return prepared, repo, home
 
 
@@ -274,126 +305,130 @@ def current(store, state):
         return False
 
 
-def _kill_group(proc, sig):
-    try:
-        os.killpg(proc.pid, sig)
-    except ProcessLookupError:
-        pass
-    except PermissionError:
-        # Darwin can return EPERM for a group whose only member is a zombie.
-        # Reap that parent; a running process with EPERM is a real failure.
-        if proc.poll() is None:
-            raise Invalid("Не удалось остановить process group clean-run")
-
-
 def _run(command, cwd, env, timeout, secrets):
-    _require(os.name == "posix", "Clean-run с остановкой дочерних процессов поддерживается только на POSIX")
-    try:
-        proc = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
-    except OSError:
-        return b"AISpa: command could not start.\n", 127, False, False, False
-    captured = bytearray()
-    truncated, timed_out, redacted = False, False, False
-    tail = b""
-    tail_size = max([4096] + [len(s.encode()) for s in secrets])
-    deadline = time.monotonic() + timeout
-    selector = selectors.DefaultSelector()
-    selector.register(proc.stdout, selectors.EVENT_READ)
-    stopped, drain_deadline = False, None
-    try:
-        while selector.get_map() or proc.poll() is None:
-            if not stopped and time.monotonic() >= deadline:
-                timed_out = True
-                _kill_group(proc, signal.SIGKILL)
-                stopped, drain_deadline = True, time.monotonic() + 1
-            elif not stopped and proc.poll() is not None:
-                # An exited parent must not leave background children running.
-                _kill_group(proc, signal.SIGKILL)
-                stopped, drain_deadline = True, time.monotonic() + 1
-            if drain_deadline is not None and time.monotonic() >= drain_deadline:
-                break
-            for key, _mask in selector.select(timeout=0.05):
-                chunk = os.read(key.fd, 65536)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    break
-                text = (tail + chunk).decode("utf-8", "replace")
-                redacted = redacted or bool(SECRET.search(text)) or any(v in text for v in secrets)
-                tail = (tail + chunk)[-tail_size:]
-                keep = min(len(chunk), MAX_OUTPUT - len(captured))
-                captured.extend(chunk[:keep])
-                truncated = truncated or keep < len(chunk)
-        rc = proc.wait(timeout=5)
-        if timed_out:
-            captured.extend(b"\nAISpa: timeout; process group terminated.\n")
-            rc = 124
-        if truncated:
-            captured.extend(b"\nAISpa: output truncated at 1048576 bytes.\n")
-        return bytes(captured), rc, timed_out, truncated, redacted
-    finally:
-        if not stopped:
-            _kill_group(proc, signal.SIGKILL)
-        proc.wait(timeout=5)
-        selector.close()
-        proc.stdout.close()
+    return process_runner.run(command, cwd, env, timeout, max_output=MAX_OUTPUT,
+                              secret_pattern=SECRET, secrets=secrets)
+
+
+def _path_argument(value):
+    return "/" in value or "\\" in value or value.startswith(".") or bool(PureWindowsPath(value).drive)
+
+
+def _argument_path(value, clone):
+    if os.name == "nt":
+        value = value.replace("/", "\\")
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+        _require(not value.startswith("\\\\.\\"), "Device-пути запрещены в clean-run")
+        windows = PureWindowsPath(value)
+        _require(not windows.drive or windows.is_absolute(), "Drive-relative путь запрещён в clean-run")
+    return Path(os.path.abspath(clone / value))
 
 
 def _guard_path(value, source, clone):
     """Inspect intermediate symlinks too: source venv/bin/python may link out."""
-    if not value or "/" not in value and not value.startswith("."):
+    if not value or not _path_argument(value):
         return
-    path = Path(os.path.abspath(clone / value))
+    if os.name == "nt":
+        # Whole inline programs are also candidates; invalid Windows filenames
+        # cannot be filesystem references. Their quoted literals are checked
+        # separately below, including Python raw strings and shell strings.
+        probe = value[4:] if value.startswith("\\\\?\\") else value
+        if any(c in probe for c in '<>"|?*\n\r\t') or ":" in probe[2:]:
+            _require(not PureWindowsPath(probe).drive and not probe.startswith("\\"),
+                     "Некорректный абсолютный путь или ADS запрещён в clean-run")
+            return
+    path = _argument_path(value, clone or source)
     seen = set()
     for _ in range(40):
-        _require(not path.is_relative_to(source) or path.is_relative_to(clone),
+        _require(not path.is_relative_to(source) or clone is not None and path.is_relative_to(clone),
                  "Clean-run не может использовать пути исходного проекта вне клона; установите зависимости внутри клона")
         _require(path not in seen, "Циклическая ссылка в пути clean-run")
         seen.add(path)
-        link = next((part for part in [*reversed(path.parents), path] if part.is_symlink()), None)
+        link = next((part for part in [*reversed(path.parents), path] if is_link(part)), None)
         if link is None:
             return
-        target = Path(os.readlink(link))
-        if not target.is_absolute():
-            target = link.parent / target
-        path = Path(os.path.abspath(target / path.relative_to(link)))
+        target = _argument_path(os.readlink(link), link.parent)
+        path = _argument_path(str(target / path.relative_to(link)), clone or source)
     raise Invalid("Слишком длинная цепочка ссылок в пути clean-run")
 
 
 def _guard_command(command, source, clone, environment):
     """Reject detectable source paths, not arbitrary programmatic file access."""
     executable = command[0]
-    if "/" not in executable:
-        executable = shutil.which(executable, path=environment["PATH"])
+    if not _path_argument(executable):
+        executable = _which(executable, environment)
     if executable:
         _guard_path(executable, source, clone)
     for argument in command:
         candidates = {argument}
-        start = argument.find(str(source))
+        normalized = argument.replace("\\", "/") if os.name == "nt" else argument
+        source_name = source.as_posix()
+        searchable = normalized.casefold() if os.name == "nt" else normalized
+        needle = source_name.casefold() if os.name == "nt" else source_name
+        start = searchable.find(needle)
         while start >= 0:
             # Also catches attached flags such as -I/source/include.
-            candidates.add(argument[start:])
-            start = argument.find(str(source), start + len(str(source)))
+            candidates.add(normalized[start:])
+            start = searchable.find(needle, start + len(needle))
         if "=" in argument:
             candidates.add(argument.split("=", 1)[1])
         try:
             candidates.update(shlex.split(argument))
+            if os.name == "nt":
+                candidates.update(part.strip('"\'') for part in shlex.split(argument, posix=False))
         except ValueError:
             pass
         # Python -c, shell -c and JavaScript -e commonly contain quoted paths.
-        for match in re.finditer(r'''(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')''', argument):
+        for match in re.finditer(r'''(?i:(?:br|rb|r|u|b)?)(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')''', argument):
             literal = match.group()
+            quote_at = min(i for i, char in enumerate(literal) if char in "\"'")
+            candidates.add(literal[quote_at + 1:-1])
             try:
                 value = ast.literal_eval(literal)
             except (ValueError, SyntaxError):
-                value = literal[1:-1]
+                value = literal[quote_at + 1:-1]
             if isinstance(value, str):
                 candidates.add(value)
         for value in candidates:
             if value.startswith("file://"):
                 from urllib.parse import unquote, urlsplit
-                value = unquote(urlsplit(value).path)
+                parsed = urlsplit(value)
+                value = unquote(parsed.path)
+                if os.name == "nt" and parsed.netloc:
+                    value = "//" + parsed.netloc + value
+                if os.name == "nt" and re.match(r"^/[A-Za-z]:/", value):
+                    value = value[1:]
             _guard_path(value.removeprefix("@"), source, clone)
+
+
+def _execution_command(command, source, clone, environment):
+    argv = list(command)
+    if os.name != "nt":
+        return argv
+    _require(Path(argv[0]).suffix.casefold() not in (".cmd", ".bat"),
+             "Для .cmd/.bat укажите явный cmd.exe /d /c или PowerShell")
+    # Drop host-installed tool directories that point into the source checkout.
+    directories = []
+    for directory in environment["PATH"].split(os.pathsep):
+        try:
+            _guard_path(directory, source, clone)
+        except Invalid:
+            continue
+        directories.append(directory)
+    environment["PATH"] = os.pathsep.join(directories)
+    executable = (_argument_path(argv[0], clone) if _path_argument(argv[0])
+                  else _which(argv[0], environment))
+    if executable is not None:
+        _require(Path(executable).suffix.casefold() not in (".cmd", ".bat"),
+                 "Для .cmd/.bat укажите явный cmd.exe /d /c или PowerShell")
+        argv[0] = str(executable)
+    else:
+        # Do not let CreateProcess fall back to the controller's cwd or PATH.
+        return None
+    return argv
 
 
 def execute(store, state, command, timeout=600):
@@ -412,9 +447,13 @@ def execute(store, state, command, timeout=600):
              "Секреты нельзя передавать аргументами clean-run")
     prepared, repo, home = _check_prepared(store, state)
     environment = _environment(home)
+    execution_command = _execution_command(command, store.root, repo, environment)
     _guard_command(command, store.root, repo, environment)
     started = time.monotonic()
-    raw, rc, timed_out, truncated, redacted = _run(command, repo, environment, timeout, secrets)
+    if execution_command is None:
+        raw, rc, timed_out, truncated, redacted = b"AISpa: command could not start.\n", 127, False, False, False
+    else:
+        raw, rc, timed_out, truncated, redacted = _run(execution_command, repo, environment, timeout, secrets)
     output = raw.decode("utf-8", "replace")
     redacted = redacted or bool(SECRET.search(output) or any(v in output for v in secrets))
     if redacted:

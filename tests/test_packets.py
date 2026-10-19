@@ -24,7 +24,7 @@ class PacketTests(unittest.TestCase):
         packet = {"basis": "current", "kind": "task", "briefs": ["Original source " * 10000],
                   "expectedChecks": [{"requirement": f"R{i:02}", "criterion": "Criterion " * 200} for i in range(60)]}
         receipt = packets.write(self.store, packet)
-        envelope = json.loads(Path(receipt["absolutePath"]).read_text())
+        envelope = json.loads(Path(receipt["absolutePath"]).read_text(encoding="utf-8"))
         self.assertLessEqual(receipt["envelopeBytes"], packets.MAX_PACKET_BYTES)
         self.assertLess(receipt["envelopeBytes"], receipt["inlineBytesBefore"] / 10)
         self.assertIsNone(receipt["tokenCount"])
@@ -37,7 +37,7 @@ class PacketTests(unittest.TestCase):
         packet = {"basis": "x", "kind": "task", "briefs": [], "expectedChecks": []}
         receipt = packets.write(self.store, packet)
         self.assertEqual(receipt["sectionCount"], 0)
-        self.assertEqual(json.loads(Path(receipt["absolutePath"]).read_text()), packet)
+        self.assertEqual(json.loads(Path(receipt["absolutePath"]).read_text(encoding="utf-8")), packet)
 
     def test_blind_packet_contains_no_registry_spec_or_old_reviews(self):
         self.state["briefs"] = [dict(self.store.artifact("briefs", b"Original request", ".md"), id="B001")]

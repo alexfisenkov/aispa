@@ -11,6 +11,7 @@ import tempfile
 from urllib.parse import quote
 
 from .store import Invalid, digest
+from .portable import is_link, relative_name
 from . import carryover
 
 
@@ -44,13 +45,16 @@ DOCUMENTS = {"readme.md", "architecture.md", "decisions.md", "plan.md", "spec.md
 
 def _path(root, relative):
     """Reject every symlink component, including an in-root link and dangling links."""
-    name = Path(relative)
-    if name.is_absolute() or not name.parts or ".." in name.parts:
-        raise Invalid("AISpa context: нужен относительный путь без переходов ..")
+    try:
+        name = Path(relative_name(relative.as_posix() if isinstance(relative, Path) else relative))
+    except ValueError as exc:
+        raise Invalid("AISpa context: нужен относительный путь без переходов ..") from exc
     current = root
+    if is_link(current):
+        raise Invalid("AISpa context: ссылка вместо корня запрещена")
     for part in name.parts:
         current = current / part
-        if current.is_symlink():
+        if is_link(current):
             raise Invalid("AISpa context: символическая ссылка запрещена: " + str(name))
     if not current.resolve().is_relative_to(root.resolve()):
         raise Invalid("AISpa context: путь выходит за корень проекта")
@@ -88,14 +92,16 @@ def _block(value):
 
 def inventory(root):
     """Inventory names only: never read configs, secrets, tests or historical copies."""
+    if is_link(root):
+        raise Invalid("AISpa context: ссылка вместо корня запрещена")
     result = {"zones": [], "manifests": [], "entrypoints": [], "documents": [], "instructions": []}
     for name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md"):
         path = root / name
-        if path.is_file() and not path.is_symlink():
+        if not is_link(path) and path.is_file():
             result["instructions"].append(name)
     def walk(folder, depth=0):
         for path in sorted(folder.iterdir(), key=lambda p: p.name):
-            if path.is_symlink() or path.name.startswith("."):
+            if is_link(path) or path.name.startswith("."):
                 continue
             rel = path.relative_to(root).as_posix()
             if path.is_dir():
@@ -153,7 +159,7 @@ def initialize(store, state, runtime):
     found = inventory(store.root)  # Must precede any writes.
     targets = ["AGENTS.md"]
     if runtime == "codex" and ((store.root / "AGENTS.override.md").exists()
-                               or (store.root / "AGENTS.override.md").is_symlink()):
+                               or is_link(store.root / "AGENTS.override.md")):
         targets.append("AGENTS.override.md")
     if runtime == "claude-code":
         targets.append("CLAUDE.md")
@@ -229,7 +235,7 @@ def _source(store, artifact, sources, kind, read=False):
         raise Invalid("AISpa context: изменён неизменный источник " + name)
     relative = path.relative_to(store.root).as_posix()
     sources.append({"kind": kind, "file": relative, "sha256": artifact["sha256"]})
-    relative_link = os.path.relpath(path, store.home / "context")
+    relative_link = Path(os.path.relpath(path, store.home / "context")).as_posix()
     link = "[" + name.replace("]", "\\]") + "](" + quote(relative_link, safe="/") + ")"
     return link, store.text(artifact) if read else None
 

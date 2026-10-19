@@ -11,6 +11,7 @@ import tempfile
 import uuid
 
 from . import VERSION, SCHEMA
+from .portable import relative_name, is_link, executable, match_name
 
 COMMON_INPUTS = {"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".gitignore", "package.json",
                  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb", "pyproject.toml",
@@ -19,7 +20,9 @@ COMMON_INPUTS = {"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".
 
 
 def common_input(name):
-    return "/" not in name and (name in COMMON_INPUTS or name.startswith("requirements") and name.endswith(".txt"))
+    names = {match_name(item) for item in COMMON_INPUTS}
+    name = match_name(name)
+    return "/" not in name and (name in names or name.startswith("requirements") and name.endswith(".txt"))
 
 
 class Invalid(ValueError):
@@ -30,10 +33,14 @@ def canonical_zone(value):
     """One spelling for relative task paths before matching or fingerprinting."""
     if not isinstance(value, str) or not value.strip() or "\\" in value or "\0" in value:
         raise Invalid("Некорректная зона задачи")
-    path = Path(value)
-    if path.is_absolute() or ".." in path.parts or (path.parts and path.parts[0] in (".git", ".aispa")):
+    try:
+        normalized = relative_name(value, root=True)
+    except ValueError as exc:
+        raise Invalid("Некорректная зона задачи") from exc
+    path = Path(normalized)
+    if path.parts and path.parts[0].casefold() in (".git", ".aispa"):
         raise Invalid("Некорректная зона задачи")
-    return path.as_posix()
+    return match_name(normalized)
 
 
 def timestamp():
@@ -54,7 +61,7 @@ def atomic_json(path, value):
     fd, name = tempfile.mkstemp(prefix=".aispa-write-", dir=path.parent)
     tmp = Path(name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
             json.dump(value, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
@@ -65,11 +72,15 @@ def atomic_json(path, value):
 
 
 def confined(base, name):
-    if not isinstance(name, str) or not name or Path(name).is_absolute():
-        raise Invalid("Нужен относительный путь внутри прогона")
-    candidate = base / name
-    if any(p == ".." for p in Path(name).parts) or candidate.is_symlink():
-        raise Invalid("Переходы .. и ссылки в путях свидетельств запрещены")
+    try:
+        name = relative_name(name)
+    except ValueError as exc:
+        raise Invalid("Нужен относительный путь внутри прогона") from exc
+    candidate = base
+    for part in Path(name).parts:
+        candidate = candidate / part
+        if is_link(candidate):
+            raise Invalid("Ссылки и junction в путях свидетельств запрещены")
     result = candidate.resolve()
     if not result.is_relative_to(base.resolve()):
         raise Invalid("Путь выходит за пределы прогона")
@@ -80,7 +91,7 @@ class Journal:
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.home = self.root / ".aispa"
-        if self.home.is_symlink():
+        if is_link(self.home):
             raise Invalid(".aispa не должна быть символической ссылкой")
         self.run = None
 
@@ -122,9 +133,9 @@ class Journal:
 
     def load(self, *, handoff_only=False):
         try:
-            pointer = json.loads((self.home / "active.json").read_text())
+            pointer = json.loads(confined(self.home, "active.json").read_text(encoding="utf-8"))
             self.run = confined(self.home / "runs", pointer["run"])
-            lines = confined(self.run, "events.jsonl").read_text().splitlines()
+            lines = confined(self.run, "events.jsonl").read_text(encoding="utf-8").splitlines()
         except (OSError, ValueError, KeyError) as e:
             raise Invalid("Не удалось прочитать журнал; init нужен только для нового проекта") from e
         previous = None
@@ -141,7 +152,7 @@ class Journal:
         if not state or state.get("schema") != SCHEMA:
             raise Invalid("Неподдерживаемая схема журнала")
         if state.get("version") != VERSION:
-            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3"}
+            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4"}
             if not (handoff_only and state.get("version") in supported
                     and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
                 raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")
@@ -153,13 +164,13 @@ class Journal:
 
     def append(self, state, event):
         history = confined(self.run, "events.jsonl")
-        lines = history.read_text().splitlines() if history.exists() else []
+        lines = history.read_text(encoding="utf-8").splitlines() if history.exists() else []
         previous = json.loads(lines[-1])["hash"] if lines else None
         state["updatedAt"] = timestamp()
         row = {"sequence": len(lines) + 1, "previous": previous, "at": state["updatedAt"],
                "event": event, "state": state}
         row["hash"] = digest(row)
-        with history.open("a", encoding="utf-8") as stream:
+        with history.open("a", encoding="utf-8", newline="\n") as stream:
             stream.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -189,6 +200,12 @@ class Journal:
         if top != self.root:
             raise Invalid("--root должен указывать на корень Git-репозитория")
         names = self.git("ls-files", "--cached", "--others", "--exclude-standard", "-z").split(b"\0")
+        modes = {}
+        if os.name == "nt":
+            for record in self.git("ls-files", "--stage", "-z").split(b"\0"):
+                if record:
+                    metadata, name = record.split(b"\t", 1)
+                    modes[os.fsdecode(name)] = metadata.split()[0]
         records = []
         for raw in sorted(set(names)):
             if not raw:
@@ -198,14 +215,14 @@ class Journal:
                 continue
             common = common_input(name)
             if zones is not None and not (include_common and common) and not any(
-                z in ("", ".") or name == z.rstrip("/") or name.startswith(z.rstrip("/") + "/") for z in zones
+                z in ("", ".") or match_name(name) == z.rstrip("/") or match_name(name).startswith(z.rstrip("/") + "/") for z in zones
             ):
                 continue
             path = self.root / name
-            if path.is_symlink():
+            if is_link(path):
                 value = {"link": os.readlink(path)}
             elif path.is_file():
-                value = {"sha256": file_hash(path), "executable": bool(path.stat().st_mode & 0o111)}
+                value = {"sha256": file_hash(path), "executable": executable(path, modes.get(name))}
             elif path.is_dir():
                 raise Invalid("Вложенные Git-модули пока не поддерживаются: " + name)
             else:

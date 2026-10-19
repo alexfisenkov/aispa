@@ -25,6 +25,7 @@ import urllib.request
 import zipfile
 
 from .store import Invalid, atomic_json
+from .portable import executable, is_link, relative_name
 
 REPOSITORY = "alexfisenkov/aispa"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
@@ -89,6 +90,8 @@ def _runtime_path(path):
 def _install_policy(alias, target):
     if _runtime_path(alias) or _runtime_path(target):
         return "pinned_runtime"
+    if os.name == "nt" and Path.cwd().resolve().is_relative_to(target):
+        return "cwd_inside_package"
     # A package accidentally containing a project/run must never be replaced.
     if (target / ".aispa").exists():
         return "contains_runs"
@@ -97,7 +100,7 @@ def _install_policy(alias, target):
                                 capture_output=True, timeout=3)
         if result.returncode == 0 and result.stdout:
             return "git_checkout"
-        if result.returncode != 0 and any((p / ".git").exists() or (p / ".git").is_symlink() for p in (target, *target.parents)):
+        if result.returncode != 0 and any((p / ".git").exists() or is_link(p / ".git") for p in (target, *target.parents)):
             return "git_check_failed"
     except FileNotFoundError:
         # Protect obvious checkouts even when Git itself is unavailable.
@@ -118,13 +121,13 @@ def _writable_target(package):
 
 
 def _safe_path(name):
-    if (not isinstance(name, str) or not name or len(name) > 512
-            or "\\" in name or "\0" in name or ":" in name
-            or any(ord(ch) < 32 for ch in name)):
+    try:
+        canonical = relative_name(name)
+    except ValueError as exc:
+        raise Invalid("Небезопасный путь в пакете") from exc
+    if len(name) > 512 or canonical != name:
         raise Invalid("Небезопасный путь в пакете")
     path = PurePosixPath(name)
-    if path.is_absolute() or any(p in ("", ".", "..") for p in name.split("/")):
-        raise Invalid("Небезопасный путь в пакете")
     if any(p.casefold() in (".git", ".aispa", "__pycache__") for p in path.parts):
         raise Invalid("Служебный каталог запрещён в выпуске")
     return name
@@ -139,12 +142,14 @@ def _walk_error(error):
 
 
 def _snapshot(package):
+    if is_link(package):
+        raise Invalid("Ссылка вместо каталога пакета запрещена")
     records = {}
     total = 0
     for root, dirs, files in os.walk(package, followlinks=False, onerror=_walk_error):
         for name in dirs + files:
             path = Path(root) / name
-            if path.is_symlink():
+            if is_link(path):
                 raise Invalid("Внутри пакета обнаружена символическая ссылка")
         dirs[:] = sorted(d for d in dirs if not _ignored((d,)))
         for name in sorted(files):
@@ -165,9 +170,21 @@ def _snapshot(package):
             if len(data) != info.st_size:
                 raise Invalid("Пакет изменился во время чтения")
             records[rel.as_posix()] = {"sha256": hashlib.sha256(data).hexdigest(),
-                                     "size": len(data), "mode": 0o755 if info.st_mode & 0o111 else 0o644}
+                                     "size": len(data), "mode": 0o755 if executable(path) else 0o644}
     encoded = json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
     return records, hashlib.sha256(encoded).hexdigest()
+
+
+def _disk_records(records):
+    """NTFS cannot preserve POSIX execute bits; hashes and sizes remain exact.
+
+    Archive metadata is checked before extraction on every platform. Only the
+    comparison to the installed filesystem normalizes that unavailable bit.
+    """
+    if os.name != "nt":
+        return records
+    return {name: dict(record, mode=record["mode"] & ~0o111)
+            for name, record in records.items()}
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -372,7 +389,7 @@ def _extract(data, destination, records):
                 expected = records[name]
                 if item.file_size != expected["size"]:
                     raise Invalid("Размер файла не соответствует манифесту")
-                if (0o755 if mode & 0o111 else 0o644) != expected["mode"]:
+                if mode & 0o7777 != expected["mode"]:
                     raise Invalid("Права файла не соответствуют манифесту")
                 # Bounded streaming read also limits memory when a hostile ZIP
                 # header understates the true DEFLATE output size.
@@ -441,7 +458,7 @@ def prepare(package, *, timeout=20):
         if _version(staged) != release["version"]:
             raise Invalid("Версия кода не соответствует манифесту")
         actual, staged_digest = _snapshot(staged)
-        if actual != records or _snapshot(target)[1] != old_digest:
+        if actual != _disk_records(records) or _snapshot(target)[1] != old_digest:
             raise Invalid("Пакет изменился во время подготовки")
         result = {"schema": 1, "status": "prepared", "candidateId": candidate.name,
                   "target": str(target), "installedVersion": version, "version": release["version"],
@@ -461,10 +478,10 @@ def _local_record(target, ident, prefix, filename):
     if not isinstance(ident, str) or not re.fullmatch(re.escape(prefix) + r"[A-Za-z0-9_-]{8,64}", ident):
         raise Invalid("Некорректный идентификатор локального обновления")
     directory = target.parent / ident
-    if directory.is_symlink() or not directory.is_dir() or directory.resolve().parent != target.parent:
+    if is_link(directory) or not directory.is_dir() or directory.resolve().parent != target.parent:
         raise Invalid("Недоступен локальный каталог обновления")
     path = directory / filename
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_METADATA_BYTES:
+    if is_link(path) or not path.is_file() or path.stat().st_size > MAX_METADATA_BYTES:
         raise Invalid("Некорректная локальная запись обновления")
     value = _json(path.read_bytes())
     if not isinstance(value, dict) or value.get("target") != str(target) or value.get("schema") != 1:
@@ -493,7 +510,7 @@ def _confirmed(confirmed):
 
 
 def _check_stage(path):
-    if path.is_symlink() or not path.is_dir():
+    if is_link(path) or not path.is_dir():
         raise Invalid("Некорректный локальный пакет обновления")
 
 
@@ -508,12 +525,12 @@ def apply(package, candidate_id, *, confirmed=False):
         staged = candidate / "package"
         _check_stage(staged)
         manifest_path = candidate / "manifest.json"
-        if manifest_path.is_symlink() or manifest_path.stat().st_size > MAX_METADATA_BYTES:
+        if is_link(manifest_path) or manifest_path.stat().st_size > MAX_METADATA_BYTES:
             raise Invalid("Некорректный локальный манифест")
         manifest = _json(manifest_path.read_bytes())
         expected = _manifest(manifest, review)
         actual, digest = _snapshot(staged)
-        if actual != expected or digest != review.get("candidateDigest") or _version(staged) != review["version"]:
+        if actual != _disk_records(expected) or digest != review.get("candidateDigest") or _version(staged) != review["version"]:
             raise Invalid("Подготовленный пакет изменён после проверки")
         if _snapshot(target)[1] != review.get("expectedCurrentDigest"):
             raise Invalid("Установленный пакет изменён; подготовьте обновление заново")
@@ -569,7 +586,7 @@ def rollback(package, backup_id, *, confirmed=False):
         if _snapshot(target)[1] != receipt.get("expectedCurrentDigest"):
             raise Invalid("Текущий пакет изменён после обновления; автоматический откат запрещён")
         displaced = backup / "replaced"
-        if displaced.exists() or displaced.is_symlink():
+        if displaced.exists() or is_link(displaced):
             raise Invalid("Каталог сохранения текущей версии уже занят")
         old_moved = new_moved = False
         try:

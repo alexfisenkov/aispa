@@ -18,6 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/aispa/tools"))
 from aispa_core.store import Invalid
+from aispa_core.portable import is_link
 from aispa_core.updates import (MAX_ARCHIVE_BYTES, MAX_FILE_BYTES, MAX_FILES,
                                 MAX_PACKAGE_BYTES, REPOSITORY, _manifest,
                                 _safe_path, _version_text)
@@ -76,7 +77,7 @@ def build_release(repository, output, *, commit="HEAD"):
     _manifest(manifest, {"version": version})
     output.mkdir(parents=True, exist_ok=True)
     archive_path, manifest_path = output / "aispa.zip", output / "aispa-update.json"
-    if archive_path.exists() or archive_path.is_symlink() or manifest_path.exists() or manifest_path.is_symlink():
+    if archive_path.exists() or is_link(archive_path) or manifest_path.exists() or is_link(manifest_path):
         raise Invalid("Выходные файлы уже существуют; выберите свободный каталог")
     with archive_path.open("xb") as stream:
         stream.write(data)

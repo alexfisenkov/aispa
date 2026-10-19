@@ -16,8 +16,8 @@ class BlindReviewTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-blind-")
         self.root = Path(self.temp.name).resolve()
-        (self.root / ".gitignore").write_text(".aispa/\n")
-        (self.root / "app.py").write_text("print('verified application')\n")
+        (self.root / ".gitignore").write_text(".aispa/\n", encoding="utf-8", newline="\n")
+        (self.root / "app.py").write_text("print('verified application')\n", encoding="utf-8", newline="\n")
         self.git("init", "-q")
         self.commit()
         self.store = Journal(self.root)
@@ -137,7 +137,7 @@ class BlindReviewTests(unittest.TestCase):
         for artifact in (saved["report"], saved["record"], self.evidence, self.state["briefs"][0]):
             path = self.store.run / artifact["file"]
             before = path.read_bytes()
-            path.write_text("tampered")
+            path.write_text("tampered", encoding="utf-8", newline="\n")
             self.assertFalse(blind.valid(self.store, self.state))
             path.write_bytes(before)
             self.assertTrue(blind.valid(self.store, self.state))
@@ -148,10 +148,10 @@ class BlindReviewTests(unittest.TestCase):
         blind.record(self.store, self.state, self.report())
         original = copy.deepcopy(self.state["blindReview"])
         candidate = blind.basis(self.store, self.state)
-        before = (self.root / "app.py").read_text()
-        (self.root / "app.py").write_text("changed")
+        before = (self.root / "app.py").read_text(encoding="utf-8")
+        (self.root / "app.py").write_text("changed", encoding="utf-8", newline="\n")
         self.assertFalse(blind.valid(self.store, self.state))
-        (self.root / "app.py").write_text(before)
+        (self.root / "app.py").write_text(before, encoding="utf-8", newline="\n")
         self.assertTrue(blind.valid(self.store, self.state))
         self.state["cleanrun"] = cleanroom.execute(self.store, self.state, [sys.executable, "app.py"], 5)
         self.assertTrue(blind.valid(self.store, self.state))
@@ -169,7 +169,7 @@ class BlindReviewTests(unittest.TestCase):
         self.assertEqual(original, self.state["blindReview"])
 
     def changed_candidate(self):
-        (self.root / "app.py").write_text("print('new commit')\n")
+        (self.root / "app.py").write_text("print('new commit')\n", encoding="utf-8", newline="\n")
         self.commit()
         self.state["cleanroom"] = cleanroom.prepare(self.store, self.state)
         self.state["cleanrun"] = cleanroom.execute(self.store, self.state, [sys.executable, "app.py"], 5)
@@ -199,7 +199,7 @@ class BlindReviewTests(unittest.TestCase):
         for artifact in (previous["report"], previous["candidate"], previous["record"]):
             path = self.store.run / artifact["file"]
             original = path.read_bytes()
-            path.write_text("corrupted history")
+            path.write_text("corrupted history", encoding="utf-8", newline="\n")
             self.assertFalse(blind.valid(self.store, self.state))
             path.write_bytes(original)
             self.assertTrue(blind.valid(self.store, self.state))

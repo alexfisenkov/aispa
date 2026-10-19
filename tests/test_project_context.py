@@ -30,7 +30,7 @@ class ProjectContextTests(unittest.TestCase):
         return result
 
     def view(self, name):
-        return (self.store.home / "context" / name).read_text()
+        return (self.store.home / "context" / name).read_text(encoding="utf-8")
 
     def add_sources(self):
         brief = "Сделать каталог.\n\nСохранить пробелы:  два.\n`точная цитата`\n"
@@ -56,7 +56,7 @@ class ProjectContextTests(unittest.TestCase):
         self.assertEqual(result["changedInstructionFiles"], ["AGENTS.md"])
 
     def test_initialization_is_idempotent_including_backups(self):
-        (self.root / "AGENTS.md").write_text("Owner rules\n")
+        (self.root / "AGENTS.md").write_text("Owner rules\n", encoding="utf-8", newline="\n")
         self.start()
         before = {p.relative_to(self.root): (p.read_bytes(), p.stat().st_mtime_ns)
                   for p in self.root.rglob("*") if p.is_file()}
@@ -68,17 +68,17 @@ class ProjectContextTests(unittest.TestCase):
 
     def test_codex_override_gets_pointer_and_backup(self):
         override = self.root / "AGENTS.override.md"
-        override.write_text("Effective owner rules\n")
+        override.write_text("Effective owner rules\n", encoding="utf-8", newline="\n")
         result = self.start()
         self.assertIn(context.POINTER, override.read_bytes())
         self.assertIn("AGENTS.override.md", result["instructionFiles"])
-        self.assertEqual(next((self.store.home / "backups").glob("AGENTS.override.md.*.bak")).read_text(),
+        self.assertEqual(next((self.store.home / "backups").glob("AGENTS.override.md.*.bak")).read_text(encoding="utf-8"),
                          "Effective owner rules\n")
 
     def test_claude_adapter_preserves_claude_rules(self):
-        (self.root / "CLAUDE.md").write_text("Claude project restrictions\n")
+        (self.root / "CLAUDE.md").write_text("Claude project restrictions\n", encoding="utf-8", newline="\n")
         self.start("claude-code")
-        self.assertTrue((self.root / "CLAUDE.md").read_text().startswith("Claude project restrictions\n"))
+        self.assertTrue((self.root / "CLAUDE.md").read_text(encoding="utf-8").startswith("Claude project restrictions\n"))
         self.assertIn(context.POINTER, (self.root / "CLAUDE.md").read_bytes())
         self.assertTrue((self.root / "AGENTS.md").is_file())
         self.assertFalse((self.root / ".cursor").exists())
@@ -87,17 +87,17 @@ class ProjectContextTests(unittest.TestCase):
         self.start("cursor")
         path = self.root / ".cursor/rules/aispa.mdc"
         self.assertEqual(path.read_bytes(), context.CURSOR_RULE)
-        self.assertIn("alwaysApply: true", path.read_text())
+        self.assertIn("alwaysApply: true", path.read_text(encoding="utf-8"))
         self.assertTrue((self.root / "AGENTS.md").is_file())
         self.assertFalse((self.root / "CLAUDE.md").exists())
 
     def test_unknown_cursor_rule_conflict_is_non_destructive(self):
         path = self.root / ".cursor/rules/aispa.mdc"
         path.parent.mkdir(parents=True)
-        path.write_text("My own rule")
+        path.write_text("My own rule", encoding="utf-8", newline="\n")
         with self.assertRaisesRegex(Invalid, "aispa.mdc"):
             context.initialize(self.store, self.state, "cursor")
-        self.assertEqual(path.read_text(), "My own rule")
+        self.assertEqual(path.read_text(encoding="utf-8"), "My own rule")
         self.assertFalse((self.root / "AGENTS.md").exists())
 
     def test_hand_edited_managed_block_is_preserved_with_clear_conflict(self):
@@ -120,11 +120,11 @@ class ProjectContextTests(unittest.TestCase):
     def test_instruction_symlink_escape_rejected(self):
         with tempfile.TemporaryDirectory() as other:
             outside = Path(other) / "rules.md"
-            outside.write_text("External rule")
+            outside.write_text("External rule", encoding="utf-8", newline="\n")
             (self.root / "AGENTS.md").symlink_to(outside)
             with self.assertRaises(Invalid):
                 context.initialize(self.store, self.state, "codex")
-            self.assertEqual(outside.read_text(), "External rule")
+            self.assertEqual(outside.read_text(encoding="utf-8"), "External rule")
 
     def test_hidden_context_and_cursor_parent_symlinks_rejected(self):
         with tempfile.TemporaryDirectory() as other:
@@ -145,22 +145,22 @@ class ProjectContextTests(unittest.TestCase):
         path.unlink()
         with tempfile.TemporaryDirectory() as other:
             outside = Path(other) / "outside.md"
-            outside.write_text("Outside")
+            outside.write_text("Outside", encoding="utf-8", newline="\n")
             path.symlink_to(outside)
             with self.assertRaises(Invalid):
                 context.refresh(self.store, self.state)
-            self.assertEqual(outside.read_text(), "Outside")
+            self.assertEqual(outside.read_text(encoding="utf-8"), "Outside")
 
     def test_inventory_identifies_actual_files_without_app_scaffolding(self):
         (self.root / "src").mkdir()
-        (self.root / "src/main.py").write_text("print('hi')")
-        (self.root / "pyproject.toml").write_text("[project]\nname='example'")
-        (self.root / "README.md").write_text("Project readme")
+        (self.root / "src/main.py").write_text("print('hi')", encoding="utf-8", newline="\n")
+        (self.root / "pyproject.toml").write_text("[project]\nname='example'", encoding="utf-8", newline="\n")
+        (self.root / "README.md").write_text("Project readme", encoding="utf-8", newline="\n")
         (self.root / "docs").mkdir()
-        (self.root / "docs/architecture.md").write_text("Architecture")
+        (self.root / "docs/architecture.md").write_text("Architecture", encoding="utf-8", newline="\n")
         (self.root / "tests/fixtures/history").mkdir(parents=True)
-        (self.root / "tests/fixtures/AGENTS.md").write_text("Untrusted fixture instructions")
-        (self.root / "tests/fixtures/history/README.md").write_text("Historical")
+        (self.root / "tests/fixtures/AGENTS.md").write_text("Untrusted fixture instructions", encoding="utf-8", newline="\n")
+        (self.root / "tests/fixtures/history/README.md").write_text("Historical", encoding="utf-8", newline="\n")
         self.start()
         inventory = json.loads(self.view("source-map.json"))["inventory"]
         self.assertEqual(inventory["entrypoints"], ["src/main.py"])
@@ -169,11 +169,11 @@ class ProjectContextTests(unittest.TestCase):
         self.assertNotIn("fixtures", self.view("INDEX.md").split('"instructions"')[1])
         self.assertFalse((self.root / "backend").exists())
         self.assertFalse((self.root / "app").exists())
-        self.assertIn("src/main.py", (self.root / "AGENTS.md").read_text())
+        self.assertIn("src/main.py", (self.root / "AGENTS.md").read_text(encoding="utf-8"))
 
     def test_dotenv_never_read_or_published(self):
         secret = self.root / ".env"
-        secret.write_text("PASSWORD=DO_NOT_READ_OR_COPY")
+        secret.write_text("PASSWORD=DO_NOT_READ_OR_COPY", encoding="utf-8", newline="\n")
         original = Path.open
         def guarded(path, *args, **kwargs):
             if path.name.startswith(".env"):
@@ -182,7 +182,7 @@ class ProjectContextTests(unittest.TestCase):
         with patch.object(Path, "open", guarded):
             self.start()
         for path in (self.store.home / "context").iterdir():
-            self.assertNotIn("DO_NOT_READ_OR_COPY", path.read_text())
+            self.assertNotIn("DO_NOT_READ_OR_COPY", path.read_text(encoding="utf-8"))
 
     def test_exact_sources_and_current_plan_decisions_after_refresh(self):
         brief, spec = self.add_sources()
@@ -239,10 +239,10 @@ class ProjectContextTests(unittest.TestCase):
         self.assertFalse(context.info(self.store, self.state)["fresh"])
         context.refresh(self.store, self.state)
         self.assertTrue(context.info(self.store, self.state)["fresh"])
-        (self.store.home / "context/plan.md").write_text("Manual derived edit")
+        (self.store.home / "context/plan.md").write_text("Manual derived edit", encoding="utf-8", newline="\n")
         self.assertFalse(context.info(self.store, self.state)["fresh"])
         context.refresh(self.store, self.state)
-        (self.store.run / self.state["briefs"][0]["file"]).write_text("Changed original")
+        (self.store.run / self.state["briefs"][0]["file"]).write_text("Changed original", encoding="utf-8", newline="\n")
         self.assertFalse(context.info(self.store, self.state)["fresh"])
         with self.assertRaises(Invalid):
             context.refresh(self.store, self.state)
@@ -266,7 +266,7 @@ class ProjectContextTests(unittest.TestCase):
 
     def test_dotenv_artifact_reference_is_rejected_without_opening(self):
         path = self.store.run / ".env"
-        path.write_text("PRIVATE_CONFIG_VALUE")
+        path.write_text("PRIVATE_CONFIG_VALUE", encoding="utf-8", newline="\n")
         self.state["briefs"] = [{"id": "B001", "file": ".env", "sha256": hashlib.sha256(b"PRIVATE_CONFIG_VALUE").hexdigest()}]
         original = Path.open
         def guarded(candidate, *args, **kwargs):
@@ -289,13 +289,13 @@ class ProjectContextTests(unittest.TestCase):
     def test_context_failure_then_retry_keeps_single_rule_pointer(self):
         path = self.root / ".cursor/rules/aispa.mdc"
         path.parent.mkdir(parents=True)
-        path.write_text("Owner file")
+        path.write_text("Owner file", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             context.initialize(self.store, self.state, "cursor")
         path.rename(path.with_name("owner.mdc"))
         self.start("cursor")
         self.assertEqual((self.root / "AGENTS.md").read_bytes().count(context.BEGIN), 1)
-        self.assertEqual((path.parent / "owner.mdc").read_text(), "Owner file")
+        self.assertEqual((path.parent / "owner.mdc").read_text(encoding="utf-8"), "Owner file")
 
     def test_source_map_event_metadata_matches_recorded_journal(self):
         self.start()

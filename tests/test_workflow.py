@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -18,8 +19,8 @@ class WorkflowTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-flow-")
         self.root = Path(self.temp.name)
         self.git("init", "-q")
-        (self.root / ".gitignore").write_text(".aispa/\n")
-        (self.root / "app.py").write_text("print('ready')\n")
+        (self.root / ".gitignore").write_text(".aispa/\n", encoding="utf-8", newline="\n")
+        (self.root / "app.py").write_text("print('ready')\n", encoding="utf-8", newline="\n")
         self.commit()
         self.store = Journal(self.root)
         self.state = self.store.create("example", "Пример")
@@ -39,7 +40,7 @@ class WorkflowTests(unittest.TestCase):
 
     def file(self, value, name="input.json"):
         path = self.inbox / name
-        path.write_text(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+        path.write_text(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False), encoding="utf-8", newline="\n")
         return path
 
     def prepare(self, secondary=False):
@@ -236,14 +237,14 @@ class WorkflowTests(unittest.TestCase):
 
     def test_code_change_invalidates_acceptance(self):
         self.accepted()
-        (self.root / "app.py").write_text("print('broken')\n")
+        (self.root / "app.py").write_text("print('broken')\n", encoding="utf-8", newline="\n")
         self.assertFalse(gate_valid(self.store, self.state, "acceptance"))
         with self.assertRaises(Invalid):
             self.flow.finish()
 
     def test_finished_projection_becomes_stale_after_code_edit(self):
         self.accepted(); self.flow.finish()
-        (self.root / "app.py").write_text("print('broken')\n")
+        (self.root / "app.py").write_text("print('broken')\n", encoding="utf-8", newline="\n")
         self.assertEqual(project(self.store, self.state)["status"], "stale")
 
     def test_old_report_cannot_be_reused(self):
@@ -282,7 +283,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_changed_evidence_blocks_finish(self):
         self.accepted()
-        (self.store.run / self.state["verification"]["output"]["file"]).write_text("rewritten")
+        (self.store.run / self.state["verification"]["output"]["file"]).write_text("rewritten", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             self.flow.finish()
 
@@ -367,10 +368,40 @@ class WorkflowTests(unittest.TestCase):
         self.prepare()
         self.assertFalse(self.flow.verify([sys.executable, "-c", "print('gh'+'p_'+'a'*40)"], 10))
         verification = self.state["verification"]
-        output = (self.store.run / verification["output"]["file"]).read_text()
+        output = (self.store.run / verification["output"]["file"]).read_text(encoding="utf-8")
         self.assertEqual(verification["exitCode"], 125)
         self.assertNotIn('a' * 40, output)
         self.assertIn("withheld", output)
+
+    def test_task_verify_timeout_terminates_descendant_holding_output_pipe(self):
+        self.prepare()
+        marker = self.inbox / "child-started"
+        release = self.inbox / "child-release"
+        leaked = self.inbox / "child-leaked"
+        child = ("from pathlib import Path; import time; "
+                 f"Path({str(marker)!r}).write_bytes(b'started'); "
+                 f"\nwhile not Path({str(release)!r}).exists(): time.sleep(.01)"
+                 f"\nPath({str(leaked)!r}).write_bytes(b'alive')")
+        parent = ("import subprocess,sys,time; "
+                  f"subprocess.Popen([sys.executable,'-c',{child!r}]); time.sleep(30)")
+        started = time.monotonic()
+        self.assertFalse(self.flow.verify([sys.executable, "-c", parent], 3, "T01"))
+        self.assertLess(time.monotonic() - started, 8)
+        self.assertTrue(marker.exists(), "The child must really start before timeout")
+        self.assertEqual(self.attempt()["verification"]["exitCode"], 124)
+        self.assertNotIn("activity", self.state)
+        release.write_bytes(b"go")
+        time.sleep(.3)
+        self.assertFalse(leaked.exists(), "Descendant must not outlive verification")
+
+    def test_verify_scans_secret_after_bounded_output_limit(self):
+        self.prepare()
+        command = "import sys; sys.stdout.write('x'*1100000); print('gh'+'p_'+'a'*40)"
+        self.assertFalse(self.flow.verify([sys.executable, "-c", command], 10))
+        receipt = self.state["verification"]
+        self.assertTrue(receipt["truncated"])
+        self.assertEqual(receipt["exitCode"], 125)
+        self.assertLess(len(self.store.text(receipt["output"])), 200)
 
     def test_workflow_task_clock_excludes_pause_and_survives_retry(self):
         self.prepare()

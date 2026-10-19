@@ -128,3 +128,28 @@ worker; оба критика и отдельный приёмщик остаю�
 actionlint PASS. Реальный переход файлов/CLI alpha.3 → alpha.4 проверен на
 изолированном синтетическом проекте; глобальные установки не менялись.
 Подробности и границы — [протокол alpha.4](validation-alpha.4.md).
+
+## 19.10.2026 — alpha.5: нативная Windows
+
+Добавлен общий ограниченный runner для verify/clean-verify: POSIX process group
+и Windows Job Object с запуском команды только после назначения job. Вывод
+ограничен, секреты проверяются и после лимита, дочерние процессы завершаются
+при timeout и выходе родителя.
+
+Чистый клон учитывает LF/CRLF как точное текстовое преобразование к Git blob;
+реальное изменение, binary/-text, staged и untracked файлы не скрываются.
+NTFS execute-бит учитывается через Git/manifest; junctions, ADS, device-имена
+и drive-relative пути проверяются отдельно. Добавлены UTF-8 журнал/CLI, внешние
+UTF-8 BOM inputs, Windows env, относительный Scripts/python.exe, безопасное
+сравнение пакетов updater и инструкция PowerShell.
+
+Локальный macOS-набор: 292 теста, 275 исполненных PASS, 17 Windows-only SKIP;
+18 JS тестов PASS, actionlint и diff-check PASS. Полная финальная матрица
+GitHub проверяет macOS, Windows и Linux на Python 3.11/3.13. Её фактический
+результат привязывается к commit в Actions/Release; локальный результат не
+заменяет нативную Windows-проверку. Два круга критики задач сохранены.
+
+Ограничения: клон не sandbox; полная изоляция системных пакетов, native-host
+прогоны Codex/Claude Code/Cursor на ученических машинах, сетевые/нестандартные
+файловые системы остаются отдельными испытаниями. Tracked symlinks, submodules,
+внешние Git-фильтры/encoding/ident и SHA-256 Git repositories отклоняются явно.

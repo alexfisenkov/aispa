@@ -291,12 +291,12 @@ class UpdateTests(unittest.TestCase):
 
     def test_concurrent_modification_and_candidate_tamper_refused(self):
         result = self.prepare()
-        (self.package / "SKILL.md").write_text("local edit")
+        (self.package / "SKILL.md").write_text("local edit", encoding="utf-8", newline="\n")
         with self.assertRaisesRegex(Invalid, "изменён"):
             updates.apply(self.package, result["candidateId"], confirmed=True)
         self.write_package(self.package, self.old)
         staged = self.package.parent / result["candidateId"] / "package"
-        (staged / "SKILL.md").write_text("tamper")
+        (staged / "SKILL.md").write_text("tamper", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             updates.apply(self.package, result["candidateId"], confirmed=True)
         self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
@@ -318,11 +318,11 @@ class UpdateTests(unittest.TestCase):
     def test_rollback_refuses_modified_current_or_backup(self):
         result = self.prepare()
         receipt = updates.apply(self.package, result["candidateId"], confirmed=True)
-        (self.package / "local.txt").write_text("local")
+        (self.package / "local.txt").write_text("local", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             updates.rollback(self.package, receipt["backupId"], confirmed=True)
         (self.package / "local.txt").unlink()
-        (self.package.parent / receipt["backupId"] / "package/SKILL.md").write_text("changed")
+        (self.package.parent / receipt["backupId"] / "package/SKILL.md").write_text("changed", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             updates.rollback(self.package, receipt["backupId"], confirmed=True)
 
@@ -392,7 +392,7 @@ class UpdateTests(unittest.TestCase):
         (repo / "LICENSE").write_bytes(b"MIT fixture\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "release")):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
-        (repo / "skills/aispa/SKILL.md").write_text("uncommitted edit")
+        (repo / "skills/aispa/SKILL.md").write_text("uncommitted edit", encoding="utf-8", newline="\n")
         first = producer.build_release(repo, self.root / "artifact-1")
         second = producer.build_release(repo, self.root / "artifact-2")
         self.assertEqual(Path(first["archive"]).read_bytes(), Path(second["archive"]).read_bytes())
@@ -403,7 +403,7 @@ class UpdateTests(unittest.TestCase):
         self.assertFalse(first["published"])
         with self.assertRaises(Invalid):
             producer.build_release(repo, self.root / "artifact-1")
-        (repo / "skills/aispa/LICENSE").write_text("different notice")
+        (repo / "skills/aispa/LICENSE").write_text("different notice", encoding="utf-8", newline="\n")
         for args in (("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "mismatched license")):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         with self.assertRaises(Invalid):

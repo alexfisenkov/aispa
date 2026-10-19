@@ -13,6 +13,7 @@ from aispa_core import VERSION
 from aispa_core.contracts import basis, active, task_closure
 from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
+from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
 from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind
 
@@ -146,9 +147,9 @@ def execute(args):
         if args.action == "init":
             store.code()  # Require an actual Git root before creating a run.
             ignore = store.root / ".gitignore"
-            if ignore.is_symlink() or ignore.exists() and not ignore.is_file():
+            if is_link(ignore) or ignore.exists() and not ignore.is_file():
                 raise Invalid(".gitignore должен быть обычным файлом; содержимое сохранено")
-            if (store.home / "dashboard.html").is_symlink():
+            if is_link(store.home / "dashboard.html"):
                 raise Invalid("Дашборд не должен быть символической ссылкой")
             inherited = carryover.capture(store, store.load(handoff_only=True)) if (store.home / "active.json").exists() else None
             def initialize_run(state):
@@ -161,9 +162,9 @@ def execute(args):
                 shutil.copytree(PACKAGE, store.run / "runtime", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             state = store.create(args.slug, args.title, initializer=initialize_run)
             shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
-            previous = ignore.read_text() if ignore.exists() else ""
-            if ".aispa/" not in previous.splitlines():
-                ignore.write_text(previous.rstrip("\n") + "\n.aispa/\n")
+            previous = ignore.read_bytes() if ignore.exists() else b""
+            if b".aispa/" not in previous.splitlines():
+                ignore.write_bytes(previous + (b"\n" if previous and not previous.endswith(b"\n") else b"") + b".aispa/\n")
             store.append(state, "runtime-pinned")
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
@@ -297,6 +298,10 @@ def execute(args):
 
 
 def main():
+    # JSON and diagnostics have the same UTF-8 contract in Windows pipes/console.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     try:
         return execute(parser().parse_args())
     except (Invalid, OSError, ValueError) as error:

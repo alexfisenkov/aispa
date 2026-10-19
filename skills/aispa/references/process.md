@@ -1,7 +1,9 @@
-# Выполнение AISpa · 0.1.0-alpha.4
+# Выполнение AISpa · 0.1.0-alpha.5
 
 Команды ниже вызываются как `python3 "<skillDir>/tools/aispa.py" --root "<repo>" …`.
 `<skillDir>` — именно открытая папка навыка, `<repo>` — физический корень Git.
+На Windows замени python3 на выбранный python.exe/py -3; примеры PowerShell
+и UTF-8 — [runtimes.md](runtimes.md).
 После init все команды прогона выполняй сохранённым
 `.aispa/runs/<run>/runtime/tools/aispa.py`. Для обновления установленного навыка
 нужен его исходный каталог, а не закреплённый runtime.

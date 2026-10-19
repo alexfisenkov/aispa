@@ -1,8 +1,9 @@
 """Domain operations. No publishing, agent spawning or external messages."""
 import json
+import math
+import os
 from pathlib import Path
 import re
-import subprocess
 import time
 
 from .contracts import (active, add_requirements, artifact_valid, basis, definition,
@@ -11,7 +12,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing
 from .team import TaskPipeline, task_proof_valid
-from . import project_context, discovery, carryover, cleanroom, blind
+from . import project_context, discovery, carryover, cleanroom, blind, process_runner
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -20,7 +21,7 @@ SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}
 
 
 def read_input(path):
-    text = Path(path).read_text(encoding="utf-8")
+    text = Path(path).read_text(encoding="utf-8-sig")
     require(bool(text.strip()), "Входной файл пуст")
     require(not SECRET.search(text), "Обнаружен возможный секрет; подготовьте обезличенный входной файл")
     return text
@@ -226,7 +227,11 @@ class Workflow:
     def verify(self, command, timeout, task_id=None):
         self.running()
         require(command and all(isinstance(x, str) for x in command), "Нужна команда проверки после --")
+        require(isinstance(timeout, (int, float)) and not isinstance(timeout, bool)
+                and math.isfinite(timeout) and 0 < timeout <= 86400, "Нужен положительный конечный timeout")
         require(not SECRET.search(" ".join(command)), "Секреты нельзя передавать аргументами команды")
+        secrets = [v for k, v in os.environ.items() if cleanroom.SENSITIVE_ENV.search(k) and len(v) >= 8]
+        require(not any(value in " ".join(command) for value in secrets), "Секреты нельзя передавать аргументами команды")
         attempt = None
         if task_id:
             self.task(task_id)
@@ -241,21 +246,22 @@ class Workflow:
         self.s["activity"] = {"kind": "verification", "task": task_id, "startedAt": timestamp()}
         self.save("verification-started")
         try:
-            result = subprocess.run(command, cwd=self.store.root, capture_output=True, timeout=timeout)
-            raw, rc = result.stdout + result.stderr, result.returncode
-        except subprocess.TimeoutExpired as e:
-            raw, rc = (e.stdout or b"") + (e.stderr or b"") + b"\nAISPA: timeout\n", 124
+            environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+            raw, rc, timed_out, truncated, redacted = process_runner.run(
+                command, self.store.root, environment, timeout, max_output=1048576,
+                secret_pattern=SECRET, secrets=secrets)
         except OSError:
             self.s.pop("activity", None)
             self.save("verification-could-not-start")
             raise Invalid("Не удалось запустить команду проверки")
         output = raw.decode("utf-8", "replace")
-        if SECRET.search(output):
+        if redacted or SECRET.search(output):
             output = "AISpa withheld the entire output because it may contain a secret.\n"
             rc = 125
         artifact = self.store.artifact("evidence", output.encode() or b"(no output)\n", ".log")
         after = task_basis(self.store, self.s, task_id) if task_id else self.store.code()
         receipt = {"command": command, "exitCode": rc, "code": code, "changedCode": code != after,
+                   "timedOut": timed_out, "truncated": truncated, "redacted": redacted,
                    "output": artifact, "durationSeconds": round(time.monotonic() - started, 3), "at": timestamp()}
         if attempt is not None:
             receipt.update(task=task_id, attempt=attempt["id"], candidate=code)

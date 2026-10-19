@@ -12,6 +12,7 @@ import re
 
 from .contracts import nonempty, require
 from .store import Invalid, digest, timestamp
+from .portable import is_link, relative_name
 from .team import historical_proof_valid, task_proof_valid
 
 
@@ -34,16 +35,17 @@ def _json(value):
 
 
 def _safe(root, name):
-    relative = Path(name) if isinstance(name, str) else Path("/")
-    require(not relative.is_absolute() and relative.parts and ".." not in relative.parts,
-            "Carryover: нужен относительный путь без ..")
+    try:
+        relative = Path(relative_name(name))
+    except ValueError as exc:
+        raise Invalid("Carryover: нужен относительный путь без ..") from exc
     path = root
-    require(not path.is_symlink(), "Carryover: ссылка вместо корня запрещена")
+    require(not is_link(path), "Carryover: ссылка вместо корня запрещена")
     for part in relative.parts:
         require(not (part.startswith(".env") or part.lower().endswith((".pem", ".key"))),
                 "Carryover: секретный файл не может быть источником")
         path = path / part
-        require(not path.is_symlink(), "Carryover: символические ссылки запрещены")
+        require(not is_link(path), "Carryover: символические ссылки запрещены")
     require(path.resolve().is_relative_to(root.resolve()), "Carryover: источник вне прогона")
     return path
 

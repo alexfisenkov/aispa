@@ -13,6 +13,7 @@ import re
 import tomllib
 
 from .store import Invalid, digest
+from .portable import is_link, relative_name
 
 
 SCHEMA = 1
@@ -51,13 +52,15 @@ def _require(condition, text):
 
 
 def _safe_path(root, name):
-    path = Path(name)
-    _require(isinstance(name, str) and not path.is_absolute() and path.parts and ".." not in path.parts,
-             "нужен относительный путь источника")
+    try:
+        path = Path(relative_name(name))
+    except ValueError as exc:
+        raise Invalid("AISpa discovery: нужен относительный путь источника") from exc
     result = root
+    _require(not is_link(result), "ссылка вместо корня запрещена")
     for part in path.parts:
         result = result / part
-        _require(not result.is_symlink(), "символические ссылки запрещены: " + name)
+        _require(not is_link(result), "символические ссылки запрещены: " + name)
     _require(result.resolve().is_relative_to(root.resolve()), "источник вне проекта")
     return result
 
@@ -159,11 +162,13 @@ def _included_paths(store, paths, names):
     _require(isinstance(paths, list) and all(isinstance(name, str) for name in paths), "include должен быть списком относительных файлов")
     result = []
     for name in paths:
-        parts = Path(name).parts
-        _require(name and "\\" not in name and "\0" not in name and not Path(name).is_absolute()
-                 and parts and ".." not in parts and all(not part.startswith(".") for part in parts),
+        try:
+            canonical = relative_name(name)
+        except ValueError as exc:
+            raise Invalid("AISpa discovery: небезопасный include") from exc
+        parts = Path(canonical).parts
+        _require(all(not part.startswith(".") for part in parts),
                  "небезопасный include: нужен обычный относительный файл")
-        canonical = Path(name).as_posix()
         _require(_kind(canonical, explicit=True) is not None, "небезопасный или неподдержанный include: " + canonical)
         _require(canonical in names, "include отсутствует или исключён Git: " + canonical)
         _require(_safe_path(store.root, canonical).is_file(), "include отсутствует или не является файлом: " + canonical)

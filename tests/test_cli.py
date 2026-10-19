@@ -18,10 +18,10 @@ CLI = PACKAGE / "tools/aispa.py"
 class CliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-cli-")
-        self.root = Path(self.temp.name) / "project with spaces"
+        self.root = Path(self.temp.name) / "проект with spaces"
         self.root.mkdir()
         self.git("init", "-q")
-        (self.root / "app.py").write_text("print('ready')\n")
+        (self.root / "app.py").write_text("print('ready')\n", encoding="utf-8", newline="\n")
         self.git("add", "app.py")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")
 
@@ -33,7 +33,7 @@ class CliTests(unittest.TestCase):
 
     def call(self, *args, expected=0, cli=CLI):
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
-                           text=True, capture_output=True, timeout=20)
+                           text=True, capture_output=True, timeout=20, encoding="utf-8")
         self.assertEqual(r.returncode, expected, r.stderr + r.stdout)
         if expected:
             self.assertNotIn("Traceback", r.stderr)
@@ -50,7 +50,7 @@ class CliTests(unittest.TestCase):
 
     def input(self, value):
         p = self.inbox / "input"
-        p.write_text(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+        p.write_text(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False), encoding="utf-8", newline="\n")
         return str(p)
 
     def context(self, kind, *extra):
@@ -59,13 +59,13 @@ class CliTests(unittest.TestCase):
     def discover(self):
         from test_discovery import synthetic_report
         receipt = self.call("discover")["receipt"]
-        evidence = json.loads(Path(receipt["absolutePath"]).read_text())
+        evidence = json.loads(Path(receipt["absolutePath"]).read_text(encoding="utf-8"))
         self.call("discover", "--file", self.input(synthetic_report(evidence)))
 
     @contextmanager
     def server(self):
         process = subprocess.Popen([sys.executable, "-B", str(CLI), "--root", str(self.root), "serve"],
-                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
         try:
             url = process.stdout.readline().strip()
             self.assertTrue(url.startswith("http://127.0.0.1:"), url)
@@ -85,22 +85,22 @@ class CliTests(unittest.TestCase):
 
     def test_init_does_not_write_through_ignore_symlink(self):
         external = Path(self.temp.name) / "external-ignore"
-        external.write_text("keep this unchanged\n")
+        external.write_text("keep this unchanged\n", encoding="utf-8", newline="\n")
         (self.root / ".gitignore").symlink_to(external)
         self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", expected=2)
-        self.assertEqual(external.read_text(), "keep this unchanged\n")
+        self.assertEqual(external.read_text(encoding="utf-8"), "keep this unchanged\n")
         self.assertFalse((self.root / ".aispa/active.json").exists())
 
     def test_context_receipts_and_derived_memory_are_current(self):
         self.init()
         result = self.call("decision", "Use standard library")
         self.assertNotIn("requirements", result)
-        self.assertIn("Use standard library", (self.root / ".aispa/context/decisions.md").read_text())
+        self.assertIn("Use standard library", (self.root / ".aispa/context/decisions.md").read_text(encoding="utf-8"))
         result = self.call("context", "--kind", "coverage", "--write")
         self.assertNotIn("briefs", result)
-        packet = json.loads(Path(result["absolutePath"]).read_text())
+        packet = json.loads(Path(result["absolutePath"]).read_text(encoding="utf-8"))
         self.assertEqual(packet["basis"], result["basis"])
-        self.assertLessEqual(len((self.root / ".aispa/context/memory.md").read_text()), 8000)
+        self.assertLessEqual(len((self.root / ".aispa/context/memory.md").read_text(encoding="utf-8")), 8000)
 
     def test_init_rejects_ignore_directory_before_switching_active_run(self):
         (self.root / ".gitignore").mkdir()
@@ -130,7 +130,7 @@ class CliTests(unittest.TestCase):
         self.call("brief", "--file", self.input("Эту команду больше не нужно делать"))
         self.call("carry", item["id"], "--action", "drop", "--brief", "B002", "--quote", "Эту команду больше не нужно делать")
         self.assertEqual(self.call("memory")["items"][0]["status"], "dropped")
-        self.assertIn("Команда", (self.root / ".aispa/context/carryover.md").read_text())
+        self.assertIn("Команда", (self.root / ".aispa/context/carryover.md").read_text(encoding="utf-8"))
 
     def test_empty_finish_fails_with_nonzero_exit(self):
         self.init()
@@ -142,7 +142,7 @@ class CliTests(unittest.TestCase):
         shutil.copytree(PACKAGE, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         cli = copy / "tools/aispa.py"
         self.init(cli)
-        (copy / "assets/dashboard.html").write_text("changed template")
+        (copy / "assets/dashboard.html").write_text("changed template", encoding="utf-8", newline="\n")
         self.call("decision", "Новая запись", cli=cli, expected=2)
         pinned = self.run / "runtime/tools/aispa.py"
         self.call("decision", "Новая запись", cli=pinned)
@@ -215,7 +215,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(state["status"], "accepted")
         self.assertTrue(state["gates"]["acceptance"])
         with self.server() as url:
-            (self.root / "app.py").write_text("print('changed after delivery')\n")
+            (self.root / "app.py").write_text("print('changed after delivery')\n", encoding="utf-8", newline="\n")
             with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
                 self.assertEqual(json.load(response)["status"], "stale")
 
@@ -227,7 +227,7 @@ class CliTests(unittest.TestCase):
             with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
                 self.assertEqual(json.load(response)["status"], "running")
             journal = self.run / "events.jsonl"
-            journal.write_text(journal.read_text().replace('"running"', '"accepted"'))
+            journal.write_text(journal.read_text(encoding="utf-8").replace('"running"', '"accepted"'), encoding="utf-8", newline="\n")
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5)
             self.assertEqual(error.exception.code, 409)
@@ -238,7 +238,7 @@ class CliTests(unittest.TestCase):
         with self.server() as url:
             process = subprocess.Popen([sys.executable, "-B", str(CLI), "--root", str(self.root),
                                         "verify", "--", sys.executable, "-c", "import time; time.sleep(2); print('checked')"],
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
             try:
                 seen = False
                 for _ in range(40):

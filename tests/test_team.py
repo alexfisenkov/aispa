@@ -18,7 +18,7 @@ class Host:
 
     @staticmethod
     def read_input(path):
-        return Path(path).read_text()
+        return Path(path).read_text(encoding="utf-8")
 
     def running(self):
         require(self.s["status"] == "running", "not running")
@@ -46,9 +46,9 @@ class TeamTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.root = self.home / "project"
         self.root.mkdir()
-        (self.root / ".gitignore").write_text(".aispa/\n")
-        (self.root / "a.txt").write_text("a")
-        (self.root / "b.txt").write_text("b")
+        (self.root / ".gitignore").write_text(".aispa/\n", encoding="utf-8", newline="\n")
+        (self.root / "a.txt").write_text("a", encoding="utf-8", newline="\n")
+        (self.root / "b.txt").write_text("b", encoding="utf-8", newline="\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")):
             subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, check=True)
         self.store = Journal(self.root)
@@ -99,7 +99,7 @@ class TeamTests(unittest.TestCase):
         value.update(extra)
         self.serial += 1
         path = self.home / ("report-" + str(self.serial) + ".json")
-        path.write_text(json.dumps(value))
+        path.write_text(json.dumps(value), encoding="utf-8", newline="\n")
         return path
 
     def reviews(self, tid="T01", fail_first=False):
@@ -107,7 +107,7 @@ class TeamTests(unittest.TestCase):
         findings = [{"id": "F1", "severity": "blocking", "text": "Fix fixture", "criterion": self.host.task(tid)["criteria"][0]}] if fail_first else []
         self.team.review(tid, 1, self.report(tid, "critic1", findings=findings))
         if fail_first:
-            (self.root / self.host.task(tid)["zones"][0]).write_text("fixed")
+            (self.root / self.host.task(tid)["zones"][0]).write_text("fixed", encoding="utf-8", newline="\n")
             self.verify(tid)
             first = self.attempt(tid)["rounds"][0]
             self.team.repair(tid, self.report(tid, "worker", previousReport=first["report"]["sha256"], addresses=["F1"]))
@@ -161,7 +161,7 @@ class TeamTests(unittest.TestCase):
         self.assertNotEqual(original, replacement)
         self.assertEqual(self.attempt()["writers"], [original, replacement])
         self.assertEqual(self.attempt()["submitted"]["actor"], original)
-        (self.root / "a.txt").write_text("repaired by replacement")
+        (self.root / "a.txt").write_text("repaired by replacement", encoding="utf-8", newline="\n")
         self.verify()
         first = self.attempt()["rounds"][0]
         self.team.repair("T01", self.report(previousReport=first["report"]["sha256"], addresses=["F1"]))
@@ -186,7 +186,7 @@ class TeamTests(unittest.TestCase):
         self.complete()
         source_path = self.store.run / self.state["spec"]["file"]
         original = source_path.read_bytes()
-        source_path.write_text("tampered source")
+        source_path.write_text("tampered source", encoding="utf-8", newline="\n")
         self.assertFalse(historical_proof_valid(self.store, self.state, "T01"))
         source_path.write_bytes(original)
         source = self.store.artifact("briefs", b"Repeat A with the new agreed change.\n", ".md")
@@ -196,7 +196,7 @@ class TeamTests(unittest.TestCase):
         self.complete()
         self.assertTrue(historical_proof_valid(self.store, self.state, "T01"))
         auth = self.attempt()["authorization"]["record"]
-        (self.store.run / auth["file"]).write_text("tampered owner decision")
+        (self.store.run / auth["file"]).write_text("tampered owner decision", encoding="utf-8", newline="\n")
         self.assertFalse(historical_proof_valid(self.store, self.state, "T01"))
         self.assertFalse(direct_proof_current(self.store, self.state, "T01"))
 
@@ -205,7 +205,7 @@ class TeamTests(unittest.TestCase):
         self.team.prepare()
         self.assertEqual(before, self.attempt()["roles"])
         path = self.home / "team.json"
-        path.write_text(json.dumps({"tasks": {"T01": {"critic1": {"specialization": "Privacy expert", "checks": ["Specific risk checked"]}}}}))
+        path.write_text(json.dumps({"tasks": {"T01": {"critic1": {"specialization": "Privacy expert", "checks": ["Specific risk checked"]}}}}), encoding="utf-8", newline="\n")
         self.team.team(path)
         card = self.attempt()["roles"]["critic1"]
         self.assertIn("Specific risk checked", card["checks"])
@@ -313,10 +313,10 @@ class TeamTests(unittest.TestCase):
 
     def test_sibling_change_preserves_proof_own_change_invalidates(self):
         self.complete()
-        (self.root / "b.txt").write_text("independent edit")
+        (self.root / "b.txt").write_text("independent edit", encoding="utf-8", newline="\n")
         self.verify("T02")
         self.assertTrue(direct_proof_current(self.store, self.state, "T01"))
-        (self.root / "a.txt").write_text("own edit")
+        (self.root / "a.txt").write_text("own edit", encoding="utf-8", newline="\n")
         self.assertFalse(direct_proof_current(self.store, self.state, "T01"))
         self.assertTrue(historical_proof_valid(self.store, self.state, "T01"))
 
@@ -326,7 +326,7 @@ class TeamTests(unittest.TestCase):
         self.team.prepare()
         self.complete()
         self.start("T02")
-        (self.root / "a.txt").write_text("intentional descendant integration")
+        (self.root / "a.txt").write_text("intentional descendant integration", encoding="utf-8", newline="\n")
         self.verify("T02")
         self.reviews("T02")
         self.assertTrue(self.accept("T02"))
@@ -354,7 +354,7 @@ class TeamTests(unittest.TestCase):
     def test_artifact_tamper_invalidates_full_history(self):
         self.complete()
         first = self.attempt()["rounds"][0]["report"]
-        (self.store.run / first["file"]).write_text("tampered")
+        (self.store.run / first["file"]).write_text("tampered", encoding="utf-8", newline="\n")
         self.assertFalse(historical_proof_valid(self.store, self.state, "T01"))
         self.assertFalse(task_proof_valid(self.store, self.state, "T01"))
 
@@ -362,7 +362,7 @@ class TeamTests(unittest.TestCase):
         self.start()
         self.reviews()
         submitted = self.attempt()["submitted"]["report"]
-        (self.store.run / submitted["file"]).write_text("tampered")
+        (self.store.run / submitted["file"]).write_text("tampered", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             self.accept()
         self.assertEqual(self.host.task("T01")["status"], "running")
@@ -370,7 +370,7 @@ class TeamTests(unittest.TestCase):
     def test_code_change_after_second_critic_cannot_skip_third_round_rule(self):
         self.start()
         self.reviews()
-        (self.root / "a.txt").write_text("changed after reviews")
+        (self.root / "a.txt").write_text("changed after reviews", encoding="utf-8", newline="\n")
         self.verify()
         with self.assertRaises(Invalid):
             self.accept()

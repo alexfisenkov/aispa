@@ -24,8 +24,8 @@ class StorageTests(unittest.TestCase):
 
     def repository(self):
         self.git("init", "-q")
-        (self.root / ".gitignore").write_text(".aispa/\ncache/\n")
-        (self.root / "app.py").write_text("print('example')\n")
+        (self.root / ".gitignore").write_text(".aispa/\ncache/\n", encoding="utf-8", newline="\n")
+        (self.root / "app.py").write_text("print('example')\n", encoding="utf-8", newline="\n")
         self.git("add", ".gitignore", "app.py")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                  "commit", "-qm", "fixture")
@@ -62,7 +62,7 @@ class StorageTests(unittest.TestCase):
         self.repository()
         before = self.store.code(["./app.py"])
         self.assertEqual(before, self.store.code(["app.py"]))
-        (self.root / "app.py").write_text("print('changed')\n")
+        (self.root / "app.py").write_text("print('changed')\n", encoding="utf-8", newline="\n")
         self.assertNotEqual(before, self.store.code(["./app.py"]))
         for zone in ("./.aispa/context", "./.git/config", "src/../app.py"):
             with self.subTest(zone=zone), self.assertRaises(Invalid):
@@ -78,13 +78,13 @@ class StorageTests(unittest.TestCase):
     def test_history_corruption_is_rejected(self):
         self.store.create("example", "Пример")
         path = self.store.run / "events.jsonl"
-        path.write_text(path.read_text().replace('"running"', '"accepted"'))
+        path.write_text(path.read_text(encoding="utf-8").replace('"running"', '"accepted"'), encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             self.store.load()
 
     def test_partial_history_is_rejected(self):
         self.store.create("example", "Пример")
-        with (self.store.run / "events.jsonl").open("a") as stream:
+        with (self.store.run / "events.jsonl").open("a", encoding="utf-8", newline="\n") as stream:
             stream.write('{"sequence":')
         with self.assertRaises(Invalid):
             self.store.load()
@@ -94,7 +94,7 @@ class StorageTests(unittest.TestCase):
         artifact = self.store.artifact("briefs", "Исходное требование".encode(), ".md")
         state["briefs"].append(dict(artifact, id="B01"))
         self.store.append(state, "brief")
-        (self.store.run / artifact["file"]).write_text("Другой текст")
+        (self.store.run / artifact["file"]).write_text("Другой текст", encoding="utf-8", newline="\n")
         with self.assertRaises(Invalid):
             self.store.load()
 
@@ -119,7 +119,7 @@ class StorageTests(unittest.TestCase):
     def test_code_hash_tracks_edits_deletes_and_untracked_files(self):
         self.repository()
         baseline = self.store.code()
-        (self.root / "new file.py").write_text("# new\n")
+        (self.root / "new file.py").write_text("# new\n", encoding="utf-8", newline="\n")
         self.assertNotEqual(baseline, self.store.code())
         (self.root / "new file.py").unlink()
         self.assertEqual(baseline, self.store.code())
@@ -131,7 +131,7 @@ class StorageTests(unittest.TestCase):
         baseline = self.store.code()
         self.store.create("example", "Пример")
         (self.root / "cache").mkdir()
-        (self.root / "cache/file").write_text("derived")
+        (self.root / "cache/file").write_text("derived", encoding="utf-8", newline="\n")
         self.assertEqual(baseline, self.store.code())
         self.assertTrue(self.store.clean())
 

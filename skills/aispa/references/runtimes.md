@@ -1,4 +1,4 @@
-# Codex, Claude Code, Cursor · 0.1.0-alpha.4
+# Codex, Claude Code, Cursor · 0.1.0-alpha.5
 
 Один пакет aispa используется целиком. Команды модели берутся из доступного
 реестра конкретной сессии: файл инструкции не подтверждает наличие инструмента.
@@ -70,7 +70,44 @@ Python 3.11+ и Git нужны движку. После init продолжай 
 
 Во всех средах обязательны изучение проекта перед планом, чтение переданной
 истории, два критика и отдельный приёмщик. Для финала нужен чистый Git-клон
-и первоначальные blind-наблюдения. Новый clean-clone исполнитель подтверждён
-автоматическими POSIX-тестами; Windows пока не поддерживается. Клон не является
+и первоначальные blind-наблюдения. Clean-clone имеет отдельные нативные пути
+POSIX и Windows; результат каждого подтверждает соответствующая строка CI. Клон не является
 сетевой/файловой песочницей. Выбор model tier — рекомендация; доступность
 конкретной модели и фактические usage-метрики задаёт среда.
+
+## Нативная Windows · alpha.5
+
+Нужны CPython 3.11+ и Git for Windows. Используй python.exe или py -3,
+доступные в текущей среде; скрипт сам выдаёт JSON/ошибки в UTF-8 и принимает
+UTF-8 с BOM на внешней границе ввода. PowerShell5 перенаправлением `>` создаёт
+UTF-16: сохраняй JSON/бриф через WriteAllText с UTF8Encoding либо PowerShell7.
+
+```powershell
+$Python = (py -3 -X utf8 -c "import sys; print(sys.executable)").Trim()
+$Skill = 'C:\Work\Project\.agents\skills\aispa\tools\aispa.py'
+& $Python $Skill update-check
+```
+
+После init используй закреплённый runtime. Чистая проверка запускает команду
+в клоне: `.venv\Scripts\python.exe` допустим как clone-relative executable.
+Создай venv и установи зависимости внутри клона, не используй source/.venv.
+Для npm.cmd/скрипта .bat указывай cmd.exe либо PowerShell явно: shell не
+подставляется молча. SystemRoot сохраняется, user HOME/AppData/TEMP изолированы.
+
+```powershell
+& $Python $Skill --root 'C:\Work\Project' clean-prepare
+& $Python $Skill --root 'C:\Work\Project' clean-verify -- $Python -m venv .venv
+& $Python $Skill --root 'C:\Work\Project' clean-verify -- '.venv\Scripts\python.exe' -m pip install --require-hashes -r requirements.lock
+& $Python $Skill --root 'C:\Work\Project' clean-verify -- '.venv\Scripts\python.exe' -m unittest discover -s tests -v
+```
+
+В примере `$Skill` уже должен указывать на runtime текущего прогона. Каждая
+команда должна завершиться с кодом 0; установка не заменяет финальный тест.
+Пути в JSON zones/readZones и артефактах всегда относительные с `/`, не
+`C:folder` и не `\folder`. Junctions и подмены управляемых каталогов запрещены.
+
+Git LF/CRLF учитывается только как точная нормализация текстовых окончаний
+строк; изменение содержимого, binary/-text, индекса и untracked файлов не
+маскируется. Tracked symlinks, submodules, внешние Git-фильтры/encoding/ident
+и Git SHA-256 repositories пока отклоняются. Это не sandbox; полная изоляция
+системных пакетов и сетевые/нестандартные файловые системы не заявляются.
