@@ -21,6 +21,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Contract tests
         run: python -m unittest discover -s tests -v
+      - name: Study-plan pilot example tests
+        working-directory: examples/study-plan
+        run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests
         if: matrix.python == '3.13'
         run: node --test tests/dashboard.test.cjs

@@ -1,0 +1,4 @@
+.aispa/
+__pycache__/
+*.pyc
+.venv/

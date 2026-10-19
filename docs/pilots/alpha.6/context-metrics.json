@@ -1,0 +1,427 @@
+{
+  "schema": 1,
+  "skillVersion": "0.1.0-alpha.6",
+  "skillCommit": "2f2d1eb5184f3aae629f5d074bae6275072f6679",
+  "runtime": "Codex on macOS",
+  "date": "2026-10-19",
+  "measurement": "Native token_usage_record usage per unique response_id; cached subset of input; output includes reasoning",
+  "comparisonScope": "Cold restoration of one frozen two-wave project snapshot, not the complete development cycle or money",
+  "repetitionsPerArm": 2,
+  "questionsPerTrial": 12,
+  "readCallsPerTrial": 5,
+  "mandatoryCommonPayloadBytes": 26475,
+  "excludedCalibrations": {
+    "count": 5,
+    "reason": "Large single-read delivery did not allow reliable complete answers; all calibration arms excluded before fixed-chunk comparison",
+    "modelRequests": 12,
+    "totals": {
+      "input_tokens": 721177,
+      "cached_input_tokens": 500736,
+      "output_tokens": 1948,
+      "reasoning_output_tokens": 671,
+      "total_tokens": 723125
+    }
+  },
+  "metadataGenerationDedicatedModelCalls": 0,
+  "trials": [
+    {
+      "trial": "a1",
+      "arm": "a",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 74573,
+      "payloadSha256": "99eb60ced350e9b8d24e1e110d858a200a8d1244e70db41f52407e6354ec6420",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54309,
+      "postReadInputTokens": 70873,
+      "input_tokens": 375105,
+      "cached_input_tokens": 319232,
+      "output_tokens": 653,
+      "reasoning_output_tokens": 62,
+      "total_tokens": 375758,
+      "nativeUsageArtifactSha256": "41a86277e43ccd1166d54d91e08283b5d5fb5aefbeda1788402389777d79a55e"
+    },
+    {
+      "trial": "b1",
+      "arm": "b",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 80438,
+      "payloadSha256": "cb35b86f896199fb4eac1b58f6bf74c511000ae59c1096028415a2e385aabec6",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54279,
+      "postReadInputTokens": 73442,
+      "input_tokens": 382889,
+      "cached_input_tokens": 362240,
+      "output_tokens": 622,
+      "reasoning_output_tokens": 34,
+      "total_tokens": 383511,
+      "nativeUsageArtifactSha256": "daaa522c6d0a7799f5551d0b9329aa1058dc7664536e04289a9a67e0675d871c"
+    },
+    {
+      "trial": "c1",
+      "arm": "c",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 54785,
+      "payloadSha256": "9bfc1fedd4cbfbedb1288a8fe41260508255554e07206551fa490268141bdc90",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54248,
+      "postReadInputTokens": 67672,
+      "input_tokens": 365501,
+      "cached_input_tokens": 350720,
+      "output_tokens": 649,
+      "reasoning_output_tokens": 59,
+      "total_tokens": 366150,
+      "nativeUsageArtifactSha256": "6bfab635418038331d9452bf3c3f1aa549600ccabdb8356bffa5e7b8015ff862"
+    },
+    {
+      "trial": "c2",
+      "arm": "c",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 54785,
+      "payloadSha256": "9bfc1fedd4cbfbedb1288a8fe41260508255554e07206551fa490268141bdc90",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54275,
+      "postReadInputTokens": 67736,
+      "input_tokens": 365841,
+      "cached_input_tokens": 312960,
+      "output_tokens": 624,
+      "reasoning_output_tokens": 31,
+      "total_tokens": 366465,
+      "nativeUsageArtifactSha256": "2deab50787f1a150012e9b5972f66bad78783ce8391f22cbd5f2ec833b3eca0b"
+    },
+    {
+      "trial": "b2",
+      "arm": "b",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 80438,
+      "payloadSha256": "cb35b86f896199fb4eac1b58f6bf74c511000ae59c1096028415a2e385aabec6",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54313,
+      "postReadInputTokens": 73488,
+      "input_tokens": 383159,
+      "cached_input_tokens": 266880,
+      "output_tokens": 637,
+      "reasoning_output_tokens": 45,
+      "total_tokens": 383796,
+      "nativeUsageArtifactSha256": "3748dd4dc34b8fa96ac15ae57efbfe2af699bd9074bf1818cf3c9e802f0a30fc"
+    },
+    {
+      "trial": "a2",
+      "arm": "a",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 74573,
+      "payloadSha256": "99eb60ced350e9b8d24e1e110d858a200a8d1244e70db41f52407e6354ec6420",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54248,
+      "postReadInputTokens": 70757,
+      "input_tokens": 374484,
+      "cached_input_tokens": 318720,
+      "output_tokens": 599,
+      "reasoning_output_tokens": 12,
+      "total_tokens": 375083,
+      "nativeUsageArtifactSha256": "0108d3e904feb077e2a6470e833e99ab6c03f5270a23428c2cdae61f81118b87"
+    }
+  ],
+  "summary": {
+    "a": {
+      "payloadBytes": 74573,
+      "firstInputTokens": 54278.5,
+      "postReadInputTokens": 70815,
+      "input_tokens": 374794.5,
+      "cached_input_tokens": 318976,
+      "output_tokens": 626,
+      "reasoning_output_tokens": 37,
+      "modelRequests": 6,
+      "factsCorrect": 24,
+      "factsTotal": 24,
+      "inputRange": [
+        374484,
+        375105
+      ]
+    },
+    "b": {
+      "payloadBytes": 80438,
+      "firstInputTokens": 54296,
+      "postReadInputTokens": 73465,
+      "input_tokens": 383024,
+      "cached_input_tokens": 314560,
+      "output_tokens": 629.5,
+      "reasoning_output_tokens": 39.5,
+      "modelRequests": 6,
+      "factsCorrect": 24,
+      "factsTotal": 24,
+      "inputRange": [
+        382889,
+        383159
+      ],
+      "inputChangeVsA": 2.1957365969884846,
+      "postReadChangeVsA": 3.7421450257713706,
+      "payloadChangeVsA": 7.864776795891282
+    },
+    "c": {
+      "payloadBytes": 54785,
+      "firstInputTokens": 54261.5,
+      "postReadInputTokens": 67704,
+      "input_tokens": 365671,
+      "cached_input_tokens": 331840,
+      "output_tokens": 636.5,
+      "reasoning_output_tokens": 45,
+      "modelRequests": 6,
+      "factsCorrect": 24,
+      "factsTotal": 24,
+      "inputRange": [
+        365501,
+        365841
+      ],
+      "inputChangeVsA": -2.434267311820215,
+      "postReadChangeVsA": -4.393137047235751,
+      "payloadChangeVsA": -26.535073015702736
+    }
+  },
+  "limitations": [
+    "One small synthetic project; two repeats per arm.",
+    "Fixed platform context about 54k input tokens per fresh agent.",
+    "Cache variation is not attributed to the skill and is not converted to financial savings.",
+    "Project and experimental harness authoring costs excluded from comparative effect.",
+    "Complete raw traces kept locally; no conversation transcripts or machine paths published."
+  ]
+}
