@@ -15,7 +15,7 @@ from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
-from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind
+from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -56,6 +56,14 @@ def parser():
     discover.add_argument("--include", action="append", help="Дополнительный безопасный исходник; можно повторять")
     sub.add_parser("discovery")
     sub.add_parser("memory")
+    documents = sub.add_parser("documents")
+    documents.add_argument("--refresh", action="store_true", help="Обновить описания изменённых зарегистрированных источников")
+    documents.add_argument("--path", action="append", help="Показать выбранный путь; можно повторять")
+    document = sub.add_parser("document")
+    document.add_argument("--path", required=True)
+    document.add_argument("--sha256", help="Ожидаемый SHA-256 прочитанного файла; обязателен для --summary и --write-header")
+    document.add_argument("--summary", help="Краткое описание, привязанное к текущему содержимому")
+    document.add_argument("--write-header", action="store_true", help="Записать YAML только в совместимый Markdown с проверкой SHA-256")
     carried = sub.add_parser("carry")
     carried.add_argument("id"); carried.add_argument("--action", dest="carry_action", required=True, choices=("keep", "map", "resolve", "drop", "defer"))
     carried.add_argument("--requirement"); carried.add_argument("--brief"); carried.add_argument("--quote")
@@ -172,7 +180,8 @@ def execute(args):
             print(json.dumps(publish(store, state), ensure_ascii=False, indent=2))
             return 0
         state = store.load()
-        if args.action not in ("status", "context", "memory", "discovery") and state.get("runtimeDigest") != runtime_digest():
+        read_only = args.action in ("status", "context", "memory", "discovery") or (args.action == "documents" and not args.refresh)
+        if not read_only and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
         flow = Workflow(store, state)
         ok = True
@@ -201,10 +210,12 @@ def execute(args):
                 receipt = discovery.record(store, state, json.loads(flow.read_input(args.file)))
                 flow.save("project-discovery-recorded")
             else:
-                evidence = discovery.collect(store, state, paths=args.include)
+                metadata_receipt = {}
+                evidence = discovery.collect(store, state, paths=args.include, metadata_receipt=metadata_receipt)
                 receipt = {"collection": state["discoveryCollection"],
                            "absolutePath": str(store.run / state["discoveryCollection"]["file"]),
-                           "sourceCount": len(evidence["sources"]), "omitted": evidence["omitted"]}
+                           "sourceCount": len(evidence["sources"]), "omitted": evidence["omitted"],
+                           "documentRegistration": metadata_receipt}
                 flow.save("project-discovery-collected")
         elif action == "discovery":
             print(json.dumps(discovery.view(store, state), ensure_ascii=False, indent=2))
@@ -212,6 +223,20 @@ def execute(args):
         elif action == "memory":
             print(json.dumps(carryover.view(store, state), ensure_ascii=False, indent=2))
             return 0
+        elif action == "documents":
+            if args.refresh:
+                flow.running()
+                receipt = docmeta.refresh(store, state, paths=args.path)
+                flow.save("document-metadata-refreshed")
+                receipt = {"refresh": receipt, "catalog": docmeta.catalog(store, state, paths=args.path)}
+            else:
+                print(json.dumps(docmeta.catalog(store, state, paths=args.path), ensure_ascii=False, indent=2))
+                return 0
+        elif action == "document":
+            flow.running()
+            receipt = docmeta.register(store, state, args.path, expected_sha256=args.sha256,
+                                       summary=args.summary, write_header=args.write_header)
+            flow.save("document-metadata-registered")
         elif action == "carry":
             receipt = carryover.decide(store, state, args.id, args.carry_action, current_requirement=args.requirement,
                                        brief=args.brief, quote=args.quote)

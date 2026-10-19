@@ -2,7 +2,9 @@
 import json
 
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
-from .store import timestamp
+from .store import timestamp, common_input
+from .portable import match_name
+from . import docmeta
 
 MAX_PACKET_BYTES = 16000
 
@@ -51,6 +53,14 @@ def build(store, state, pipeline, kind, task_id=None, role=None):
               "tasks": [dict(definition(t), status=t["status"]) for t in selected],
               "verification": state["verification"], "projectContext": state.get("projectContext"),
               "discovery": state.get("discovery"), "carryover": state.get("carryover")}
+    document_paths = None
+    if kind == "task":
+        zones = {match_name(zone) for task in selected for zone in task["zones"] + task.get("readZones", [])}
+        document_paths = [name for name in state.get("documents", {})
+                          if common_input(name) or any(zone == "." or match_name(name) == zone
+                             or match_name(name).startswith(zone + "/") for zone in zones)]
+    packet["documentCatalog"] = docmeta.catalog(store, state, paths=document_paths)
+    packet["documentReadingRule"] = "Catalog summaries select relevant files; stale summaries are withheld. Original briefs, constraints and every required check remain mandatory. Read source bodies for decisions and evidence."
     if kind == "task":
         current = state["taskHistory"][task_id][-1]
         task = next(t for t in selected if t["id"] == task_id)

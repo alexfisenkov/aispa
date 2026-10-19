@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from .store import Invalid, digest
 from .portable import is_link, relative_name
-from . import carryover
+from . import carryover, docmeta
 
 
 RUNTIMES = ("codex", "claude-code", "cursor")
@@ -31,7 +31,18 @@ POINTER = BEGIN + b"\n" + (
 CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\n\n".encode()
                + POINTER + b"\n")
 VIEWS = ("INDEX.md", "brief.md", "spec.md", "plan.md", "decisions.md", "progress.md",
-         "memory.md", "requirements.json", "project-study.md", "carryover.md", "source-map.json")
+         "memory.md", "requirements.json", "project-study.md", "carryover.md", "documents.yaml", "source-map.json")
+VIEW_SUMMARIES = {
+    "INDEX.md": "Навигация по контексту, правила чтения и карта существующих файлов проекта.",
+    "brief.md": "Точный текст сохранённых брифов владельца и ссылки на неизменные оригиналы.",
+    "spec.md": "Текущая спецификация и ссылка на её неизменный источник, либо отметка об отсутствии.",
+    "plan.md": "Текущие задачи, зависимости, зоны, критерии и ссылка на исходный план.",
+    "decisions.md": "Записанные решения агента и владельца, включая изменения объёма требований.",
+    "progress.md": "Текущие статусы, блокеры, следующие действия, роли, участники и попытки задач.",
+    "memory.md": "Краткая ориентация в текущем прогоне и ссылки на полные источники и остатки.",
+    "project-study.md": "Сохранённое изучение проекта, источники исследования и ограничения его свежести.",
+    "carryover.md": "Происхождение истории, решений и незакрытых обязательств прошлых прогонов.",
+}
 SKIP_DIRS = {"node_modules", "vendor", "dist", "build", "coverage", "__pycache__",
              "tests", "test", "fixtures", "fixture", "history", "archive", "archives"}
 MANIFESTS = {"package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile",
@@ -325,7 +336,12 @@ def refresh(store, state):
              "- [Бриф](brief.md), [требования](requirements.json), [спецификация](spec.md).\n"
              "- [План](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
              "- [Изучение проекта](project-study.md), [память между прогонами](carryover.md).\n"
+             "- [Краткий каталог документов](documents.yaml): назначение, ссылки и свежесть.\n"
              "- [Происхождение и свежесть](source-map.json).\n\n"
+             "YAML-заголовки и каталог помогают выбрать нужный файл; они не заменяют его чтение.\n"
+             "Перед использованием каталога проверьте текущие хеши командой documents; устаревшее резюме не используйте.\n"
+             "После изменения источника обновите его описание через document или documents --refresh.\n"
+             "Бриф, требования и обязательные проверки читайте полностью по их точным источникам.\n\n"
              "Правки этих файлов не меняют канон и будут заменены при обновлении.\n"
              "Не объявляйте проверки пройденными по статусам этого представления.\n\n"
              "## Фактическая карта проекта\n\n" + _block(found))
@@ -341,6 +357,8 @@ def refresh(store, state):
               "Сжатие памяти не удаляет канонические записи.\n\n"
               "Прошлые прогоны: [история и остатки](carryover.md); незакрытых пунктов: " + str(inherited["summary"]["outstanding"]) + ".\n"
               "Архитектура, команды и неизвестное: [изучение проекта](project-study.md).\n\n"
+              "Для адресного чтения: [каталог документов](documents.yaml); актуальность проверяет documents.\n"
+              "Каталог и YAML — навигация, а не доказательство выполнения требований.\n\n"
               "Требований: " + str(len(state.get("requirements", []))) + "; задач: " + str(len(state.get("tasks", []))) +
               "; решений агента: " + str(len(state.get("notes", []))) + ".\n\n"
               "Следующие действия (до 8; весь список в progress.md):\n" +
@@ -348,12 +366,25 @@ def refresh(store, state):
               "Блокеры (до 5; все в progress.md):\n" +
               ("\n".join("- " + short(x) for x in blockers[:5]) or "- Нет записанных блокеров задач.") +
               "\nОжидание: " + short(state.get("waiting")) + "\n")
-    if len(memory) > MEMORY_LIMIT:
-        raise Invalid("AISpa context: краткая память превысила установленный предел")
     content = {"INDEX.md": index, "brief.md": brief, "spec.md": spec, "plan.md": plan,
                "decisions.md": "# Решения\n\n" + lead + _block(decisions), "progress.md": progress,
                "memory.md": memory, "requirements.json": _json({"run": state["run"], "requirements": state.get("requirements", [])})}
     content.update({"project-study.md": study, "carryover.md": carry_text})
+    for name, summary in VIEW_SUMMARIES.items():
+        content[name] = docmeta.render(content[name], kind="derived-context", summary=summary)
+    if len(content["memory.md"]) > MEMORY_LIMIT:
+        raise Invalid("AISpa context: краткая память вместе с YAML превысила установленный предел")
+    documents = docmeta.catalog(store, state)
+    # These immutable sources have already been checked by _source. Do not
+    # mutate state here: refresh derives views after the event was committed.
+    canonical = [{"path": row["file"], "kind": row["kind"], "sourceSha256": row["sha256"],
+                  "status": "fresh", "immutable": True}
+                 for row in sources if row["kind"] in ("brief", "spec")]
+    documents.update(canonicalSources=canonical[:32], canonicalSourceCount=len(canonical),
+                     canonicalSourcesOmitted=max(0, len(canonical) - 32), derived=True,
+                     readingRule="Navigation only. Check live freshness with documents; read original briefs and required evidence in full.")
+    # JSON is a YAML 1.2 subset; no parser dependency is needed for this view.
+    content["documents.yaml"] = _json(documents)
     source_map = {"schema": 1, "derived": True, "run": state["run"], "runtime": runtime,
                   "stateDigest": digest(state), "journal": journal, "sources": sources,
                   "inventory": found, "views": {name: hashlib.sha256(text.encode()).hexdigest() for name, text in content.items()}}

@@ -14,6 +14,7 @@ import tomllib
 
 from .store import Invalid, digest
 from .portable import is_link, relative_name
+from . import docmeta
 
 
 SCHEMA = 1
@@ -280,11 +281,19 @@ def _collection(store, state):
     return saved
 
 
-def collect(store, state, paths=None):
+def collect(store, state, paths=None, *, metadata_receipt=None):
     """Save/reuse bounded evidence; paths=None retains prior explicit includes.
 
     An explicit [] clears includes. Mutate state only, never execute or append.
+    metadata_receipt, when supplied, receives routing-index registration results;
+    those results do not change the saved discovery evidence or its basis.
     """
+    _require(metadata_receipt is None or isinstance(metadata_receipt, dict), "metadata_receipt должен быть объектом")
+    def index_documents(sources):
+        result = docmeta.collect_sources(store, state, sources)
+        if metadata_receipt is not None:
+            metadata_receipt.clear()
+            metadata_receipt.update(result)
     if paths is None and state.get("discoveryCollection"):
         paths = _collection(store, state).get("includedPaths", [])
     scan = _scan(store, paths)
@@ -293,11 +302,13 @@ def collect(store, state, paths=None):
         try:
             previous = _collection(store, state)
             if previous["basis"] == basis:
+                index_documents(previous["sources"])
                 return previous
         except (OSError, ValueError, TypeError):
             pass
     saved = {"schema": SCHEMA, "run": state["run"], "basis": basis, **scan}
     state["discoveryCollection"] = {**_artifact(store, saved), "basis": basis}
+    index_documents(saved["sources"])
     return saved
 
 
