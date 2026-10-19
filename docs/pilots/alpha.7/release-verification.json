@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "version": "0.1.0-alpha.7",
+  "commit": "5ea4a60e9f649f2ad26d1b6dbece9fb8f83f44fa",
+  "date": "2026-10-20",
+  "ci": {
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/39291562285",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "python (ubuntu-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (macos-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (windows-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (windows-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (macos-latest, 3.11)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "tests": {
+    "enginePerJob": 337,
+    "windows": {
+      "passed": 336,
+      "posixOnlySkipped": 1
+    },
+    "macosLinux": {
+      "passed": 318,
+      "windowsOnlySkipped": 19
+    },
+    "examplePerJob": 15,
+    "dashboardPerOsOnPython313": 25
+  },
+  "release": "https://github.com/alexfisenkov/aispa/releases/tag/v0.1.0-alpha.7",
+  "assetWorkflow": "https://github.com/alexfisenkov/aispa/actions/runs/39293356644",
+  "assetWorkflowConclusion": "success",
+  "downloadedAssetsMatchExactCommitPackage": true,
+  "assets": {
+    "aispa.zip": {
+      "bytes": 165472,
+      "sha256": "94044064ba456b83a3a3faa64ff90b26301ce79b4e961dfe9edef078d3eebf75"
+    },
+    "aispa-update.json": {
+      "bytes": 6509,
+      "sha256": "b6a42693c4704dbfe7eb4cc706cdf81082b3ca14f84ec8271d9bef1824c488dd"
+    }
+  },
+  "updateTest": {
+    "from": "0.1.0-alpha.6",
+    "to": "0.1.0-alpha.7",
+    "mainCommitBeforeReleaseDidNotOfferUpdate": true,
+    "installed": true,
+    "currentAfterInstall": true,
+    "rolledBack": true,
+    "fileCount": 35,
+    "environment": "isolated temporary package on macOS; not a global installation"
+  },
+  "browser": {
+    "viewportWidth": 634,
+    "demoBrandAndWaves": true,
+    "horizontalOverflow": false,
+    "engineHttpRepairToCritic2": true,
+    "pausedClocksFrozen": true,
+    "reports": "synthetic; not a native model repair pilot"
+  },
+  "remaining": [
+    "Physical phone acceptance",
+    "Native model repair after critic1 FAIL",
+    "Full Claude Code / Cursor / Windows-host model pilots",
+    "Larger project and unknown recovery questions"
+  ]
+}

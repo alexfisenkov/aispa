@@ -253,3 +253,20 @@ diff-check проверены отдельно.
 Финальная нативная матрица для этой версии и опубликованные ресурсы подтверждаются
 отдельно в Actions/Release. Физические телефоны, полный модельный repair после FAIL,
 Claude Code, Cursor и крупные проекты остаются открытыми испытаниями.
+
+Финальная матрица [39291562285](https://github.com/alexfisenkov/aispa/actions/runs/39291562285)
+для commit `5ea4a60e9f649f2ad26d1b6dbece9fb8f83f44fa` завершилась успешно:
+все шесть строк Windows/macOS/Linux × Python 3.11/3.13. В каждой строке
+337 тестов движка и 15 тестов примера; Windows — 336 PASS / 1 POSIX-only SKIP,
+macOS/Linux — 318 PASS / 19 Windows-only SKIP. По 25 JS-тестов прошли на каждой ОС.
+
+[Alpha.7](https://github.com/alexfisenkov/aispa/releases/tag/v0.1.0-alpha.7)
+опубликована из этого commit. Выпуск ресурсов
+[39293356644](https://github.com/alexfisenkov/aispa/actions/runs/39293356644) прошёл;
+скачанные ZIP и manifest побайтно совпали с воспроизводимой локальной сборкой.
+До публикации Release тестовая alpha.6 не предлагала обновление несмотря на
+новый main; после публикации прошли update-check, prepare, apply, current и
+rollback. Все 35 файлов установленного тестового пакета сверены по manifest.
+Установка и откат выполнялись только во временной копии на macOS.
+Численные свидетельства — [release-verification.json](pilots/alpha.7/release-verification.json).
+Эта запись дополняет историю после выпуска; код и тег проверенного пакета не менялись.

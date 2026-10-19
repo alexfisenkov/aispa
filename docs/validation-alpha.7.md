@@ -102,3 +102,9 @@ Cached input — часть input, а reasoning — часть output. Они п
 Локальные результаты, браузерная проверка и финальная матрица публикуются
 в [журнале изменений](changes.md). Успех на macOS не подтверждает Windows;
 результат CI относится только к указанному commit. Версия остаётся альфой.
+
+Итог выпуска: [матрица из шести строк](https://github.com/alexfisenkov/aispa/actions/runs/39291562285)
+для `5ea4a60` прошла, [alpha.7](https://github.com/alexfisenkov/aispa/releases/tag/v0.1.0-alpha.7)
+опубликована. Ресурсы совпали с точной локальной сборкой; обновление с alpha.6
+и откат проверены во временной копии. Машинная сводка:
+[release-verification.json](pilots/alpha.7/release-verification.json).
