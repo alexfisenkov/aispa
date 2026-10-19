@@ -11,6 +11,7 @@ import tempfile
 from urllib.parse import quote
 
 from .store import Invalid, digest
+from . import carryover
 
 
 RUNTIMES = ("codex", "claude-code", "cursor")
@@ -29,7 +30,7 @@ POINTER = BEGIN + b"\n" + (
 CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\n\n".encode()
                + POINTER + b"\n")
 VIEWS = ("INDEX.md", "brief.md", "spec.md", "plan.md", "decisions.md", "progress.md",
-         "memory.md", "requirements.json", "source-map.json")
+         "memory.md", "requirements.json", "project-study.md", "carryover.md", "source-map.json")
 SKIP_DIRS = {"node_modules", "vendor", "dist", "build", "coverage", "__pycache__",
              "tests", "test", "fixtures", "fixture", "history", "archive", "archives"}
 MANIFESTS = {"package.json", "pyproject.toml", "Cargo.toml", "go.mod", "Gemfile",
@@ -241,6 +242,8 @@ def _next(state):
     if not state.get("sealed"):
         return ["Сверить требования с брифом и зафиксировать обязательное ядро."]
     if not state.get("spec"):
+        if state.get("policy", {}).get("discovery") and not state.get("discovery"):
+            return ["Изучить проект через discover и сохранить наблюдения по источникам: discover --file."]
         return ["Подготовить спецификацию по действующему брифу."]
     if not state.get("tasks"):
         return ["Проверить покрытие брифа и записать план."]
@@ -292,11 +295,30 @@ def refresh(store, state):
             for role, artifact in attempt.get("roles", {}).items():
                 link, _ = _source(store, artifact, sources, "role")
                 progress += "- " + str(tid) + " / " + str(attempt.get("id")) + " / " + str(role) + ": " + link + "\n"
+    inherited = carryover.view(store, state)
+    carry_text = "# Память между прогонами\n\n" + lead
+    carry_text += "Историческая приёмка не подтверждает текущий код. Сохранённый остаток не добавляется в текущий объём молча.\n\n"
+    if inherited.get("handoff"):
+        link, _ = _source(store, inherited["handoff"], sources, "handoff")
+        carry_text += "Полные источники и происхождение: " + link + "\n\n"
+        for receipt in state["carryover"]["decisions"]:
+            _source(store, receipt, sources, "carryover-decision")
+    carry_text += _block({key: inherited[key] for key in ("summary", "items", "decisions", "runs")})
+    study = "# Изучение проекта\n\n" + lead
+    if state.get("discovery"):
+        link, text = _source(store, state["discovery"], sources, "discovery", read=True)
+        study += "Записанное исследование: " + link + "\n\n" + text + "\n"
+        link, _ = _source(store, state["discovery"]["collection"], sources, "discovery-collection")
+        study += "\nСобранные фрагменты и пропуски: " + link + "\n"
+        study += "\nЭто снимок изучения. Перед новым планом проверьте свежесть командой discovery.\n"
+    else:
+        study += "Исследование ещё не записано; инвентаризация имён его не заменяет.\n"
     found = inventory(store.root)
     index = ("# Контекст проекта AISpa\n\n" + lead +
              "Читайте [краткую память](memory.md), затем нужный документ:\n\n"
              "- [Бриф](brief.md), [требования](requirements.json), [спецификация](spec.md).\n"
              "- [План](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
+             "- [Изучение проекта](project-study.md), [память между прогонами](carryover.md).\n"
              "- [Происхождение и свежесть](source-map.json).\n\n"
              "Правки этих файлов не меняют канон и будут заменены при обновлении.\n"
              "Не объявляйте проверки пройденными по статусам этого представления.\n\n"
@@ -311,6 +333,8 @@ def refresh(store, state):
               "Полные данные: [бриф](brief.md), [спецификация](spec.md), [требования](requirements.json), "
               "[план](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
               "Сжатие памяти не удаляет канонические записи.\n\n"
+              "Прошлые прогоны: [история и остатки](carryover.md); незакрытых пунктов: " + str(inherited["summary"]["outstanding"]) + ".\n"
+              "Архитектура, команды и неизвестное: [изучение проекта](project-study.md).\n\n"
               "Требований: " + str(len(state.get("requirements", []))) + "; задач: " + str(len(state.get("tasks", []))) +
               "; решений агента: " + str(len(state.get("notes", []))) + ".\n\n"
               "Следующие действия (до 8; весь список в progress.md):\n" +
@@ -323,6 +347,7 @@ def refresh(store, state):
     content = {"INDEX.md": index, "brief.md": brief, "spec.md": spec, "plan.md": plan,
                "decisions.md": "# Решения\n\n" + lead + _block(decisions), "progress.md": progress,
                "memory.md": memory, "requirements.json": _json({"run": state["run"], "requirements": state.get("requirements", [])})}
+    content.update({"project-study.md": study, "carryover.md": carry_text})
     source_map = {"schema": 1, "derived": True, "run": state["run"], "runtime": runtime,
                   "stateDigest": digest(state), "journal": journal, "sources": sources,
                   "inventory": found, "views": {name: hashlib.sha256(text.encode()).hexdigest() for name, text in content.items()}}

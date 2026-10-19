@@ -12,9 +12,9 @@ from urllib.parse import urlsplit
 from aispa_core import VERSION
 from aispa_core.contracts import basis, active, task_closure
 from aispa_core.display import publish, project
-from aispa_core.store import Invalid, Journal, digest, file_hash
+from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.workflow import Workflow
-from aispa_core import project_context
+from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -46,10 +46,24 @@ def parser():
     for name in ("seal", "finish", "resume", "status"):
         sub.add_parser(name)
     ctx = sub.add_parser("context")
-    ctx.add_argument("--kind", choices=("coverage", "task", "wave", "acceptance"), required=True)
+    ctx.add_argument("--kind", choices=("coverage", "task", "wave", "acceptance", "blind"), required=True)
     ctx.add_argument("--task")
     ctx.add_argument("--role", choices=("worker", "critic1", "critic2", "acceptor"))
     ctx.add_argument("--write", action="store_true", help="Сохранить пакет контекста, вернуть только путь и basis")
+    discover = sub.add_parser("discover")
+    discover.add_argument("--file")
+    discover.add_argument("--include", action="append", help="Дополнительный безопасный исходник; можно повторять")
+    sub.add_parser("discovery")
+    sub.add_parser("memory")
+    carried = sub.add_parser("carry")
+    carried.add_argument("id"); carried.add_argument("--action", dest="carry_action", required=True, choices=("keep", "map", "resolve", "drop", "defer"))
+    carried.add_argument("--requirement"); carried.add_argument("--brief"); carried.add_argument("--quote")
+    sub.add_parser("clean-prepare")
+    sub.add_parser("blind").add_argument("--file", required=True)
+    clean = sub.add_parser("clean-verify")
+    clean.add_argument("--timeout", type=int, default=600)
+    clean.add_argument("command", nargs=argparse.REMAINDER)
+    sub.add_parser("usage").add_argument("--file")
     adapter = sub.add_parser("project-context")
     adapter.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
     sub.add_parser("context-refresh")
@@ -58,6 +72,7 @@ def parser():
     assignment.add_argument("--role", required=True, choices=("worker", "critic1", "critic2", "acceptor"))
     assignment.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
     assignment.add_argument("--native-id", required=True); assignment.add_argument("--session", required=True)
+    assignment.add_argument("--model", help="Фактический ID выбранной модели из среды, если она его сообщает")
     for name in ("submit", "repair"):
         action = sub.add_parser(name); action.add_argument("id"); action.add_argument("--file", required=True)
     critic = sub.add_parser("critic"); critic.add_argument("id"); critic.add_argument("--round", type=int, required=True, choices=(1, 2))
@@ -130,15 +145,22 @@ def execute(args):
     with store.lock():
         if args.action == "init":
             store.code()  # Require an actual Git root before creating a run.
-            if (store.root / ".gitignore").is_symlink():
-                raise Invalid(".gitignore не должен быть символической ссылкой; содержимое сохранено")
-            state = store.create(args.slug, args.title)
-            state["mode"], state["sealed"], state["core"] = args.mode, False, []
-            state["runtime"] = args.runtime
-            state["runtimeDigest"] = runtime_digest()
-            shutil.copytree(PACKAGE, store.run / "runtime", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-            shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
             ignore = store.root / ".gitignore"
+            if ignore.is_symlink() or ignore.exists() and not ignore.is_file():
+                raise Invalid(".gitignore должен быть обычным файлом; содержимое сохранено")
+            if (store.home / "dashboard.html").is_symlink():
+                raise Invalid("Дашборд не должен быть символической ссылкой")
+            inherited = carryover.capture(store, store.load(handoff_only=True)) if (store.home / "active.json").exists() else None
+            def initialize_run(state):
+                state["policy"] = {"discovery": True, "cleanClone": True}
+                state["mode"], state["sealed"], state["core"] = args.mode, False, []
+                state["runtime"] = args.runtime
+                state["runtimeDigest"] = runtime_digest()
+                if inherited is not None:
+                    carryover.attach(store, state, inherited)
+                shutil.copytree(PACKAGE, store.run / "runtime", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            state = store.create(args.slug, args.title, initializer=initialize_run)
+            shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
             previous = ignore.read_text() if ignore.exists() else ""
             if ".aispa/" not in previous.splitlines():
                 ignore.write_text(previous.rstrip("\n") + "\n.aispa/\n")
@@ -149,7 +171,7 @@ def execute(args):
             print(json.dumps(publish(store, state), ensure_ascii=False, indent=2))
             return 0
         state = store.load()
-        if args.action not in ("status", "context") and state.get("runtimeDigest") != runtime_digest():
+        if args.action not in ("status", "context", "memory", "discovery") and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
         flow = Workflow(store, state)
         ok = True
@@ -164,29 +186,65 @@ def execute(args):
         elif action == "scope":
             flow.scope(args.id, args.decision, args.brief, args.quote)
         elif action == "context":
-            selected = task_closure(state, args.task) if args.kind == "task" else state["tasks"]
-            req_ids = {rid for task in selected for rid in task["requirements"]}
-            reqs = [r for r in active(state) if args.kind != "task" or r["id"] in req_ids or r["kind"] == "constraint"]
-            packet = {"basis": basis(store, state, args.kind, args.task), "runDirectory": str(store.run),
-                      "briefs": state["briefs"], "requirements": reqs, "spec": state["spec"], "tasks": selected,
-                      "verification": state["verification"], "projectContext": state.get("projectContext")}
-            if args.kind == "task":
-                current = state["taskHistory"][args.task][-1]
-                packet.update(verification=current.get("verification"), attempt=current["id"], roles=current["roles"],
-                              actors=current["actors"], rounds=current["rounds"], repair=current.get("repair"),
-                              traceRequirements=flow.pipeline.trace_requirements(args.task),
-                              inheritedProofs=flow.pipeline.inherited_proofs(args.task),
-                              neighbors=[{"id": t["id"], "zones": t["zones"], "status": t["status"]}
-                                         for t in state["tasks"] if t["id"] != args.task])
-                if args.role:
-                    packet["expectedChecks"] = [{"requirement": rid, "criterion": criterion}
-                                                for rid, criterion in sorted(flow.pipeline.expected_checks(args.task, args.role))]
-            if args.write:
-                artifact = store.artifact("contexts", (json.dumps(packet, ensure_ascii=False, indent=2) + "\n").encode(), ".json")
-                print(json.dumps(dict(artifact, basis=packet["basis"], absolutePath=str(store.run / artifact["file"])), ensure_ascii=False))
-            else:
-                print(json.dumps(packet, ensure_ascii=False, indent=2))
+            if args.kind == "acceptance" and state.get("policy", {}).get("cleanClone") and not blind.valid(store, state):
+                raise Invalid("Сначала сохраните независимые наблюдения: context --kind blind, затем blind --file")
+            if args.kind == "blind":
+                if not cleanroom.current(store, state):
+                    raise Invalid("Сначала подготовьте актуальный чистый клон: clean-prepare")
+            packet = packets.build(store, state, flow.pipeline, args.kind, args.task, args.role)
+            print(json.dumps(packets.write(store, packet) if args.write else packet, ensure_ascii=False, indent=2))
             return 0
+        elif action == "discover":
+            flow.running()
+            if args.file:
+                receipt = discovery.record(store, state, json.loads(flow.read_input(args.file)))
+                flow.save("project-discovery-recorded")
+            else:
+                evidence = discovery.collect(store, state, paths=args.include)
+                receipt = {"collection": state["discoveryCollection"],
+                           "absolutePath": str(store.run / state["discoveryCollection"]["file"]),
+                           "sourceCount": len(evidence["sources"]), "omitted": evidence["omitted"]}
+                flow.save("project-discovery-collected")
+        elif action == "discovery":
+            print(json.dumps(discovery.view(store, state), ensure_ascii=False, indent=2))
+            return 0
+        elif action == "memory":
+            print(json.dumps(carryover.view(store, state), ensure_ascii=False, indent=2))
+            return 0
+        elif action == "carry":
+            receipt = carryover.decide(store, state, args.id, args.carry_action, current_requirement=args.requirement,
+                                       brief=args.brief, quote=args.quote)
+            flow.save("inherited-obligation-" + args.carry_action)
+        elif action == "clean-prepare":
+            flow.running()
+            state["cleanroom"] = cleanroom.prepare(store, state)
+            state.pop("cleanrun", None)
+            receipt = state["cleanroom"]
+            flow.save("clean-clone-prepared")
+        elif action == "blind":
+            flow.running()
+            receipt = blind.record(store, state, json.loads(flow.read_input(args.file)))
+            flow.save("blind-observations-recorded")
+        elif action == "clean-verify":
+            flow.running()
+            command = args.command[1:] if args.command[:1] == ["--"] else args.command
+            state.pop("cleanrun", None)
+            state["activity"] = {"kind": "clean-verification", "startedAt": timestamp()}
+            flow.save("clean-verification-started")
+            try:
+                state["cleanrun"] = cleanroom.execute(store, state, command, args.timeout)
+                receipt = state["cleanrun"]
+            finally:
+                state.pop("activity", None)
+                flow.save("clean-verification-recorded")
+            ok = cleanroom.valid(store, state)
+        elif action == "usage":
+            if args.file:
+                receipt = packets.record_usage(store, state, json.loads(flow.read_input(args.file)))
+                flow.save("native-usage-recorded")
+            else:
+                print(json.dumps(packets.usage_summary(store, state), ensure_ascii=False, indent=2))
+                return 0
         elif action == "project-context":
             receipt = project_context.initialize(store, state, args.runtime)
             flow.save("project-context-adapted")
@@ -195,7 +253,7 @@ def execute(args):
         elif action == "team":
             receipt = flow.pipeline.team(args.file)
         elif action == "assign":
-            receipt = {"actor": flow.pipeline.assign(args.id, args.role, args.runtime, args.native_id, args.session)}
+            receipt = {"actor": flow.pipeline.assign(args.id, args.role, args.runtime, args.native_id, args.session, model=args.model)}
         elif action == "submit":
             result = flow.pipeline.submit(args.id, args.file)
             receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase")}

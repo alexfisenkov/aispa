@@ -112,3 +112,7 @@ test('stale task proof is visibly awaiting a new check',async()=>{
  const d=sample();d.requirements[0].implementation='needs_check';
  const f=await fixture('',d);assert.match(f.text('requirements'),/Нужна повторная проверка/);
 });
+test('inherited unfinished work is visible independently of current tasks',async()=>{
+ const d=sample();d.remaining.inherited=[{id:'C-example',status:'outstanding',text:'Экспорт из прошлого прогона'}];
+ const f=await fixture('',d);assert.match(f.text('remaining'),/Остатки прошлых прогонов/);assert.match(f.text('remaining'),/Экспорт из прошлого прогона/);
+});

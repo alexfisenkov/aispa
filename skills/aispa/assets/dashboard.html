@@ -269,7 +269,7 @@ var SCOPE={dropped:'Снято по решению владельца',deferred:
 var TASK={completed:'Реализовано',running:'В работе',pending:'Ожидает',blocked:'Препятствие'};
 var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
  ['acceptance','Приёмка','Независимая проверка ядра']];
-var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],
+var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],['inherited','Остатки прошлых прогонов'],
  ['unmapped','Не попало в требования']];
 var UNKNOWN='Состояние не определено';
 var params=new URLSearchParams(location.search),demoMode=params.has('demo');
@@ -438,7 +438,7 @@ async function refresh(){
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.1.0-alpha.3',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.1.0-alpha.4',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[

@@ -9,6 +9,7 @@ import json
 import uuid
 
 from . import timing
+from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
 from .store import Invalid, digest, timestamp
@@ -329,6 +330,7 @@ class TaskPipeline:
                     "Роли нужны специализация и строковые проверки")
             all_checks = list(dict.fromkeys(task["criteria"] + LENSES[role] + checks))
             card = {**context, "role": role, "specialization": specialization, "checks": all_checks,
+                    "routing": routing(self.s, task, role, attempt, self.store), "discovery": self.s.get("discovery"),
                     "freshContext": role != "worker", "maximumCriticRounds": 2}
             artifact = _artifact_json(self.store, "roles", card)
             attempt["roles"][role] = {**artifact, "checks": all_checks, "specialization": specialization}
@@ -366,10 +368,11 @@ class TaskPipeline:
             self.host.save("team-specialized")
         return {t["id"]: copy.deepcopy(self._attempt(t["id"])["roles"]) for t in self.s["tasks"]}
 
-    def assign(self, tid, role, runtime, native_id, session, fresh=True):
+    def assign(self, tid, role, runtime, native_id, session, fresh=True, model=None):
         self.host.build_ready()
         require(role in ROLES, "Неизвестная роль")
         require(all(nonempty(v) for v in (runtime, native_id, session)), "Нужны runtime, native ID и session")
+        require(model is None or nonempty(model), "Модель должна быть реальным ID среды или отсутствовать")
         runtime, native_id, session = runtime.strip().casefold(), native_id.strip(), session.strip()
         require(type(fresh) is bool and (role == "worker" or fresh), "Проверяющему нужен новый независимый контекст")
         attempt = self._attempt(tid)
@@ -389,7 +392,7 @@ class TaskPipeline:
         require(aid not in self.s.setdefault("actors", {}), "Этот native actor уже использован в другой роли или попытке")
         actor = {"id": aid, "runtime": runtime, "nativeId": native_id, "session": session, "fresh": fresh,
                  "task": tid, "attempt": attempt["id"], "role": role,
-                 "card": attempt["roles"][role]["sha256"], "at": timestamp()}
+                 "card": attempt["roles"][role]["sha256"], "model": model, "at": timestamp()}
         self.s["actors"][aid] = _seal(self.store, actor)
         if previous:
             attempt["actorHistory"].append({"role": role, "previous": previous, "replacement": aid, "at": timestamp()})

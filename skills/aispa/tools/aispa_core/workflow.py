@@ -11,7 +11,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing
 from .team import TaskPipeline, task_proof_valid
-from . import project_context
+from . import project_context, discovery, carryover, cleanroom, blind
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -91,6 +91,8 @@ class Workflow:
     def spec(self, path):
         self.running()
         require(self.s.get("sealed"), "Сначала зафиксируйте бриф и обязательное ядро")
+        if self.s.get("policy", {}).get("discovery"):
+            require(discovery.valid(self.store, self.s), "Сначала изучите проект: discover и проверенный отчёт discover --file")
         self.s["spec"] = self.store.artifact("specs", read_input(path).encode(), ".md")
         self.save("spec-recorded")
 
@@ -123,6 +125,9 @@ class Workflow:
 
     def plan(self, path):
         self.running()
+        if self.s.get("policy", {}).get("discovery"):
+            require(discovery.valid(self.store, self.s), "Исследование проекта отсутствует или устарело; обновите discover")
+        carryover.guard_current(self.store, self.s)
         require(gate_valid(self.store, self.s, "coverage"), "Покрытие брифа не подтверждено или устарело")
         text = read_input(path)
         tasks = validate_plan(self.s, json.loads(text))
@@ -161,6 +166,7 @@ class Workflow:
 
     def start(self, tid, context):
         self.build_ready()
+        carryover.guard_current(self.store, self.s)
         task = self.task(tid)
         require(task["status"] in ("pending", "blocked"), "Задача уже запущена или завершена")
         self.pipeline.start_guard(tid)
@@ -285,6 +291,9 @@ class Workflow:
 
     def acceptance(self, path):
         self.build_ready()
+        if self.s.get("policy", {}).get("cleanClone"):
+            require(cleanroom.valid(self.store, self.s), "Для итоговой приёмки нужен актуальный успешный запуск из чистого клона")
+            require(blind.valid(self.store, self.s), "Сначала нужны независимые наблюдения из чистого клона")
         require(verified(self.store, self.s), "Нет успешной проверки текущего кода")
         require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"]), "Есть незавершённые задачи без результата или блокера")
         require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
@@ -300,11 +309,15 @@ class Workflow:
                 "Итоговая сверка последней волны устарела")
         text = read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "acceptance")
+        if self.s.get("policy", {}).get("cleanClone"):
+            require(report.get("cleanrun") == self.s["cleanrun"]["artifact"]["sha256"], "Приёмщик должен сослаться на точную проверку чистого клона")
         expected = {(r["id"], c) for r in active(self.s) for c in r["acceptance"]}
         artifacts, failures = evidence_rows(self.store, report, expected)
+        if self.s.get("policy", {}).get("cleanClone"):
+            failures.extend(blind.mapping(self.store, self.s, report))
         missing = {f["requirement"] for f in failures}
         core = set(self.s["core"]) & {r["id"] for r in active(self.s)}
-        passed = not report["unmapped"] and not core & missing
+        passed = not report["unmapped"] and None not in missing and not core & missing
         core_tasks = [t for t in self.s["tasks"] if set(t["requirements"]) & core]
         passed = passed and all(t["status"] == "completed" for t in core_tasks)
         self.s["gates"]["acceptance"] = {
@@ -330,8 +343,10 @@ class Workflow:
         residuals = self.s["gates"]["acceptance"]["failures"]
         excluded = [r["id"] for r in self.s["requirements"] if r["scope"] != "active"]
         blocked = [t["id"] for t in self.s["tasks"] if t["status"] == "blocked"]
-        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked else "accepted"
-        self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked}
+        inherited = carryover.unresolved(self.store, self.s)
+        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited else "accepted"
+        self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked,
+                               "inherited": [{"id": item["id"], "status": item["status"], "text": item.get("requirement", {}).get("text", "")} for item in inherited]}
         timing.stop(self.s, timestamp(), completed=True)
         self.save("delivery-recorded")
 

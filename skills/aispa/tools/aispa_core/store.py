@@ -99,11 +99,11 @@ class Journal:
         finally:
             lock.unlink(missing_ok=True)
 
-    def create(self, slug, title):
+    def create(self, slug, title, initializer=None):
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
             raise Invalid("Имя прогона: латинские буквы, цифры и дефис")
         if (self.home / "active.json").exists():
-            old = self.load()
+            old = self.load(handoff_only=True)
             if old["status"] not in ("accepted", "delivered_with_remaining", "cancelled"):
                 raise Invalid("Предыдущий прогон не завершён; продолжите его или явно отмените")
         ident = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + slug + "-" + uuid.uuid4().hex[:8]
@@ -114,11 +114,13 @@ class Journal:
                  "briefs": [], "requirements": [], "spec": None, "tasks": [],
                  "gates": {}, "verification": None, "waiting": None, "notes": []}
         state.update(startedAt=state["createdAt"], activeSince=state["createdAt"], elapsedSeconds=0.0)
+        if initializer is not None:
+            initializer(state)  # Failure leaves the previous active pointer intact.
         self.append(state, "init")
         atomic_json(self.home / "active.json", {"run": ident})
         return state
 
-    def load(self):
+    def load(self, *, handoff_only=False):
         try:
             pointer = json.loads((self.home / "active.json").read_text())
             self.run = confined(self.home / "runs", pointer["run"])
@@ -139,7 +141,10 @@ class Journal:
         if not state or state.get("schema") != SCHEMA:
             raise Invalid("Неподдерживаемая схема журнала")
         if state.get("version") != VERSION:
-            raise Invalid("Версия движка отличается от версии прогона; нужна явная миграция")
+            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3"}
+            if not (handoff_only and state.get("version") in supported
+                    and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
+                raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")
         for artifact in state["briefs"] + ([state["spec"]] if state["spec"] else []):
             path = confined(self.run, artifact["file"])
             if not path.is_file() or file_hash(path) != artifact["sha256"]:

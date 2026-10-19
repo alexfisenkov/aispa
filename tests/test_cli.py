@@ -56,6 +56,12 @@ class CliTests(unittest.TestCase):
     def context(self, kind, *extra):
         return self.call("context", "--kind", kind, *extra)
 
+    def discover(self):
+        from test_discovery import synthetic_report
+        receipt = self.call("discover")["receipt"]
+        evidence = json.loads(Path(receipt["absolutePath"]).read_text())
+        self.call("discover", "--file", self.input(synthetic_report(evidence)))
+
     @contextmanager
     def server(self):
         process = subprocess.Popen([sys.executable, "-B", str(CLI), "--root", str(self.root), "serve"],
@@ -96,6 +102,36 @@ class CliTests(unittest.TestCase):
         self.assertEqual(packet["basis"], result["basis"])
         self.assertLessEqual(len((self.root / ".aispa/context/memory.md").read_text()), 8000)
 
+    def test_init_rejects_ignore_directory_before_switching_active_run(self):
+        (self.root / ".gitignore").mkdir()
+        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", expected=2)
+        self.assertFalse((self.root / ".aispa/active.json").exists())
+
+    def test_carry_command_records_real_disposition_across_runs(self):
+        self.init()
+        self.call("brief", "--file", self.input("Команда выводит ready"))
+        requirement = {"id": "R01", "text": "Команда", "brief": "B001", "quote": "Команда выводит ready",
+                       "core": True, "acceptance": ["Выводит ready"]}
+        self.call("requirements", "--file", self.input([requirement]))
+        self.call("block", "T99", "--note", "unknown", expected=2)
+        self.call("close", "cancelled", "--note", "Synthetic owner stopped this fixture")
+        state = self.call("init", "--slug", "second", "--title", "Next", "--mode", "auto", "--runtime", "codex")
+        self.run = self.root / ".aispa" / state["runDirectory"]
+        ledger = self.call("memory")
+        item = ledger["items"][0]
+        self.assertEqual(item["status"], "outstanding")
+        self.call("brief", "--file", self.input("Теперь продолжи команду"))
+        requirement["quote"] = "Теперь продолжи команду"
+        self.call("requirements", "--file", self.input([requirement]))
+        receipt = self.call("carry", item["id"], "--action", "map", "--requirement", "R01",
+                            "--brief", "B001", "--quote", "Теперь продолжи команду")["receipt"]
+        self.assertEqual(receipt["action"], "map")
+        self.assertEqual(self.call("memory")["items"][0]["status"], "mapped")
+        self.call("brief", "--file", self.input("Эту команду больше не нужно делать"))
+        self.call("carry", item["id"], "--action", "drop", "--brief", "B002", "--quote", "Эту команду больше не нужно делать")
+        self.assertEqual(self.call("memory")["items"][0]["status"], "dropped")
+        self.assertIn("Команда", (self.root / ".aispa/context/carryover.md").read_text())
+
     def test_empty_finish_fails_with_nonzero_exit(self):
         self.init()
         self.call("finish", expected=2)
@@ -119,6 +155,8 @@ class CliTests(unittest.TestCase):
         self.call("requirements", "--file", self.input([{"id": "R01", "text": "Команда",
             "brief": "B001", "quote": "Команда выводит ready", "core": True, "acceptance": ["Выводит ready"]}]))
         self.call("seal")
+        self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."), expected=2)
+        self.discover()
         self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."))
         ctx = self.context("coverage")
         self.call("coverage", "--file", self.input({"basis": ctx["basis"], "reviewer": "synthetic",
@@ -146,6 +184,10 @@ class CliTests(unittest.TestCase):
                 report.update(previousReport=ctx["rounds"][1]["report"]["sha256"], inheritedProofs=ctx["inheritedProofs"],
                     trace=[{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
                             "note": "Сопоставлено с брифом", "artifact": ctx["verification"]["output"]["file"]} for r in ctx["traceRequirements"]])
+            if kind == "acceptance":
+                report["cleanrun"] = (ctx.get("cleanrun") or {}).get("artifact", {}).get("sha256")
+                report["blindReport"] = ctx["blindReview"]["report"]["sha256"]
+                report["blindMapping"] = [{"observation": 0, "requirement": "R01"}]
             return report
 
         self.call("submit", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "worker"))))
@@ -154,6 +196,20 @@ class CliTests(unittest.TestCase):
         self.call("complete", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "acceptor"))))
         self.call("verify", "--", sys.executable, "app.py")
         self.call("wave", "1", "--file", self.input(proof("wave", "R01")))
+        self.call("context", "--kind", "acceptance", expected=2)
+        self.call("acceptance", "--file", self.input({}), expected=2)
+        self.call("clean-prepare")
+        blind = self.context("blind")
+        self.assertNotIn("requirements", blind)
+        self.assertNotIn("spec", blind)
+        self.assertNotEqual(Path(blind["clone"]["path"]), self.root)
+        clean = self.call("clean-verify", "--", sys.executable, "-B", "-c",
+                  "import subprocess,sys; assert subprocess.check_output([sys.executable,'app.py'],text=True).strip()=='ready'; print('fresh clone checked')")["receipt"]
+        self.call("context", "--kind", "acceptance", expected=2)
+        blind = self.context("blind")
+        self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": "synthetic", "independent": True,
+                  "observations": [{"brief": "B001", "quote": "Команда выводит ready", "status": "passed",
+                                    "note": "Read original brief first; synthetic clean clone assertion passed", "artifact": clean["output"]["file"]}]}))
         self.call("acceptance", "--file", self.input(proof("acceptance", "R01")))
         state = self.call("finish")
         self.assertEqual(state["status"], "accepted")

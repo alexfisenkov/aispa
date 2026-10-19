@@ -37,6 +37,27 @@ class StorageTests(unittest.TestCase):
             self.store.append(state, "note")
         self.assertEqual(self.store.load()["notes"], ["Первое решение"])
 
+    def test_prior_version_can_only_be_read_for_terminal_handoff(self):
+        state = self.store.create("prior", "Prior schema-one fixture")
+        state["version"] = "0.1.0-alpha.3"
+        self.store.append(state, "prior-version-fixture")
+        with self.assertRaises(Invalid):
+            self.store.load(handoff_only=True)
+        state["status"] = "cancelled"
+        self.store.append(state, "prior-stopped")
+        with self.assertRaises(Invalid):
+            self.store.load()
+        self.assertEqual(self.store.load(handoff_only=True)["version"], "0.1.0-alpha.3")
+        created = self.store.create("next", "New current run")
+        self.assertNotEqual(created["run"], state["run"])
+
+    def test_unknown_prior_version_is_not_silently_migrated(self):
+        state = self.store.create("future", "Unsupported fixture")
+        state.update(version="9.0.0", status="cancelled")
+        self.store.append(state, "unsupported")
+        with self.assertRaises(Invalid):
+            self.store.load(handoff_only=True)
+
     def test_zone_aliases_hash_real_files_and_reject_reserved_paths(self):
         self.repository()
         before = self.store.code(["./app.py"])

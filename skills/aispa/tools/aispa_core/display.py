@@ -4,6 +4,7 @@ from .store import atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import elapsed
 from .team import task_proof_valid
+from . import carryover
 
 PHASES = {"implementation": "Исполнитель", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи"}
@@ -39,6 +40,8 @@ def project(store, state):
         "blockedTasks": [t["id"] for t in state["tasks"] if t["status"] == "blocked"],
         "excluded": [r["id"] for r in state["requirements"] if r["scope"] != "active"],
         "unmapped": assessment.get("unmapped", []) if current_assessment else [],
+        "inherited": [{"id": item["id"], "status": item["status"], "text": item["requirement"]["text"]}
+                      for item in carryover.unresolved(store, state)],
     }
     tasks = [dict(t, elapsedSeconds=elapsed(t, observed), phaseLabel=PHASES.get(t.get("phase"), "Исполнитель"),
                   proofCurrent=current.get(t["id"], False),

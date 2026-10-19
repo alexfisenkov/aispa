@@ -20,7 +20,8 @@ def active(state):
 
 def definition(task):
     return {**{k: task[k] for k in ("id", "title", "requirements", "dependsOn", "zones", "criteria", "wave")},
-            "readZones": task.get("readZones", [])}
+            "readZones": task.get("readZones", []), "risk": task.get("risk", "normal"),
+            "riskReason": task.get("riskReason", "")}
 
 
 def task_closure(state, task_id):
@@ -79,6 +80,9 @@ def basis(store, state, kind, task_id=None):
     else:
         raise Invalid("Неизвестный вид проверки")
     body["verification"] = state["verification"]
+    if kind == "acceptance":
+        body.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
+                    carryover=state.get("carryover"), blindReview=state.get("blindReview"))
     return digest(body)
 
 
@@ -92,6 +96,11 @@ def artifact_valid(store, artifact):
 
 def gate_valid(store, state, name):
     gate = state["gates"].get(name)
+    if name == "acceptance" and state.get("policy", {}).get("cleanClone"):
+        from .cleanroom import valid
+        from .blind import valid as blind_valid
+        if not valid(store, state) or not blind_valid(store, state):
+            return False
     return bool(gate and gate["passed"] and gate["basis"] == basis(store, state, name)
                 and artifact_valid(store, gate["report"])
                 and all(artifact_valid(store, a) for a in gate.get("artifacts", [])))
@@ -165,10 +174,13 @@ def validate_plan(state, items):
         require(isinstance(reads, list) and all(nonempty(x) for x in reads), "readZones должен быть списком путей")
         zones = list(dict.fromkeys(canonical_zone(z) for z in zones))
         reads = list(dict.fromkeys(canonical_zone(z) for z in reads))
+        risk, reason = raw.get("risk", "normal"), raw.get("riskReason", "")
+        require(risk in ("low", "normal", "high") and isinstance(reason, str), "Некорректный уровень риска")
+        require(risk != "low" or nonempty(reason), "Для low risk укажите riskReason: почему задача допускает экономную модель")
         tasks[tid] = {"id": tid, "title": raw["title"], "requirements": reqs,
                       "dependsOn": deps, "zones": zones,
                       "readZones": reads,
-                      "criteria": criteria, "status": "pending"}
+                      "criteria": criteria, "status": "pending", "risk": risk, "riskReason": reason}
     covered = {r for t in tasks.values() for r in t["requirements"]}
     require(available <= covered, "В плане потеряны требования: " + ", ".join(sorted(available - covered)))
     graph = dict(state, tasks=list(tasks.values()))
