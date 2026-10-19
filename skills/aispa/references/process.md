@@ -1,4 +1,4 @@
-# Выполнение AISpa · 0.1.0-alpha.5
+# Выполнение AISpa · 0.1.0-alpha.7
 
 Команды ниже вызываются как `python3 "<skillDir>/tools/aispa.py" --root "<repo>" …`.
 `<skillDir>` — именно открытая папка навыка, `<repo>` — физический корень Git.

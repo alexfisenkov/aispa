@@ -190,6 +190,21 @@ class DocumentCliTests(unittest.TestCase):
         state = store.load()
         self.assertTrue(project_context.info(store, state)["fresh"])
 
+    def test_cli_compact_detailed_and_known_source_dispatch(self):
+        self.call("document", "--path", "README.md")
+        compact = self.call("documents")
+        full = self.call("documents", "--detailed")
+        self.assertEqual(compact["format"], "compact")
+        self.assertNotIn("sourceSha256", compact["documents"][0])
+        self.assertEqual(full["format"], "detailed")
+        self.assertIn("sourceSha256", full["documents"][0])
+        self.assertIn("header", full["documents"][0])
+        packet = self.call("context", "--kind", "coverage", "--source", "README.md")
+        self.assertNotIn("documentCatalog", packet)
+        self.assertEqual(packet["documentRouting"], {"catalog": "omitted", "reason": "explicit-files", "sources": ["README.md"]})
+        self.assertEqual(packet["briefs"], [])
+        self.call("context", "--kind", "coverage", "--source", ".", success=False)
+
     def test_read_only_catalog_allowed_but_mutations_block_runtime_drift(self):
         store = Journal(self.root)
         with store.lock():

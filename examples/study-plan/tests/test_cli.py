@@ -1,11 +1,15 @@
 """Сквозные проверки консольного интерфейса и сохранности файлов."""
 
+import io
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from studyplan import __main__ as cli
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +55,29 @@ class CliTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(), stdout.stdout)
         self.assertEqual(self.source.read_bytes(), before)
         self.assertEqual(list(self.directory.glob("*.tmp")), [])
+
+    def test_simulated_windows_stdout_matches_lf_file_bytes(self) -> None:
+        def invoke(*args: str | Path) -> tuple[int, bytes]:
+            raw = io.BytesIO()
+            stream = io.TextIOWrapper(raw, encoding="cp1252", newline="\r\n", write_through=True)
+            with patch.object(sys, "stdout", stream):
+                code = cli.main(list(map(str, args)))
+            stream.flush()
+            return code, raw.getvalue()
+
+        before = self.source.read_bytes()
+        code, stdout = invoke(self.source, "--budget", "90")
+        self.assertEqual(code, 0)
+        self.assertIn("Чтение 🙂".encode("utf-8"), stdout)
+        self.assertIn(b"\n", stdout)
+        self.assertNotIn(b"\r\n", stdout)
+        output = self.directory / "windows-output.json"
+        output.write_bytes(b"old result")
+        saved_code, saved_stdout = invoke(self.source, "--budget", "90", "--output", output)
+        self.assertEqual(saved_code, 0)
+        self.assertEqual(saved_stdout, b"")
+        self.assertEqual(output.read_bytes(), stdout)
+        self.assertEqual(self.source.read_bytes(), before)
 
     def test_invalid_late_row_preserves_existing_and_new_output(self) -> None:
         self.source.write_text("title,minutes,priority\nВерно,5,2\nОшибка,abc,3\n", encoding="utf-8")

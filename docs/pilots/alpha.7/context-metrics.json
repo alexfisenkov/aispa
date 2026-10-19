@@ -1,0 +1,463 @@
+{
+  "schema": 1,
+  "skillVersion": "0.1.0-alpha.7",
+  "baseCommit": "d4264ee70a76e4c1975b8fb799885b6ee2f00411",
+  "runtime": "Codex on macOS",
+  "date": "2026-10-20",
+  "measurement": "Native token_usage_record per unique response_id; cached subset of input; output includes reasoning",
+  "comparisonScope": "Cold restoration of the same alpha.6 frozen snapshot after wave 1; known-file omission plus selected sources, with or without memory",
+  "repetitionsPerArm": 2,
+  "questionsPerTrial": 12,
+  "readCallsPerTrial": 5,
+  "mandatoryCommonPayloadBytes": 26475,
+  "excludedCalibrationsThisIteration": 0,
+  "metadataGenerationDedicatedModelCalls": 0,
+  "experiment": {
+    "controlSource": "alpha6 original frozen packets",
+    "knownFiles": [
+      "README.md",
+      "docs/cli.md",
+      "docs/architecture.md",
+      "docs/testing.md",
+      "studyplan/domain.py",
+      "AGENTS.md"
+    ],
+    "arms": {
+      "a": {
+        "file": "pack-a.txt",
+        "bytes": 74573,
+        "characters": 52987,
+        "sha256": "99eb60ced350e9b8d24e1e110d858a200a8d1244e70db41f52407e6354ec6420",
+        "originalSha256": "99eb60ced350e9b8d24e1e110d858a200a8d1244e70db41f52407e6354ec6420"
+      },
+      "b": {
+        "file": "pack-b.txt",
+        "bytes": 68803,
+        "characters": 49718,
+        "sha256": "cd99580eabbcb7f54b368e63cf84b6ff40569ce11dde40b7caaf638ca836983f",
+        "originalSha256": "cb35b86f896199fb4eac1b58f6bf74c511000ae59c1096028415a2e385aabec6"
+      },
+      "c": {
+        "file": "pack-c.txt",
+        "bytes": 43150,
+        "characters": 30864,
+        "sha256": "10d4403e82214b25fd24fcaf3704c7ad1c6ba498cb9e5400de09db640d1ed037",
+        "originalSha256": "9bfc1fedd4cbfbedb1288a8fe41260508255554e07206551fa490268141bdc90"
+      }
+    },
+    "oldCatalogBytes": 11933,
+    "replacementBlockBytes": 298,
+    "compactCatalogBytes": 4036,
+    "detailedCatalogBytes": 11879,
+    "packetHasCatalog": false,
+    "questionsUnchanged": true,
+    "mandatoryAndNoncatalogBlocksUnchanged": true
+  },
+  "trials": [
+    {
+      "trial": "a1",
+      "arm": "a",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 74573,
+      "payloadSha256": "99eb60ced350e9b8d24e1e110d858a200a8d1244e70db41f52407e6354ec6420",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54312,
+      "postReadInputTokens": 70884,
+      "input_tokens": 375170,
+      "cached_input_tokens": 303488,
+      "output_tokens": 619,
+      "reasoning_output_tokens": 35,
+      "total_tokens": 375789,
+      "nativeUsageArtifactSha256": "668c8798b917462e06ce2c8fe245ce10cece4d02b6d1a05b0f3eac5605cf5fab"
+    },
+    {
+      "trial": "b1",
+      "arm": "b",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 68803,
+      "payloadSha256": "cd99580eabbcb7f54b368e63cf84b6ff40569ce11dde40b7caaf638ca836983f",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54280,
+      "postReadInputTokens": 70001,
+      "input_tokens": 372531,
+      "cached_input_tokens": 317568,
+      "output_tokens": 613,
+      "reasoning_output_tokens": 30,
+      "total_tokens": 373144,
+      "nativeUsageArtifactSha256": "a1073f2d978fd0ce82114533cf6fb6137a6cd43820dee9d8a5e7feb49a1a7f19"
+    },
+    {
+      "trial": "c1",
+      "arm": "c",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 43150,
+      "payloadSha256": "10d4403e82214b25fd24fcaf3704c7ad1c6ba498cb9e5400de09db640d1ed037",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54256,
+      "postReadInputTokens": 64197,
+      "input_tokens": 355433,
+      "cached_input_tokens": 306304,
+      "output_tokens": 591,
+      "reasoning_output_tokens": 8,
+      "total_tokens": 356024,
+      "nativeUsageArtifactSha256": "c7f52a91bfe53277b803b7d440c8140dfb415fbd57018c542975aebd3771a6c0"
+    },
+    {
+      "trial": "c2",
+      "arm": "c",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 43150,
+      "payloadSha256": "10d4403e82214b25fd24fcaf3704c7ad1c6ba498cb9e5400de09db640d1ed037",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54291,
+      "postReadInputTokens": 64330,
+      "input_tokens": 356075,
+      "cached_input_tokens": 306816,
+      "output_tokens": 638,
+      "reasoning_output_tokens": 54,
+      "total_tokens": 356713,
+      "nativeUsageArtifactSha256": "6ebe103c0214cb56151edbeb8d201a1e001d19c39e2591befbc34c4e23444321"
+    },
+    {
+      "trial": "b2",
+      "arm": "b",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 68803,
+      "payloadSha256": "cd99580eabbcb7f54b368e63cf84b6ff40569ce11dde40b7caaf638ca836983f",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54281,
+      "postReadInputTokens": 69990,
+      "input_tokens": 372453,
+      "cached_input_tokens": 317568,
+      "output_tokens": 625,
+      "reasoning_output_tokens": 42,
+      "total_tokens": 373078,
+      "nativeUsageArtifactSha256": "d9b5ee42bb9f7d4567aca04eea1048470902c0709e2bb56c92385433dc5248f5"
+    },
+    {
+      "trial": "a2",
+      "arm": "a",
+      "model": "gpt-6-sol",
+      "effort": "medium",
+      "payloadBytes": 74573,
+      "payloadSha256": "99eb60ced350e9b8d24e1e110d858a200a8d1244e70db41f52407e6354ec6420",
+      "readCalls": 5,
+      "modelRequests": 6,
+      "completeChunks": true,
+      "correctFacts": 12,
+      "totalFacts": 12,
+      "answers": {
+        "next_task": "T02",
+        "ready_to_deliver": false,
+        "csv_reader": "read_tasks",
+        "planner": "plan_tasks",
+        "priority_order": [
+          3,
+          2,
+          1
+        ],
+        "tie_order": "input_order",
+        "too_long_task": "skip_and_continue",
+        "budget_range": [
+          0,
+          1440
+        ],
+        "invalid_output_policy": "no_create_no_overwrite_no_source_write",
+        "dependencies": "stdlib_only",
+        "next_validation": "python3 -m unittest discover -s tests -v",
+        "optional_followup": "malformed_csv_line_number"
+      },
+      "correctness": {
+        "next_task": true,
+        "ready_to_deliver": true,
+        "csv_reader": true,
+        "planner": true,
+        "priority_order": true,
+        "tie_order": true,
+        "too_long_task": true,
+        "budget_range": true,
+        "invalid_output_policy": true,
+        "dependencies": true,
+        "next_validation": true,
+        "optional_followup": true
+      },
+      "firstInputTokens": 54256,
+      "postReadInputTokens": 70737,
+      "input_tokens": 374439,
+      "cached_input_tokens": 356480,
+      "output_tokens": 614,
+      "reasoning_output_tokens": 29,
+      "total_tokens": 375053,
+      "nativeUsageArtifactSha256": "a326fb96cbaa6d3826696aed1827196c573b208c831821dc836a13e5c3166947"
+    }
+  ],
+  "summary": {
+    "a": {
+      "payloadBytes": 74573,
+      "firstInputTokens": 54284,
+      "postReadInputTokens": 70810.5,
+      "input_tokens": 374804.5,
+      "cached_input_tokens": 329984,
+      "output_tokens": 616.5,
+      "reasoning_output_tokens": 32,
+      "modelRequests": 6,
+      "factsCorrect": 24,
+      "factsTotal": 24,
+      "inputRange": [
+        374439,
+        375170
+      ]
+    },
+    "b": {
+      "payloadBytes": 68803,
+      "firstInputTokens": 54280.5,
+      "postReadInputTokens": 69995.5,
+      "input_tokens": 372492,
+      "cached_input_tokens": 317568,
+      "output_tokens": 619,
+      "reasoning_output_tokens": 36,
+      "modelRequests": 6,
+      "factsCorrect": 24,
+      "factsTotal": 24,
+      "inputRange": [
+        372453,
+        372531
+      ],
+      "inputChangeVsA": -0.6169883232458484,
+      "postReadChangeVsA": -1.1509592503936572,
+      "payloadChangeVsA": -7.73738484438068
+    },
+    "c": {
+      "payloadBytes": 43150,
+      "firstInputTokens": 54273.5,
+      "postReadInputTokens": 64263.5,
+      "input_tokens": 355754,
+      "cached_input_tokens": 306560,
+      "output_tokens": 614.5,
+      "reasoning_output_tokens": 31,
+      "modelRequests": 6,
+      "factsCorrect": 24,
+      "factsTotal": 24,
+      "inputRange": [
+        355433,
+        356075
+      ],
+      "inputChangeVsA": -5.082783157619508,
+      "postReadChangeVsA": -9.245803941505848,
+      "payloadChangeVsA": -42.13723465597469
+    }
+  },
+  "limitations": [
+    "One small synthetic project; two repeats per arm; not a complete development cycle.",
+    "The compact catalog by itself is measured in bytes only; model B/C omit the catalog for known paths.",
+    "Fixed platform context about 54k input tokens per fresh agent.",
+    "Cache variation is not converted to financial savings.",
+    "Project, harness and review authoring costs excluded from comparative effect.",
+    "Raw traces kept locally; no private paths or native participant IDs published."
+  ],
+  "implementationSha256": {
+    "skills/aispa/tools/aispa_core/docmeta.py": "2ae8f05a24d497e40a9fc97a9bfabd226ab86896c91f71046b50f8d7333835f7",
+    "skills/aispa/tools/aispa_core/packets.py": "3a4b70ea90278e2a022d88c236ed16a3e9649e0903a42063abfca3135f398dfa",
+    "skills/aispa/tools/aispa.py": "8a307766bae16d8a895d83d1d2aa4ed12f7d8322c219a5c3df941c5354bf2ba3"
+  }
+}

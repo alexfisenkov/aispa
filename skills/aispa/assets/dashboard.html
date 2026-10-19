@@ -40,10 +40,10 @@ a{color:var(--muted);text-decoration:none}a:hover{color:var(--ink)}
 /* header */
 header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
 .brand{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
-.logo{width:40px;height:40px;border-radius:999px;background:var(--chrome);box-shadow:inset 0 1px 2px #fff,0 6px 16px rgba(20,20,22,.16);display:grid;place-items:center}
-.logo i{width:12px;height:12px;border-radius:999px;background:var(--graphite)}
-.brand b{display:block;font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em}
-.brand small{font-size:13px;color:var(--faint)}
+.logo{width:50px;height:50px;flex:none;filter:drop-shadow(0 6px 12px rgba(20,20,22,.18))}
+.logo svg{display:block;width:100%;height:100%}
+.brand b{display:block;font-family:var(--display);font-weight:700;font-size:25px;line-height:1.1;letter-spacing:-.01em}
+.brand small{display:block;margin-bottom:3px;font-size:12px;color:var(--faint)}
 .pill{padding:6px 12px;border-radius:999px;background:var(--white);border:1px solid var(--line);font-size:13px;color:var(--muted)}
 .hdr-r{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .source{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
@@ -79,13 +79,6 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .stage b{display:block;font-size:14px;font-weight:600;line-height:1.25}
 .stage.past{background:var(--paper);color:var(--ink)}.stage.past i{background:var(--graphite)}
 .stage.cur{background:var(--graphite);color:#fff;border-color:var(--graphite)}.stage.cur i{background:linear-gradient(90deg,#9A9DA2,#FFFFFF,#9A9DA2)}
-/* stats */
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
-.stat{border-radius:22px;padding:20px 22px;background:var(--white);box-shadow:0 20px 60px rgba(20,20,22,.08);display:grid;gap:6px}
-.stat>span{font-size:13px;color:var(--faint)}.stat small{font-size:13px;color:var(--muted)}
-.stat div{display:flex;align-items:baseline;gap:8px}
-.stat strong{font-family:var(--display);font-weight:700;font-size:34px;letter-spacing:-.02em}
-.stat em{font-style:normal;font-size:14px;color:var(--muted)}
 /* requirements */
 .req-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:14px}
 .req-head>div:first-child{display:grid;gap:6px;min-width:0}
@@ -121,9 +114,17 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .task-id{flex:none;width:36px;font-size:13px;color:var(--muted)}
 .task-body{flex:1 1 180px;display:grid;gap:2px;min-width:0}
 .task-body b{font-size:14.5px;font-weight:500;line-height:1.35}.task-body small{font-size:12.5px;color:var(--faint)}
+.task-phase{display:grid;gap:5px;margin-top:7px;font-size:12px;color:var(--muted)}
+.phase-steps{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.phase-step{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid var(--line);border-radius:8px;font-size:11px;color:var(--muted);background:var(--white)}
+.phase-step.current{background:var(--graphite);color:#fff;border-color:var(--graphite)}
+.phase-step.done{background:var(--silver-light);color:var(--ink)}
+.phase-step.blocked{border-color:var(--graphite)}
+.phase-step.stale{border-style:dashed}.phase-step.skipped{color:var(--faint)}
 .task-state{flex:none;margin-left:auto;display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);white-space:nowrap}
 .task.completed .task-state{color:var(--ink)}
 .task.completed .dot{background:var(--ok)}.task.blocked .dot{background:var(--graphite)}
+.task.proof-stale .dot{background:var(--muted)}
 .task.pending .dot{background:var(--silver)}.task.running .dot{background:var(--muted);animation:pulse 1.6s ease-in-out infinite}
 .rem-group{display:grid;gap:8px}
 .rem-group>span{font-family:var(--display);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint)}
@@ -143,6 +144,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 .activity-list{display:grid;gap:12px;min-width:0}
 .active-task{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
 .active-task>div{display:grid;gap:5px;min-width:0}.active-task b{font-size:16px;line-height:1.4}
+.active-task .task-phase{margin-top:0}
 .time-summary{display:grid;gap:18px;align-content:start}.time-summary>div{display:grid;gap:6px}
 .time-summary strong{font-family:var(--display);font-size:22px;line-height:1.4}
 .task-right{display:grid;gap:5px;justify-items:end;margin-left:auto}.task-time{font-size:12px;color:var(--muted);white-space:nowrap}
@@ -157,8 +159,14 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 
 <header>
   <div class="brand">
-    <div class="logo"><i></i></div>
-    <div><b>AISpa</b><small>Состояние прогона по брифу</small></div>
+    <div class="logo"><svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="AI Мастерская — сглаженный модульный знак a i m">
+  <rect width="256" height="256" rx="52" fill="#171717"/>
+  <rect x="22" y="102" width="112" height="109" rx="14" fill="#F4F5F6"/>
+  <rect x="45" y="124" width="62" height="66" rx="8" fill="#171717"/>
+  <path d="M122 211V84L173 159L224 84V211" fill="none" stroke="#F4F5F6" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="110" y="33" width="24" height="24" rx="6" fill="#F4F5F6"/>
+</svg></div>
+    <div><small>AI мастерская</small><b>AISpa</b></div>
     <span class="pill" id="version">Альфа-версия</span>
   </div>
   <div class="hdr-r">
@@ -199,12 +207,15 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
   </div>
 </section>
 
+<section class="card waves-card" aria-label="Задачи по волнам">
+  <div style="display:grid;gap:6px"><span class="h2">Задачи по волнам</span><span class="sub">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
+  <div id="waves" style="display:grid;gap:20px"></div>
+</section>
+
 <section class="card stages-card">
   <div class="row-head"><b>Этап</b><span id="stageText"></span></div>
   <div class="stages" id="stages"></div>
 </section>
-
-<section class="stats" id="stats"></section>
 
 <section class="card">
   <div class="req-head">
@@ -219,20 +230,14 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 </section>
 
 <section class="lower">
-  <div class="card">
-    <div style="display:grid;gap:6px"><span class="h2">Задачи по волнам</span><span class="sub">После каждой волны проверяется весь бриф.</span></div>
-    <div id="waves" style="display:grid;gap:20px"></div>
+  <div class="card" style="gap:16px">
+    <div style="display:grid;gap:6px"><span class="h2">Остатки</span><span class="sub">Остаются обязательствами и сохраняются в учёте.</span></div>
+    <div id="remaining" style="display:grid;gap:16px"></div>
   </div>
-  <div>
-    <div class="card" style="gap:16px">
-      <div style="display:grid;gap:6px"><span class="h2">Остатки</span><span class="sub">Остаются обязательствами и сохраняются в учёте.</span></div>
-      <div id="remaining" style="display:grid;gap:16px"></div>
-    </div>
-    <div class="card dark" style="gap:16px">
-      <div class="glow"></div>
-      <div style="position:relative;display:grid;gap:6px"><span class="h2">Решения агента</span><span class="sub">Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.</span></div>
-      <div id="decisions" style="position:relative"></div>
-    </div>
+  <div class="card dark" style="gap:16px">
+    <div class="glow"></div>
+    <div style="position:relative;display:grid;gap:6px"><span class="h2">Решения агента</span><span class="sub">Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.</span></div>
+    <div id="decisions" style="position:relative"></div>
   </div>
 </section>
 
@@ -267,6 +272,9 @@ var STAGES=[['brief','Бриф'],['requirements','Требования и ядр
 var IMPL={implemented:'Реализовано по задачам',unfinished:'Не завершено',unplanned:'Ещё нет в плане',needs_check:'Нужна повторная проверка'};
 var SCOPE={dropped:'Снято по решению владельца',deferred:'Отложено по решению владельца'};
 var TASK={completed:'Реализовано',running:'В работе',pending:'Ожидает',blocked:'Препятствие'};
+var PHASE_STATUS={pending:['○','ожидает'],current:['●','в работе'],done:['✓','завершено'],
+ skipped:['–','не потребовалась'],blocked:['!','заблокирована'],stale:['?','нужна повторная проверка']};
+var PHASE_LABEL={implementation:'Реализация',critic_1:'Первый критик',repair:'Правка',critic_2:'Второй критик',task_acceptance:'Приёмка задачи'};
 var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
  ['acceptance','Приёмка','Независимая проверка ядра']];
 var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],['inherited','Остатки прошлых прогонов'],
@@ -291,6 +299,16 @@ function viewStatus(d){return connected()?(previewStatus&&LABELS[previewStatus]?
 function delta(){return connected()?Math.max(0,(performance.now()-receivedAt)/1000):0}
 function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
  (t.activeSince&&t.status==='running'&&d.status==='running'?delta():0)}
+function phaseTime(t,d){var p=t.phaseTiming;if(t.phaseStale||!p||!Number.isFinite(p.elapsedSeconds))return null;
+ return p.elapsedSeconds+(p.activeSince&&t.status==='running'&&d.status==='running'?delta():0)}
+function phaseName(t){var p=t.phaseTiming;return t.phaseLabel||p&&(PHASE_LABEL[p.phase]||p.phase)||''}
+function phaseSteps(t){if(!Array.isArray(t.phaseSteps)||!t.phaseSteps.length)return null;
+ var row=h('div','phase-steps');row.setAttribute('role','list');row.setAttribute('aria-label','Этапы задачи');
+ t.phaseSteps.forEach(function(step){if(!step||!PHASE_STATUS[step.status])return;
+  var state=PHASE_STATUS[step.status],name=step.label||PHASE_LABEL[step.id]||step.id||'Этап';
+  var item=h('span','phase-step '+step.status,state[0]+' '+name);item.setAttribute('role','listitem');
+  item.setAttribute('aria-label',name+' — '+state[1]);row.append(item)});
+ return row.children.length?row:null}
 var FILTERS={all:['Все',function(){return true}],core:['Ядро',function(r){return r.core&&active(r)}],
  additions:['Добавления',isAdd],open:['Не завершено',function(r){return active(r)&&r.implementation!=='implemented'}]};
 
@@ -326,7 +344,9 @@ function tick(){
  $('runElapsed').textContent=duration(d.elapsedSeconds==null?null:d.elapsedSeconds+(d.status==='running'?delta():0));
  d.tasks.forEach(function(t){var time=document.getElementById('time-'+t.id);if(time)time.textContent=
   t.elapsedSeconds==null&&t.status==='pending'?'Ещё не начата':t.elapsedSeconds==null&&t.status==='blocked'?'Не запускалась':duration(taskTime(t,d));
-  var current=document.getElementById('active-time-'+t.id);if(current)current.textContent=duration(taskTime(t,d));});
+  var current=document.getElementById('active-time-'+t.id);if(current)current.textContent=duration(taskTime(t,d));
+  var phase=document.getElementById('phase-time-'+t.id);if(phase)phase.textContent=duration(phaseTime(t,d));
+  var activePhase=document.getElementById('active-phase-time-'+t.id);if(activePhase)activePhase.textContent=duration(phaseTime(t,d));});
  var v=document.getElementById('verification-time');
  if(v&&d.activity){var seconds=(new Date(d.observedAt)-new Date(d.activity.startedAt))/1000;v.textContent=duration(Math.max(0,seconds)+delta());}
  var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];
@@ -342,8 +362,12 @@ function renderActivity(d,status){
  }
  var running=d.tasks.filter(function(t){return t.status==='running'});
  running.forEach(function(t){var row=h('div','active-task'),text=h('div');
-  text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · волна '+t.wave+(t.phaseLabel?' · '+t.phaseLabel:'')));
-  var time=h('span','mono task-time');time.id='active-time-'+t.id;row.append(text,time);box.append(row);});
+  text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · волна '+t.wave));
+  if(t.phaseStale)text.append(h('span','task-phase','Проверки устарели · требуется повторная проверка'));
+  else if(phaseName(t)){var phase=h('span','task-phase',(connected()?'Сейчас: ':'На момент снимка: ')+phaseName(t));
+   if(t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){var clock=h('span','mono');clock.id='active-phase-time-'+t.id;phase.append(clock)}text.append(phase)}
+  var right=h('div','task-right'),time=h('span','mono task-time');time.id='active-time-'+t.id;
+  right.append(h('span','sub','Вся задача'),time);row.append(text,right);box.append(row);});
  if(!running.length&&!d.activity){
   var next=d.tasks.find(function(t){return t.status==='pending'&&t.dependsOn&&t.dependsOn.every(function(id){
    return d.tasks.some(function(other){return other.id===id&&other.status==='completed'})})});
@@ -382,13 +406,6 @@ function render(d){
   c.append(h('i'));var t=h('div');t.append(h('small',null,pad(i+1)),h('b',null,x[1]));c.append(t);stages.append(c)});
  renderActivity(d,status);
  var waveNums=Array.from(new Set(tasks.map(function(t){return t.wave}))).sort(function(a,b){return a-b});
- var remCount=REMAINING.reduce(function(n,k){return n+(Array.isArray(rem[k[0]])?rem[k[0]].length:0)},0);
- var doneTasks=tasks.filter(function(t){return t.status==='completed'}).length;
- var stats=[['Действующие требования',reqs.filter(active).length,'из '+reqs.length,reqs.filter(function(r){return r.core&&active(r)}).length+' в обязательном ядре'],
-  ['Задачи завершены',doneTasks,'из '+tasks.length,'Реализация — не приёмка'],['Волны',waveNums.length,'в плане','Вычислены из зависимостей'],
-  ['Остатки',d.remainingAssessed||remCount?remCount:'—','в учёте',d.remainingAssessed?'Проверки, блокеры, исключения':'Итоговая приёмка ещё не подтверждена']];
- var sb=$('stats');sb.replaceChildren();stats.forEach(function(x){var c=h('div','stat');c.append(h('span',null,x[0]));var v=h('div');
-  v.append(h('strong',null,x[1]),h('em',null,x[2]));c.append(v,h('small',null,x[3]));sb.append(c)});
  Object.keys(FILTERS).forEach(function(k){var b=tabButtons[k];if(!b){b=h('button','tab');b.type='button';
    b.addEventListener('click',function(){filter=k;render(last)});tabButtons[k]=b;$('tabs').append(b)}
   b.setAttribute('aria-pressed',String(filter===k));b.replaceChildren(document.createTextNode(FILTERS[k][0]+' '),h('span',null,reqs.filter(FILTERS[k][1]).length));});
@@ -403,13 +420,22 @@ function render(d){
  var wv=$('waves');wv.replaceChildren();
  if(!tasks.length)wv.append(h('div','note','План задач ещё не подготовлен.'));
  waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
+  var hasProof=ts.some(function(t){return typeof t.proofCurrent==='boolean'}),accepted=ts.filter(function(t){return t.status==='completed'&&t.proofCurrent===true}).length;
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,'Волна '+n));
-  hd.append(l,h('span',null,c+' из '+ts.length+' завершено'));var box=h('div','tasks');
-  ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')),b=h('div','task-body');
+  hd.append(l,h('span',null,hasProof?accepted+' из '+ts.length+' задач принято':c+' из '+ts.length+' завершено'));var box=h('div','tasks');
+  ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')+(t.status==='completed'&&t.proofCurrent===false?' proof-stale':'')),b=h('div','task-body');
    b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?'Требования: '+t.requirements.join(', '):'Без привязки к требованиям'));
+   var steps=phaseSteps(t);if(steps)b.append(steps);
    var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(
-   t.status==='running'&&d.status!=='running'?'Приостановлена':t.status==='running'&&t.phaseLabel?t.phaseLabel:TASK[t.status]||UNKNOWN));
-   var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,clock);
+   t.phaseStale?('Проверки устарели'+(!connected()?' · последний снимок':'')):
+    !connected()&&t.status==='running'?'Была в работе · последний снимок':
+    t.status==='running'&&d.status!=='running'?'Приостановлена':
+    t.status==='running'&&phaseName(t)?phaseName(t):t.status==='completed'&&t.proofCurrent===false?'Нужна повторная проверка':
+    t.status==='completed'&&t.proofCurrent===true?'Задача принята':TASK[t.status]||UNKNOWN));
+   var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,h('span','task-time','Вся задача'),clock);
+   if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
+    var pclock=h('span','mono task-time');pclock.id='phase-time-'+t.id;
+    right.append(h('span','task-time',(connected()?'Фаза: ':'Фаза на момент снимка: ')+phaseName(t)),pclock)}
    row.append(h('span','task-id mono',t.id),b,right);box.append(row)});w.append(hd,box);wv.append(w)});
  var rb=$('remaining');rb.replaceChildren();var any=false;
  REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;
@@ -435,10 +461,11 @@ async function refresh(){
  finally{clearTimeout(timer);inFlight=false;}
 }
 /* Демонстрационные данные не используются при чтении реального status.json. */
+function demoSteps(states){return Object.keys(PHASE_LABEL).map(function(id,i){return {id:id,label:PHASE_LABEL[id],status:states[i]}})}
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.1.0-alpha.6',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.1.0-alpha.7',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[
@@ -450,28 +477,39 @@ function makeDemo(requested){
    {id:'R06',text:'Экспорт расписания в календарь мастера',core:false},
    {id:'A01',text:'Быстрый повтор прошлой записи в один клик',core:false,kind:'addition',parent:'R01'},
    {id:'R08',text:'Онлайн-оплата предоплаты',core:false,scope:'deferred',decision:{quote:'Предоплату пока отложим'}}],
-  tasks:[{id:'T01',title:'Модель данных и журнал записей',requirements:['R01','R03','R04'],wave:1,status:'completed',elapsedSeconds:960},
-   {id:'T02',title:'Экран выбора услуги и времени',requirements:['R01'],wave:2,status:'completed',elapsedSeconds:1200},
-   {id:'T03',title:'Письмо-подтверждение',requirements:['R02'],wave:2,status:'running',elapsedSeconds:420,activeSince:now},
-   {id:'T04',title:'Недельное расписание администратора',requirements:['R03'],wave:2,status:'pending'},
-   {id:'T05',title:'Напоминания по расписанию',requirements:['R05'],wave:3,status:'pending'},
-   {id:'T06',title:'Повтор прошлой записи',requirements:['A01'],wave:3,status:'pending'},
-   {id:'T07',title:'Экспорт в календарь',requirements:['R06'],wave:3,status:'pending'}],
+  tasks:[{id:'T01',title:'Модель данных и журнал записей',requirements:['R01','R03','R04'],wave:1,status:'completed',elapsedSeconds:960,
+    phaseTiming:{phase:'task_acceptance',startedAt:now,elapsedSeconds:70},phaseSteps:demoSteps(['done','done','done','done','done'])},
+   {id:'T02',title:'Экран выбора услуги и времени',requirements:['R01'],wave:2,status:'completed',elapsedSeconds:1200,
+    phaseTiming:{phase:'task_acceptance',startedAt:now,elapsedSeconds:65},phaseSteps:demoSteps(['done','done','skipped','done','done'])},
+   {id:'T03',title:'Письмо-подтверждение',requirements:['R02'],wave:2,status:'running',elapsedSeconds:420,activeSince:now,
+    phaseTiming:{phase:'repair',startedAt:now,activeSince:now,elapsedSeconds:90},phaseSteps:demoSteps(['done','done','current','pending','pending'])},
+   {id:'T04',title:'Недельное расписание администратора',requirements:['R03'],wave:2,status:'running',elapsedSeconds:300,activeSince:now,
+    phaseTiming:{phase:'critic_2',startedAt:now,activeSince:now,elapsedSeconds:45},phaseSteps:demoSteps(['done','done','done','current','pending'])},
+   {id:'T05',title:'Напоминания по расписанию',requirements:['R05'],wave:3,status:'blocked',elapsedSeconds:200,note:'Нет тестового доступа',
+    phaseTiming:{phase:'critic_1',startedAt:now,elapsedSeconds:30},phaseSteps:demoSteps(['done','blocked','pending','pending','pending'])},
+   {id:'T06',title:'Повтор прошлой записи',requirements:['A01'],wave:3,status:'pending',phaseSteps:demoSteps(['pending','pending','pending','pending','pending'])},
+   {id:'T07',title:'Экспорт в календарь',requirements:['R06'],wave:3,status:'pending',phaseSteps:demoSteps(['pending','pending','pending','pending','pending'])}],
   remaining:{checks:[],blockedTasks:[],excluded:['R08']},
   decisions:['Хранение данных — SQLite: проект небольшой, внешняя база не нужна','Время записи хранится в UTC, отображается в поясе студии',
    'Добавлен повтор прошлой записи как дополнение к R01','Шаг сетки расписания — 15 минут'],
   estimate:{reason:'estimate',sampleCount:2,lowerSeconds:1860,upperSeconds:4800},activity:null};
  d.requirements.forEach(function(r){r.kind=r.kind||'requested';r.scope=r.scope||'active';r.implementation='unfinished'});
- d.tasks.forEach(function(t){t.dependsOn=[];if(terminal){t.status='completed';t.elapsedSeconds=t.elapsedSeconds||900;delete t.activeSince;}});
+ d.tasks.forEach(function(t){t.dependsOn=[];if(terminal){t.status='completed';t.elapsedSeconds=t.elapsedSeconds||900;delete t.activeSince;
+  t.proofCurrent=true;
+  t.phaseTiming={phase:'task_acceptance',startedAt:now,elapsedSeconds:45};
+  t.phaseSteps=demoSteps(['done','done',t.id==='T02'||t.id==='T06'||t.id==='T07'?'skipped':'done','done','done']);}});
  if(terminal){
   d.requirements.forEach(function(r){r.implementation='implemented'});
   d.estimate={reason:status==='stale'?'stale':'finished'};
   if(status!=='accepted'){
-   ['T05','T07'].forEach(function(id){var t=d.tasks.find(function(x){return x.id===id});t.status='blocked';t.note='Нет доступа к тестовому сервису';});
+   ['T05','T07'].forEach(function(id){var t=d.tasks.find(function(x){return x.id===id});t.status='blocked';t.proofCurrent=false;t.note='Нет доступа к тестовому сервису';
+    t.phaseTiming=id==='T05'?{phase:'critic_1',startedAt:now,elapsedSeconds:30}:null;
+    t.phaseSteps=demoSteps(id==='T05'?['done','blocked','pending','pending','pending']:['blocked','pending','pending','pending','pending']);});
    d.remaining.blockedTasks=['T05','T07'];d.remaining.checks=[{requirement:'R05',criterion:'Отправить напоминание',note:'Не проверена отложенная отправка',status:'blocked'}];
    d.requirements.forEach(function(r){if(r.id==='R05'||r.id==='R06')r.implementation='unfinished'});
   }else{d.requirements=d.requirements.filter(function(r){return r.id!=='R08'});d.remaining={checks:[],blockedTasks:[],excluded:[]};}
  }else{
+  d.tasks[0].proofCurrent=true;d.tasks[1].proofCurrent=true;
   d.requirements[0].implementation='implemented';
   if(status!=='running')d.estimate={reason:status};
  }

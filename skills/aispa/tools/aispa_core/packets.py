@@ -2,8 +2,8 @@
 import json
 
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
-from .store import timestamp, common_input
-from .portable import match_name
+from .store import timestamp, common_input, Invalid
+from .portable import match_name, relative_name
 from . import docmeta
 
 MAX_PACKET_BYTES = 16000
@@ -35,8 +35,61 @@ def _brief_packet(store, state):
     return [{**b, "absolutePath": str(store.run / b["file"])} for b in state["briefs"]]
 
 
-def build(store, state, pipeline, kind, task_id=None, role=None):
+def document_context(store, state, kind, selected, source_paths=None):
+    """Navigation is optional; original sources and proof contracts are not."""
+    from .discovery import _kind, _names, _safe_path
+    zones = {match_name(zone) for task in selected for zone in task["zones"] + task.get("readZones", [])}
+    registered = state.get("documents", {})
+    paths = [name for name in registered if kind != "task" or common_input(name) or any(
+        zone == "." or match_name(name) == zone or match_name(name).startswith(zone + "/") for zone in zones)]
+    if kind == "coverage" and source_paths is None:
+        return {"documentRouting": {"catalog": "omitted", "reason": "brief-and-spec"}}
+
+    known = None
+    if source_paths is not None:
+        require(isinstance(source_paths, list) and source_paths, "Нужен непустой список известных файлов")
+        names = set(_names(store))
+        known = []
+        for raw in source_paths:
+            try:
+                name = relative_name(raw)
+            except (ValueError, TypeError) as exc:
+                raise Invalid("Небезопасный путь известного источника") from exc
+            require(name in names and (_kind(name, explicit=True) is not None or common_input(name)),
+                    "Источник отсутствует, исключён или не поддержан: " + name)
+            require(_safe_path(store.root, name).is_file(), "Нужен точный файл, не каталог: " + name)
+            require(kind != "task" or common_input(name) or any(zone == "." or match_name(name) == zone
+                    or match_name(name).startswith(zone + "/") for zone in zones),
+                    "Источник вне readZones/zones задачи: " + name)
+            known.append(name)
+        known = sorted(set(known))
+    elif selected:
+        selectors = sorted({zone for task in selected for zone in task["zones"] + task.get("readZones", [])})
+        # Missing/future paths and directory selectors do not establish a full read list.
+        try:
+            names = set(_names(store))
+            if selectors and all(name in names and (_kind(name, explicit=True) is not None or common_input(name))
+                                 and _safe_path(store.root, name).is_file() for name in selectors):
+                known = selectors
+        except (OSError, ValueError):
+            pass
+    if known is not None:
+        checked = sorted(set(known) | {name for name in paths if common_input(name)})
+        route = {"catalog": "omitted", "reason": "explicit-files" if source_paths is not None else "task-files"}
+        if source_paths is not None:
+            route["sources"] = known
+        result = {"documentRouting": route}
+        warnings = docmeta.source_warnings(store, state, checked)
+        if warnings:
+            result["documentWarnings"] = warnings
+        return result
+    return {"documentCatalog": docmeta.catalog(store, state, paths=paths),
+            "documentRouting": {"catalog": "compact", "reason": "navigation-needed"}}
+
+
+def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths=None):
     if kind == "blind":
+        require(source_paths is None, "Blind-пакет не принимает каталог или список источников проекта")
         # Deliberately omit spec, plan, registry, reviews, discovery and memory.
         from . import blind, carryover
         clone = state.get("cleanroom") or {}
@@ -53,14 +106,8 @@ def build(store, state, pipeline, kind, task_id=None, role=None):
               "tasks": [dict(definition(t), status=t["status"]) for t in selected],
               "verification": state["verification"], "projectContext": state.get("projectContext"),
               "discovery": state.get("discovery"), "carryover": state.get("carryover")}
-    document_paths = None
-    if kind == "task":
-        zones = {match_name(zone) for task in selected for zone in task["zones"] + task.get("readZones", [])}
-        document_paths = [name for name in state.get("documents", {})
-                          if common_input(name) or any(zone == "." or match_name(name) == zone
-                             or match_name(name).startswith(zone + "/") for zone in zones)]
-    packet["documentCatalog"] = docmeta.catalog(store, state, paths=document_paths)
-    packet["documentReadingRule"] = "Catalog summaries select relevant files; stale summaries are withheld. Original briefs, constraints and every required check remain mandatory. Read source bodies for decisions and evidence."
+    packet.update(document_context(store, state, kind, selected, source_paths))
+    packet["documentReadingRule"] = "Read original briefs, constraints and every required check. Known paths need no catalog; warnings require source inspection. Metadata never replaces evidence."
     if kind == "task":
         current = state["taskHistory"][task_id][-1]
         task = next(t for t in selected if t["id"] == task_id)

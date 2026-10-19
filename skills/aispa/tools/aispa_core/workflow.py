@@ -34,7 +34,10 @@ class Workflow:
         self.store, self.s = store, state
         self.pipeline = TaskPipeline(self)
 
-    def save(self, event):
+    def save(self, event, at=None):
+        at = at or timestamp()
+        for task in self.s.get("tasks", []):
+            timing.sync_phase(task, at, self.s.get("status") == "running")
         self.store.append(self.s, event)
         if self.s.get("projectContext", {}).get("initialized"):
             try:
@@ -139,7 +142,7 @@ class Workflow:
             previous = old.get(task["id"])
             task["origin"] = contract
             if previous and definition(previous) == definition(task) and previous.get("origin") == contract:
-                for key in ("status", "phase", "proof", "note", *timing.FIELDS):
+                for key in ("status", "phase", "proof", "note", "phaseTiming", *timing.FIELDS):
                     if key in previous:
                         task[key] = previous[key]
             elif previous:
@@ -189,21 +192,24 @@ class Workflow:
                 require(review["basis"] == basis(self.store, self.s, "wave"), "Последняя сверка волны устарела; повторите общую проверку")
         if opening:
             self.s["waveEntries"][str(task["wave"])] = {"plan": plan_basis(self.s), "openedAt": timestamp()}
+        at = timestamp()
         task["status"] = "running"
         task["phase"] = "implementation"
-        timing.start(task, timestamp())
+        timing.start(task, at)
+        timing.start_phase(task, at)
         task["attempts"] = task.get("attempts", 0) + 1
         task.pop("proof", None)
-        self.save("task-started:" + tid)
+        self.save("task-started:" + tid, at)
 
     def block(self, tid, note):
         self.running()
         require(bool(note.strip()), "Нужна причина препятствия")
         task = self.task(tid)
-        timing.stop(task, timestamp())
+        at = timestamp()
+        timing.stop(task, at)
         task["status"], task["note"] = "blocked", note
         task.pop("proof", None)
-        self.save("task-blocked:" + tid)
+        self.save("task-blocked:" + tid, at)
 
     def reset(self, tid):
         self.running()
@@ -214,15 +220,17 @@ class Workflow:
             if next_set == affected:
                 break
             affected = next_set
+        at = timestamp()
         for task in self.s["tasks"]:
             if task["id"] in affected:
-                timing.stop(task, timestamp())
+                timing.stop(task, at)
                 task.pop("finishedAt", None)
                 task["status"] = "pending"
                 task.pop("proof", None)
+                task.pop("phaseTiming", None)
         self.s["waves"] = {}
         self.s["waveEntries"] = {}
-        self.save("tasks-reset:" + ",".join(sorted(affected)))
+        self.save("tasks-reset:" + ",".join(sorted(affected)), at)
 
     def verify(self, command, timeout, task_id=None):
         self.running()
@@ -365,7 +373,7 @@ class Workflow:
             timing.stop(task, at)
         self.s.pop("activity", None)
         self.s["status"], self.s["waiting"] = status, note
-        self.save("run-" + status)
+        self.save("run-" + status, at)
 
     def resume(self):
         require(self.s["status"] != "running", "Прогон уже выполняется")
@@ -377,7 +385,7 @@ class Workflow:
                 timing.start(task, at)
         self.s.pop("activity", None)
         self.s["gates"].pop("acceptance", None)
-        self.save("run-resumed")
+        self.save("run-resumed", at)
 
     def decision(self, text):
         self.running()

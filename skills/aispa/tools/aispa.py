@@ -50,6 +50,7 @@ def parser():
     ctx.add_argument("--kind", choices=("coverage", "task", "wave", "acceptance", "blind"), required=True)
     ctx.add_argument("--task")
     ctx.add_argument("--role", choices=("worker", "critic1", "critic2", "acceptor"))
+    ctx.add_argument("--source", action="append", help="Уже известный точный файл: не вкладывать каталог; можно повторять")
     ctx.add_argument("--write", action="store_true", help="Сохранить пакет контекста, вернуть только путь и basis")
     discover = sub.add_parser("discover")
     discover.add_argument("--file")
@@ -57,6 +58,7 @@ def parser():
     sub.add_parser("discovery")
     sub.add_parser("memory")
     documents = sub.add_parser("documents")
+    documents.add_argument("--detailed", action="store_true", help="Полные хеши и диагностика вместо краткой навигации")
     documents.add_argument("--refresh", action="store_true", help="Обновить описания изменённых зарегистрированных источников")
     documents.add_argument("--path", action="append", help="Показать выбранный путь; можно повторять")
     document = sub.add_parser("document")
@@ -201,7 +203,7 @@ def execute(args):
             if args.kind == "blind":
                 if not cleanroom.current(store, state):
                     raise Invalid("Сначала подготовьте актуальный чистый клон: clean-prepare")
-            packet = packets.build(store, state, flow.pipeline, args.kind, args.task, args.role)
+            packet = packets.build(store, state, flow.pipeline, args.kind, args.task, args.role, source_paths=args.source)
             print(json.dumps(packets.write(store, packet) if args.write else packet, ensure_ascii=False, indent=2))
             return 0
         elif action == "discover":
@@ -228,9 +230,9 @@ def execute(args):
                 flow.running()
                 receipt = docmeta.refresh(store, state, paths=args.path)
                 flow.save("document-metadata-refreshed")
-                receipt = {"refresh": receipt, "catalog": docmeta.catalog(store, state, paths=args.path)}
+                receipt = {"refresh": receipt, "catalog": docmeta.catalog(store, state, paths=args.path, detailed=args.detailed)}
             else:
-                print(json.dumps(docmeta.catalog(store, state, paths=args.path), ensure_ascii=False, indent=2))
+                print(json.dumps(docmeta.catalog(store, state, paths=args.path, detailed=args.detailed), ensure_ascii=False, indent=2))
                 return 0
         elif action == "document":
             flow.running()

@@ -108,6 +108,75 @@ test('current work names the recorded critic phase',async()=>{
  const d=sample();d.tasks[0].phase='critic2';d.tasks[0].phaseLabel='Второй критик';
  const f=await fixture('',d);assert.match(f.text('currentActivity'),/Второй критик/);assert.match(f.text('waves'),/Второй критик/);
 });
+test('phase clocks advance with the task clock and freeze on pause or lost connection',async()=>{
+ const d=sample();d.tasks[0].phaseTiming={phase:'repair',elapsedSeconds:8,activeSince:d.observedAt};
+ const f=await fixture('',d);assert.equal(f.text('phase-time-T01'),'8 с');
+ assert.match(f.text('currentActivity'),/Сейчас: Правка/);assert.match(f.text('currentActivity'),/Вся задача/);
+ f.advance(2000);assert.equal(f.text('phase-time-T01'),'10 с');assert.equal(f.text('active-phase-time-T01'),'10 с');
+ const paused=sample('paused');paused.tasks[0].phaseTiming={phase:'repair',elapsedSeconds:8,activeSince:paused.observedAt};
+ const p=await fixture('',paused);p.advance(2000);assert.equal(p.text('phase-time-T01'),'8 с');
+ await f.fail();f.advance(2000);assert.equal(f.text('phase-time-T01'),'8 с');assert.match(f.text('waves'),/Фаза на момент снимка/);
+});
+test('phase row reflects supplied states: repair may be skipped, second review is done',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].phaseSteps=[
+  {id:'implementation',label:'Реализация',status:'done'},
+  {id:'critic_1',label:'Первый критик',status:'done'},
+  {id:'repair',label:'Правка',status:'skipped'},
+  {id:'critic_2',label:'Второй критик',status:'done'},
+  {id:'task_acceptance',label:'Приёмка задачи',status:'done'}];
+ const f=await fixture('',d);const row=f.el('waves').children[0].children[1].children[0].children[1].children[2];
+ assert.equal(row.attributes.role,'list');assert.equal(row.children.length,5);
+ assert.equal(row.children[2].attributes['aria-label'],'Правка — не потребовалась');
+ assert.equal(row.children[3].attributes['aria-label'],'Второй критик — завершено');
+ assert.doesNotMatch(f.text('waves'),/Фаза: Правка/);
+});
+test('without backend phase data, the dashboard invents neither phase steps nor a phase clock',async()=>{
+ const f=await fixture();assert.equal(f.el('phase-time-T01'),null);
+ assert.doesNotMatch(f.text('waves'),/Первый критик|Второй критик|Приёмка задачи/);
+ assert.equal(f.el('stats'),null);
+});
+test('completed task with stale proof is not labelled accepted',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=false;
+ d.tasks[0].phaseSteps=[{id:'task_acceptance',label:'Приёмка задачи',status:'stale'}];
+ const f=await fixture('',d);assert.match(f.text('waves'),/Нужна повторная проверка/);
+ assert.match(f.text('waves'),/0 из 1 задач принято/);
+ assert.doesNotMatch(f.text('waves'),/Задача принята/);
+});
+test('source change after first PASS hides superseded second review and its clock',async()=>{
+ const d=sample();d.tasks[0].phaseStale=true;d.tasks[0].phaseLabel='Критик · круг 2';
+ d.tasks[0].phaseTiming={phase:'critic_2',elapsedSeconds:18,activeSince:d.observedAt};
+ d.tasks[0].phaseSteps=[{id:'critic_1',label:'Критик · круг 1',status:'stale'},
+  {id:'repair',label:'Исправление',status:'skipped'},
+  {id:'critic_2',label:'Критик · круг 2',status:'stale'}];
+ const f=await fixture('',d);assert.match(f.text('currentActivity'),/Проверки устарели/);
+ assert.doesNotMatch(f.text('currentActivity'),/Сейчас: Критик/);
+ assert.match(f.text('waves'),/Проверки устарели/);
+ assert.equal(f.el('phase-time-T01'),null);assert.equal(f.el('active-phase-time-T01'),null);
+ f.advance(2000);assert.equal(f.text('time-T01'),'32 с');
+ await f.fail();assert.match(f.text('waves'),/Проверки устарели · последний снимок/);
+});
+test('demo illustrates repair and second review as examples only',async()=>{
+ const f=await fixture('?demo');assert.equal(f.fetchCount(),0);
+ assert.match(f.text('sourceLabel'),/Демо-данные/);
+ assert.match(f.text('waves'),/Правка/);assert.match(f.text('waves'),/Второй критик/);
+ assert.match(f.text('waves'),/Препятствие/);assert.match(f.text('waves'),/Ожидает/);
+ assert.equal(f.text('phase-time-T03'),'1 мин 30 с');
+ const t02=f.el('waves').children[1].children[1].children[0].children[1].children[2];
+ assert.equal(t02.children[2].attributes['aria-label'],'Правка — не потребовалась');
+ assert.equal(t02.children[3].attributes['aria-label'],'Второй критик — завершено');
+ const accepted=await fixture('?demo&status=accepted');
+ for(const wave of accepted.el('waves').children)for(const task of wave.children[1].children){
+  const steps=task.children[1].children[2];assert.equal(steps.children[3].attributes['aria-label'],'Второй критик — завершено');
+ }
+});
+test('approved brand geometry is inline and long titles can wrap on narrow screens',()=>{
+ assert.match(html,/<svg[^>]*role="img"[^>]*aria-label="AI Мастерская/);
+ assert.match(html,/<path d="M122 211V84L173 159L224 84V211"/);
+ assert.match(html,/<small>AI мастерская<\/small><b>AISpa<\/b>/);
+ assert.match(html,/\.task-body b,.dec b,.rem b,.activity-title/);
+ assert.match(html,/overflow-wrap:anywhere/);
+ assert.match(html,/@media\(max-width:650px\)/);
+});
 test('stale task proof is visibly awaiting a new check',async()=>{
  const d=sample();d.requirements[0].implementation='needs_check';
  const f=await fixture('',d);assert.match(f.text('requirements'),/Нужна повторная проверка/);

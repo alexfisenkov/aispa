@@ -20,6 +20,8 @@ MAX_FILE_BYTES = 262144
 MAX_SUMMARY_CHARS = 600
 MAX_DOCUMENTS = 48
 MAX_CATALOG_CHARS = 48000
+MAX_NAVIGATION_CHARS = 12000
+MAX_NAVIGATION_SUMMARY = 160
 MAX_OMITTED_DETAILS = 48
 MAX_ARTIFACT_BYTES = 16384
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -284,9 +286,7 @@ def register(store, state, path, *, expected_sha256=None, summary=None, write_he
                      summary=summary, write_header=write_header)
 
 
-def catalog(store, state, *, paths=None):
-    """Read bounded live metadata, suppressing descriptions of changed/unsafe files."""
-    from .discovery import _names, _safe_path
+def _selection(state, paths):
     documents = state.get("documents", {})
     _require(isinstance(documents, dict), "повреждён реестр документов")
     if paths is not None:
@@ -294,15 +294,17 @@ def catalog(store, state, *, paths=None):
         selected = sorted(set(_name(path) for path in paths))
     else:
         selected = sorted(documents)
+    return documents, selected
+
+
+def _catalog_rows(store, state, documents, selected):
+    """One live Git snapshot; yields all selected rows before presentation limits."""
+    from .discovery import _names, _safe_path
     try:
         names = set(_names(store)) if any(name in documents and _original(store, state, name) is None for name in selected) else set()
     except (OSError, ValueError):
         names = set()
-    rows, used, omitted = [], 0, 0
     for name in selected:
-        if len(rows) >= MAX_DOCUMENTS:
-            omitted += 1
-            continue
         ref = documents.get(name)
         row = {"path": name, "status": "unavailable"}
         try:
@@ -312,8 +314,6 @@ def catalog(store, state, *, paths=None):
             try:
                 source = _source(store, state, name, names=names)
             except (OSError, ValueError):
-                # A link, ignored path or newly sensitive file is unavailable,
-                # never stale with its former summary exposed.
                 try:
                     missing = not _safe_path(store.root, name).exists()
                 except (OSError, ValueError):
@@ -326,17 +326,60 @@ def catalog(store, state, *, paths=None):
                     row.update({key: saved[key] for key in ("kind", "summary", "summaryOrigin", "summaryOmittedChars", "header")})
         except (OSError, ValueError, TypeError, KeyError):
             row["status"] = "unavailable"
+        yield row
+
+
+def _navigation_row(row):
+    result = {key: row[key] for key in ("path", "status")}
+    if "summary" in row:
+        result["summary"] = row["summary"][:MAX_NAVIGATION_SUMMARY]
+        if len(row["summary"]) > MAX_NAVIGATION_SUMMARY or row.get("summaryOmittedChars"):
+            result["summaryTruncated"] = True
+    if row.get("header", {}).get("needsRefresh"):
+        result["headerNeedsRefresh"] = True
+    return result
+
+
+def catalog(store, state, *, paths=None, detailed=False):
+    """Small live navigation by default; full provenance only on explicit request."""
+    _require(type(detailed) is bool, "detailed должен быть логическим значением")
+    documents, selected = _selection(state, paths)
+    limit = MAX_CATALOG_CHARS if detailed else MAX_NAVIGATION_CHARS
+    rows, used, omitted = [], 0, 0
+    # Normal navigation is bounded, not a completeness/freshness gate.
+    for row in _catalog_rows(store, state, documents, selected[:MAX_DOCUMENTS]):
+        if not detailed:
+            row = _navigation_row(row)
         size = len(json.dumps(row, ensure_ascii=False))
-        if used + size > MAX_CATALOG_CHARS:
+        if used + size > limit:
             omitted += 1
             continue
         rows.append(row)
         used += size
-    return {"schema": SCHEMA, "documents": rows, "total": len(documents),
+    omitted += max(0, len(selected) - MAX_DOCUMENTS)
+    return {"schema": SCHEMA, "format": "detailed" if detailed else "compact",
+            "documents": rows, "total": len(documents),
             "omitted": {"count": omitted, "unselected": len(set(documents) - set(selected))},
-            "limits": {"documents": MAX_DOCUMENTS, "catalogChars": MAX_CATALOG_CHARS,
-                       "summaryChars": MAX_SUMMARY_CHARS, "fileBytes": MAX_FILE_BYTES},
-            "authority": "Advisory routing data only; read exact source before decisions or acceptance."}
+            "limits": {"documents": MAX_DOCUMENTS, "catalogChars": limit,
+                       "summaryChars": MAX_SUMMARY_CHARS if detailed else MAX_NAVIGATION_SUMMARY},
+            "authority": "Navigation only; original briefs and required checks remain mandatory."}
+
+
+def source_warnings(store, state, paths):
+    """Check EVERY selected record, even beyond catalog limits; never include summaries.
+
+    Dispatch envelopes can move this full list to an immutable section. Missing
+    metadata does not certify a source as fresh; the role must read its body.
+    """
+    documents, selected = _selection(state, paths)
+    warnings = []
+    for row in _catalog_rows(store, state, documents, selected):
+        if row["status"] != "fresh" or row.get("header", {}).get("needsRefresh"):
+            item = {"path": row["path"], "status": row["status"] if row["path"] in documents else "unindexed"}
+            if row.get("header", {}).get("needsRefresh"):
+                item["headerNeedsRefresh"] = True
+            warnings.append(item)
+    return warnings
 
 
 def refresh(store, state, *, paths=None):

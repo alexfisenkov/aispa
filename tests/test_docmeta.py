@@ -44,7 +44,7 @@ class DocumentMetadataTests(unittest.TestCase):
         return docmeta.register(self.store, self.state, "README.md", **kwargs)
 
     def row(self):
-        return docmeta.catalog(self.store, self.state)["documents"][0]
+        return docmeta.catalog(self.store, self.state, detailed=True)["documents"][0]
 
     def test_render_is_idempotent_and_exact_body_hash_handles_crlf_quotes_unicode(self):
         body = '# Привет 🎈\r\n\r\nText with "quotes": *alias # comment\r\n'
@@ -307,15 +307,15 @@ class DocumentMetadataTests(unittest.TestCase):
             self.write(path, ("# Title\n\n" + "long description " * 100).encode())
             docmeta.register(self.store, self.state, path)
         with patch.object(docmeta, "MAX_DOCUMENTS", 2):
-            view = docmeta.catalog(self.store, self.state)
+            view = docmeta.catalog(self.store, self.state, detailed=True)
             self.assertEqual(len(view["documents"]), 2)
             self.assertEqual(view["omitted"]["count"], 3)
-            selected = docmeta.catalog(self.store, self.state, paths=["docs/4.md"])
+            selected = docmeta.catalog(self.store, self.state, paths=["docs/4.md"], detailed=True)
             self.assertEqual(selected["documents"][0]["status"], "fresh")
             self.assertEqual(selected["omitted"]["unselected"], 4)
         self.assertGreater(selected["documents"][0]["summaryOmittedChars"], 0)
         with patch.object(docmeta, "MAX_CATALOG_CHARS", 1):
-            view = docmeta.catalog(self.store, self.state)
+            view = docmeta.catalog(self.store, self.state, detailed=True)
             self.assertEqual(view["documents"], [])
             self.assertEqual(view["omitted"]["count"], 5)
 

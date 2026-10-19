@@ -635,7 +635,7 @@ class TaskPipeline:
         if task is not None:
             timing.stop(task, timestamp())
             task.update(status="pending", phase="implementation")
-            for key in ("proof", "note", "finishedAt"):
+            for key in ("proof", "note", "finishedAt", "phaseTiming"):
                 task.pop(key, None)
         self.host.save("owner-task-attempt:" + tid)
         return new["id"]
