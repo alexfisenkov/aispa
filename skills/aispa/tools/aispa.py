@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from aispa_core import VERSION
 from aispa_core.contracts import basis, active
-from aispa_core.display import publish
+from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash
 from aispa_core.workflow import Workflow
 
@@ -69,11 +69,20 @@ def execute(args):
             def do_GET(self):
                 if urlsplit(self.path).path == "/status.json":
                     try:
-                        with store.lock():
-                            publish(store, store.load())
+                        # Each reader has its own run pointer. Never wait for a long
+                        # verification command's writer lock, and never edit the journal.
+                        reader = Journal(args.root)
+                        payload = json.dumps(project(reader, reader.load()), ensure_ascii=False).encode()
                     except (Invalid, OSError, ValueError):
                         self.send_error(409, "Current state could not be verified")
                         return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 super().do_GET()
 
         handler = functools.partial(Handler, directory=str(store.home))

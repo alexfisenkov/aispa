@@ -1,52 +1,486 @@
 <!doctype html>
 <html lang="ru">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AISpa — состояние</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700&family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-body{font:16px/1.5 system-ui,sans-serif;max-width:960px;margin:32px auto;padding:0 20px;color:#222;background:#fafafa}
-table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid #ccc;padding:8px;vertical-align:top}
-pre{white-space:pre-wrap;overflow-wrap:anywhere}small{color:#555}button{font:inherit;padding:8px 16px}
-</style>
-<main>
-<h1>AISpa</h1>
-<small>0.1.0-alpha.1 · временный экран состояния · дизайн в разработке</small>
-<h2 id="title">Загрузка…</h2>
-<p id="status" role="status">Проверяю сохранённое состояние.</p>
-<p id="freshness"></p>
-<button type="button" id="refresh">Обновить</button>
-<h2>Требования</h2>
-<p>«Реализовано по задачам» ещё не означает, что требование принято.</p>
-<table><thead><tr><th>ID</th><th>Требование</th><th>Учёт</th></tr></thead><tbody id="requirements"></tbody></table>
-<h2>Остатки и решения</h2>
-<pre id="remaining"></pre>
-<pre id="decisions"></pre>
-</main>
-<script>
-const el = id => document.getElementById(id);
-const labels = {implemented:'Реализовано по задачам',unfinished:'Не завершено',unplanned:'Ещё нет в плане',
-  dropped:'Снято по решению владельца',deferred:'Отложено по решению владельца'};
-async function refresh(){
-  try {
-    const response = await fetch('status.json',{cache:'no-store'});
-    if(!response.ok) throw new Error('HTTP '+response.status);
-    const state = await response.json();
-    el('title').textContent=state.title;
-    el('status').textContent=state.label;
-    el('freshness').textContent='Последняя запись агента: '+state.updatedAt+' · Актуальность проверена: '+state.observedAt;
-    el('requirements').replaceChildren();
-    for(const item of state.requirements){
-      const row=document.createElement('tr');
-      for(const text of [item.id+(item.core?' · ядро':''),item.text,labels[item.scope]||labels[item.implementation]]){
-        const cell=document.createElement('td');cell.textContent=text;row.append(cell);
-      }
-      el('requirements').append(row);
-    }
-    el('remaining').textContent=JSON.stringify(state.remaining,null,2);
-    el('decisions').textContent=state.decisions.map(x=>x.text||x).join('\n');
-  }catch(error){el('status').textContent='Состояние недоступно. Запустите локальный сервер AISpa; отсутствие данных не означает готовность.';}
+:root{
+  --paper:#F4F5F6;--white:#FFFFFF;--ink:#181A1C;--muted:#55585E;--faint:#888B91;--line:#E3E4E7;
+  --graphite:#171717;--silver:#C7C9CC;--silver-light:#ECEDEF;--ok:#1F8A5B;
+  --chrome:linear-gradient(180deg,#FFFFFF 0%,#E0E2E5 40%,#A9ACB1 62%,#EEF0F2 100%);
+  --dark:linear-gradient(165deg,#202123 0%,#0E0E10 100%);
+  --sh:0 20px 60px rgba(20,20,22,.10);--sh-lg:0 40px 90px rgba(20,20,22,.16);
+  --ease:cubic-bezier(.16,1,.3,1);
+  --display:'Unbounded',sans-serif;--text:'Onest',-apple-system,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;
 }
-el('refresh').addEventListener('click',refresh);
-refresh();setInterval(refresh,5000);
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--paper)}
+body{color:var(--ink);font-family:var(--text);background:radial-gradient(1200px 600px at 80% -10%,#FFFFFF,transparent 70%),var(--paper);min-height:100vh;padding:28px clamp(16px,3vw,44px) 64px}
+a{color:var(--muted);text-decoration:none}a:hover{color:var(--ink)}
+@keyframes chromeShine{from{background-position:240% 0}to{background-position:-240% 0}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.wrap{max-width:1280px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:22px}
+.wrap>*{min-width:0}
+.card{border-radius:28px;padding:clamp(20px,2.4vw,30px);background:var(--white);box-shadow:var(--sh);display:grid;gap:18px;min-width:0}
+.dark{position:relative;overflow:hidden;background:var(--dark);color:#fff;box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.12)}
+.glow{position:absolute;right:-120px;top:-160px;width:520px;height:520px;background:radial-gradient(closest-side,rgba(199,201,204,.20),transparent 70%);pointer-events:none}
+.h2{font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:-.01em}
+.sub{font-size:14px;color:var(--muted);text-wrap:pretty}
+.dark .sub{color:var(--silver)}
+.eyebrow{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
+.eyebrow::before{content:"";width:26px;height:1px;background:linear-gradient(90deg,transparent,rgba(23,23,23,.45))}
+.dark .eyebrow{color:var(--silver)}.dark .eyebrow::before{background:linear-gradient(90deg,transparent,rgba(255,255,255,.5))}
+.chrome-dot{border-radius:999px;background:var(--chrome);box-shadow:inset 0 1px 1px #fff,0 2px 5px rgba(20,20,22,.22);flex:none}
+.mono{font-family:var(--mono)}
+.dot{width:8px;height:8px;border-radius:999px;flex:none;box-sizing:border-box}
+/* header */
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.logo{width:40px;height:40px;border-radius:999px;background:var(--chrome);box-shadow:inset 0 1px 2px #fff,0 6px 16px rgba(20,20,22,.16);display:grid;place-items:center}
+.logo i{width:12px;height:12px;border-radius:999px;background:var(--graphite)}
+.brand b{display:block;font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em}
+.brand small{font-size:13px;color:var(--faint)}
+.pill{padding:6px 12px;border-radius:999px;background:var(--white);border:1px solid var(--line);font-size:13px;color:var(--muted)}
+.hdr-r{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.source{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.btn{height:44px;padding:0 20px;border:0;border-radius:15px;background:var(--graphite);color:#fff;font:600 14px var(--text);cursor:pointer;box-shadow:0 10px 26px rgba(23,23,23,.22);display:flex;align-items:center;gap:10px;transition:transform .3s var(--ease)}
+.btn:hover{transform:translateY(-2px)}.btn:active{transform:scale(.96)}
+.btn:focus-visible,.tab:focus-visible{outline:none;box-shadow:0 0 0 5px rgba(199,201,204,.4)}
+.btn span{background:linear-gradient(100deg,#9A9DA2 0%,#FFFFFF 50%,#9A9DA2 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+/* hero */
+.hero-row{display:flex;flex-wrap:wrap;gap:18px}
+.hero{flex:2 1 min(100%,520px);min-width:0;padding:clamp(24px,3vw,40px);gap:22px;align-content:space-between;min-height:300px}
+.hero-top{position:relative;display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:center}
+.state-pill{display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);font-size:13px;color:var(--silver)}
+.state-pill .dot{width:9px;height:9px}
+.hero-main{position:relative;display:grid;gap:14px;max-width:760px}
+.label{font-family:var(--display);font-weight:700;font-size:clamp(30px,4vw,52px);line-height:1.04;letter-spacing:-.02em;text-wrap:balance;background:linear-gradient(100deg,#8A8D92 0%,#C7C9CC 22%,#FFFFFF 40%,#C7C9CC 58%,#8A8D92 82%);background-size:240% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:chromeShine 9s linear infinite}
+.hint{font-size:17px;line-height:1.55;color:var(--silver);text-wrap:pretty}
+.meta{position:relative;display:flex;flex-wrap:wrap;gap:10px 28px;padding-top:18px;border-top:1px solid rgba(255,255,255,.14);font-size:13px;color:#8A8D92}
+.meta div{display:grid;gap:3px}.meta b{font-weight:400;color:#fff}
+.gates{flex:1 1 min(100%,320px);padding:26px;gap:16px;align-content:start}
+.gate{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;background:var(--paper)}
+.gate-mark{width:26px;height:26px;flex:none;border-radius:999px;display:grid;place-items:center;font-size:13px;font-weight:700;box-shadow:inset 0 1px 2px #fff,0 3px 8px rgba(20,20,22,.12)}
+.gate-mark.ok{background:var(--ok);color:#fff}.gate-mark.no{background:var(--chrome);color:var(--graphite)}
+.gate div{display:grid;gap:2px;min-width:0}.gate b{font-weight:600;font-size:15px}.gate span{font-size:13px;color:var(--muted)}
+.note{font-size:13px;line-height:1.5;color:var(--faint);text-wrap:pretty}
+/* stages */
+.stages-card{border-radius:24px;padding:22px 24px;gap:16px}
+.row-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline}
+.row-head b{font-family:var(--display);font-weight:600;font-size:17px}.row-head span{font-size:13px;color:var(--faint)}
+.stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px}
+.stage{display:grid;gap:10px;padding:12px 12px 14px;border-radius:14px;background:var(--white);color:var(--faint);border:1px solid var(--line)}
+.stage i{height:3px;border-radius:999px;background:var(--line)}
+.stage small{font-family:var(--display);font-size:11px;letter-spacing:.14em;opacity:.7}
+.stage b{display:block;font-size:14px;font-weight:600;line-height:1.25}
+.stage.past{background:var(--paper);color:var(--ink)}.stage.past i{background:var(--graphite)}
+.stage.cur{background:var(--graphite);color:#fff;border-color:var(--graphite)}.stage.cur i{background:linear-gradient(90deg,#9A9DA2,#FFFFFF,#9A9DA2)}
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.stat{border-radius:22px;padding:20px 22px;background:var(--white);box-shadow:0 20px 60px rgba(20,20,22,.08);display:grid;gap:6px}
+.stat>span{font-size:13px;color:var(--faint)}.stat small{font-size:13px;color:var(--muted)}
+.stat div{display:flex;align-items:baseline;gap:8px}
+.stat strong{font-family:var(--display);font-weight:700;font-size:34px;letter-spacing:-.02em}
+.stat em{font-style:normal;font-size:14px;color:var(--muted)}
+/* requirements */
+.req-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:14px}
+.req-head>div:first-child{display:grid;gap:6px;min-width:0}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;padding:4px;border-radius:15px;background:var(--silver-light);min-width:0;max-width:100%}
+.tab{flex:none;white-space:nowrap;height:44px;padding:0 14px;border:0;border-radius:11px;background:transparent;color:var(--muted);font:600 13px var(--text);cursor:pointer}
+.tab span{opacity:.55;font-weight:500}
+.tab[aria-pressed="true"]{background:var(--white);color:var(--ink);box-shadow:0 4px 12px rgba(20,20,22,.10)}
+.req{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:15px 4px;border-top:1px solid var(--line)}
+.req-id{flex:none;width:64px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.req-body{flex:1 1 220px;display:grid;gap:4px;min-width:0}
+.req-body b{font-weight:400;font-size:15.5px;line-height:1.45;text-wrap:pretty}
+.req-body small{font-size:12.5px;color:var(--faint)}
+.tag{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:500;white-space:nowrap;border:1px solid var(--line)}
+.tag .dot{width:7px;height:7px}
+.tag.implemented{background:var(--paper);color:var(--ink)}.tag.implemented .dot{background:var(--graphite)}
+.tag.unfinished{background:var(--graphite);color:#fff;border-color:var(--graphite)}.tag.unfinished .dot{background:#fff}
+.tag.unplanned{background:var(--white);color:var(--muted);border-color:var(--silver)}.tag.unplanned .dot{background:var(--silver)}
+.tag.off{background:var(--white);color:var(--faint)}.tag.off .dot{border:1.5px solid var(--faint)}
+.empty{padding:22px 4px;border-top:1px solid var(--line);font-size:14px;color:var(--faint)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13px;color:var(--faint)}
+.legend span{display:flex;align-items:center;gap:8px}
+/* lower */
+.lower{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px;align-items:start}
+.lower>div{display:grid;gap:18px;min-width:0}
+.wave{display:grid;gap:10px}
+.wave-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.wave-head>div{display:flex;align-items:center;gap:10px}
+.wave-num{width:34px;height:34px;border-radius:999px;background:var(--chrome);box-shadow:inset 0 1px 2px #fff,0 4px 10px rgba(20,20,22,.14);display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:13px}
+.wave-head b{font-weight:600;font-size:15px}.wave-head>span{font-size:13px;color:var(--faint)}
+.tasks{display:grid;gap:6px}
+.task{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 14px;border-radius:14px;background:var(--paper);border:1px solid transparent}
+.task.blocked{background:var(--white);border-color:var(--silver)}
+.task-id{flex:none;width:36px;font-size:13px;color:var(--muted)}
+.task-body{flex:1 1 180px;display:grid;gap:2px;min-width:0}
+.task-body b{font-size:14.5px;font-weight:500;line-height:1.35}.task-body small{font-size:12.5px;color:var(--faint)}
+.task-state{flex:none;margin-left:auto;display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);white-space:nowrap}
+.task.completed .task-state{color:var(--ink)}
+.task.completed .dot{background:var(--ok)}.task.blocked .dot{background:var(--graphite)}
+.task.pending .dot{background:var(--silver)}.task.running .dot{background:var(--muted);animation:pulse 1.6s ease-in-out infinite}
+.rem-group{display:grid;gap:8px}
+.rem-group>span{font-family:var(--display);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint)}
+.rem{display:flex;gap:12px;padding:13px 15px;border-radius:14px;background:var(--paper);border-left:3px solid var(--graphite)}
+.rem span{flex:none;font-size:13px;color:var(--muted)}.rem b{font-weight:400;font-size:14.5px;line-height:1.45;text-wrap:pretty;min-width:0}
+.clean{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:var(--paper);font-size:14.5px}
+.clean i{width:22px;height:22px;border-radius:999px;background:var(--ok);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;font-style:normal}
+.dec{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;padding:13px 0;border-top:1px solid rgba(255,255,255,.14)}
+.dec span{font-size:12px;color:#8A8D92;padding-top:2px}.dec b{font-weight:400;font-size:14.5px;line-height:1.5;color:var(--silver-light);text-wrap:pretty}
+footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;padding:6px 4px;font-size:13px;color:var(--faint)}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Live activity and timing, in the supplied visual style. */
+.activity-card{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:28px}
+.activity-title{font-size:18px;font-weight:600;line-height:1.4}
+.activity-list{display:grid;gap:12px;min-width:0}
+.active-task{display:flex;gap:12px;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.active-task>div{display:grid;gap:5px;min-width:0}.active-task b{font-size:16px;line-height:1.4}
+.time-summary{display:grid;gap:18px;align-content:start}.time-summary>div{display:grid;gap:6px}
+.time-summary strong{font-family:var(--display);font-size:22px;line-height:1.4}
+.task-right{display:grid;gap:5px;justify-items:end;margin-left:auto}.task-time{font-size:12px;color:var(--muted);white-space:nowrap}
+.eyebrow,.hint,.label,.req-body b,.task-body b,.dec b,.rem b,.activity-title,.active-task b{overflow-wrap:anywhere;min-width:0}
+.eyebrow{line-height:1.6}.tag{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.btn:focus-visible,.tab:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+@media(max-width:650px){.activity-card{grid-template-columns:minmax(0,1fr)}.time-summary{border-top:1px solid var(--line);padding-top:18px}.label{font-size:clamp(26px,7vw,38px)}}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<header>
+  <div class="brand">
+    <div class="logo"><i></i></div>
+    <div><b>AISpa</b><small>Состояние прогона по брифу</small></div>
+    <span class="pill" id="version">Альфа-версия</span>
+  </div>
+  <div class="hdr-r">
+    <div class="source"><span class="dot" id="sourceDot"></span><span id="sourceLabel">Загрузка…</span></div>
+    <button type="button" class="btn" id="refresh">Обновить <span>→</span></button>
+  </div>
+</header>
+
+<section class="hero-row">
+  <div class="card dark hero">
+    <div class="glow"></div>
+    <div class="hero-top">
+      <div class="eyebrow" id="title">Загрузка…</div>
+      <div class="state-pill"><span class="dot" id="statusDot"></span><span id="statusShort">—</span></div>
+    </div>
+    <div class="hero-main">
+      <div class="label" id="label" role="status">Проверяю сохранённое состояние</div>
+      <div class="hint" id="hint"></div>
+    </div>
+    <div class="meta">
+      <div><span>Последняя запись агента</span><b class="mono" id="updatedAt">—</b></div>
+      <div><span>Актуальность проверена</span><b class="mono" id="observedAt">—</b></div>
+      <div><span>Текущий этап</span><b id="stageName">—</b></div>
+    </div>
+  </div>
+  <div class="card gates">
+    <div class="eyebrow">Проверки</div>
+    <div id="gates" style="display:grid;gap:10px"></div>
+    <div class="note">Изменение брифа, плана или кода делает связанные проверки устаревшими.</div>
+  </div>
+</section>
+
+<section class="card activity-card" aria-label="Текущая работа и время">
+  <div class="activity-list"><div class="eyebrow">Сейчас выполняется</div><div id="currentActivity" class="activity-list"></div></div>
+  <div class="time-summary">
+    <div><span class="sub">Время прогона · без отмеченных пауз</span><strong id="runElapsed">—</strong></div>
+    <div><span class="sub">Примерно до завершения</span><strong id="eta">Пока нет оценки</strong><span class="note" id="etaNote"></span></div>
+  </div>
+</section>
+
+<section class="card stages-card">
+  <div class="row-head"><b>Этап</b><span id="stageText"></span></div>
+  <div class="stages" id="stages"></div>
+</section>
+
+<section class="stats" id="stats"></section>
+
+<section class="card">
+  <div class="req-head">
+    <div><span class="h2">Требования</span><span class="sub">«Реализовано по задачам» ещё не означает, что требование принято.</span></div>
+    <div class="tabs" id="tabs"></div>
+  </div>
+  <div id="requirements"></div>
+  <div class="legend">
+    <span><span class="chrome-dot" style="width:12px;height:12px"></span>обязательное ядро</span>
+    <span>Отмена и перенос — только по записанному решению владельца.</span>
+  </div>
+</section>
+
+<section class="lower">
+  <div class="card">
+    <div style="display:grid;gap:6px"><span class="h2">Задачи по волнам</span><span class="sub">После каждой волны проверяется весь бриф.</span></div>
+    <div id="waves" style="display:grid;gap:20px"></div>
+  </div>
+  <div>
+    <div class="card" style="gap:16px">
+      <div style="display:grid;gap:6px"><span class="h2">Остатки</span><span class="sub">Остаются обязательствами и сохраняются в учёте.</span></div>
+      <div id="remaining" style="display:grid;gap:16px"></div>
+    </div>
+    <div class="card dark" style="gap:16px">
+      <div class="glow"></div>
+      <div style="position:relative;display:grid;gap:6px"><span class="h2">Решения агента</span><span class="sub">Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.</span></div>
+      <div id="decisions" style="position:relative"></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>Экран только отображает результат. Право назвать работу готовой определяет движок.</span>
+  <span id="refreshText">Обновляется каждые 5 с</span>
+</footer>
+</main>
+
+<script>
+(function(){
+'use strict';
+var REFRESH_SECONDS=5;
+var LABELS={running:'В работе',paused:'Приостановлено',blocked:'Есть препятствие',cancelled:'Отменено',
+ accepted:'Все действующие требования приняты',delivered_with_remaining:'Основная часть готова, есть остатки',
+ stale:'Проект изменён; приёмка устарела',unavailable:'Состояние не подтверждено'};
+var SHORT={running:'В работе',paused:'Пауза',blocked:'Препятствие',cancelled:'Отменено',accepted:'Принято',
+ delivered_with_remaining:'Сдано с остатками',stale:'Нужна повторная проверка',unavailable:'Нет связи'};
+var HINT={running:'Агент выполняет задачи. Промежуточный результат не является приёмкой.',
+ paused:'Прогон приостановлен. Таймеры задач остановлены до возобновления.',
+ blocked:'Есть препятствие. Требования и доступный результат сохранены.',
+ cancelled:'Прогон отменён. История работы сохранена.',
+ accepted:'Независимая приёмка подтвердила все действующие требования. Остатков нет.',
+ delivered_with_remaining:'Ядро работает и принято. Второстепенные остатки перечислены ниже и остаются обязательствами.',
+ stale:'Ранее принятый результат изменился. Требуется новая проверка.',
+ unavailable:'Ниже последний подтверждённый снимок. Текущая готовность неизвестна; показания времени зафиксированы.'};
+var DOT={running:['#FFFFFF','0'],paused:['transparent','2px solid #C7C9CC'],blocked:['#8A8D92','0'],
+ cancelled:['transparent','2px solid #55585E'],accepted:['#1F8A5B','0'],delivered_with_remaining:['#1F8A5B','0'],
+ stale:['transparent','2px dashed #C7C9CC'],unavailable:['transparent','2px dashed #C7C9CC']};
+var STAGES=[['brief','Бриф'],['requirements','Требования и ядро'],['spec','Спецификация'],['coverage','Сверка покрытия'],
+ ['plan','План'],['build','Задачи и волны'],['acceptance','Приёмка']];
+var IMPL={implemented:'Реализовано по задачам',unfinished:'Не завершено',unplanned:'Ещё нет в плане'};
+var SCOPE={dropped:'Снято по решению владельца',deferred:'Отложено по решению владельца'};
+var TASK={completed:'Реализовано',running:'В работе',pending:'Ожидает',blocked:'Препятствие'};
+var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
+ ['acceptance','Приёмка','Независимая проверка ядра']];
+var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],
+ ['unmapped','Не попало в требования']];
+var UNKNOWN='Состояние не определено';
+var params=new URLSearchParams(location.search),demoMode=params.has('demo');
+var previewStatus=demoMode?params.get('status'):null;
+var filter='all',last=null,source='loading',receivedAt=0,inFlight=false,tabButtons={};
+function $(id){return document.getElementById(id)}
+function h(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
+function pad(n){return String(n).padStart(2,'0')}
+function fmt(iso){if(!iso)return '—';var d=new Date(iso);if(isNaN(d))return '—';
+ return pad(d.getDate())+'.'+pad(d.getMonth()+1)+'.'+d.getFullYear()+', '+pad(d.getHours())+':'+pad(d.getMinutes())}
+function duration(s){if(!Number.isFinite(s))return 'Время не записано';s=Math.max(0,Math.floor(s));
+ var hours=Math.floor(s/3600),minutes=Math.floor(s%3600/60),seconds=s%60;
+ return hours?hours+' ч '+pad(minutes)+' мин':minutes?minutes+' мин '+pad(seconds)+' с':seconds+' с'}
+function active(r){return r.scope!=='dropped'&&r.scope!=='deferred'}
+function isAdd(r){return r.kind==='addition'}
+function connected(){return source==='live'||source==='demo'}
+function finalStatus(s){return s==='accepted'||s==='delivered_with_remaining'}
+function viewStatus(d){return connected()?(previewStatus&&LABELS[previewStatus]?previewStatus:d.status):'unavailable'}
+function delta(){return connected()?Math.max(0,(performance.now()-receivedAt)/1000):0}
+function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
+ (t.activeSince&&t.status==='running'&&d.status==='running'?delta():0)}
+var FILTERS={all:['Все',function(){return true}],core:['Ядро',function(r){return r.core&&active(r)}],
+ additions:['Добавления',isAdd],open:['Не завершено',function(r){return active(r)&&r.implementation!=='implemented'}]};
+
+function renderSource(){
+ var m={loading:['#C7C9CC','Загрузка…'],demo:['#C7C9CC','Демо-данные · пример'],live:['#1F8A5B','Живые данные · локальный сервер'],
+ offline:['#55585E','Нет актуальных данных — последний снимок'],none:['#55585E','Состояние недоступно']}[source];
+ $('sourceDot').style.background=m[0];$('sourceLabel').textContent=m[1];
+}
+function renderEmpty(){
+ $('title').textContent='AISpa';$('label').textContent='Состояние недоступно';
+ $('hint').textContent='Запустите локальный сервер AISpa командой serve. Отсутствие данных не означает готовность.';
+ $('statusShort').textContent='Нет данных';$('statusDot').style.background='transparent';$('statusDot').style.border='2px dashed #C7C9CC';
+ $('currentActivity').replaceChildren(h('div','note','Жду подтверждённое состояние прогона.'));
+ $('runElapsed').textContent='—';$('eta').textContent='Нет данных';$('etaNote').textContent='Оценка появится после начала работы.';
+}
+function etaText(d){
+ if(!connected())return ['Не подтверждено','Оценка обновится после восстановления связи.'];
+ if(finalStatus(d.status))return ['Прогон завершён',d.status==='delivered_with_remaining'?'Остатки перечислены отдельно.':'Все действующие требования приняты.'];
+ var e=d.estimate||{},reason=e.reason;
+ var messages={paused:['После возобновления','Прогон на паузе.'],blocked:['Зависит от блокеров','Срок неизвестен до устранения препятствий.'],
+ cancelled:['Прогон отменён','Оценка больше не рассчитывается.'],stale:['Нужна новая проверка','Прежняя приёмка устарела.'],
+ no_plan:['После подготовки плана','Ещё нет задач для оценки.'],insufficient_data:['Пока мало данных','Нужны длительности хотя бы двух завершённых задач.'],
+ final_review:['Осталась итоговая проверка','Задачи реализованы; длительность приёмки пока неизвестна.']};
+ if(messages[reason])return messages[reason];
+ if(reason!=='estimate'||!Number.isFinite(e.lowerSeconds)||!Number.isFinite(e.upperSeconds))return ['Пока нет оценки','Движок ещё не накопил данные.'];
+ var low=Math.max(1,Math.ceil((e.lowerSeconds-delta())/60)),high=Math.max(low,Math.ceil((e.upperSeconds-delta())/60));
+ return ['≈ '+low+'–'+high+' мин','По '+e.sampleCount+' завершённым задачам, с учётом волн и резерва на приёмку. Это ориентир.'];
+}
+function tick(){
+ if(!last)return;
+ if(source==='live'&&performance.now()-receivedAt>15000){source='offline';renderSource();render(last);return;}
+ var d=last;
+ $('runElapsed').textContent=duration(d.elapsedSeconds==null?null:d.elapsedSeconds+(d.status==='running'?delta():0));
+ d.tasks.forEach(function(t){var time=document.getElementById('time-'+t.id);if(time)time.textContent=
+  t.elapsedSeconds==null&&t.status==='pending'?'Ещё не начата':t.elapsedSeconds==null&&t.status==='blocked'?'Не запускалась':duration(taskTime(t,d));
+  var current=document.getElementById('active-time-'+t.id);if(current)current.textContent=duration(taskTime(t,d));});
+ var v=document.getElementById('verification-time');
+ if(v&&d.activity){var seconds=(new Date(d.observedAt)-new Date(d.activity.startedAt))/1000;v.textContent=duration(Math.max(0,seconds)+delta());}
+ var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];
+}
+function renderActivity(d,status){
+ var box=$('currentActivity');box.replaceChildren();
+ if(!connected()){box.append(h('div','activity-title','Последний подтверждённый снимок'));return;}
+ if(status!=='running'){box.append(h('div','activity-title',SHORT[status]||UNKNOWN));
+  if(d.waiting)box.append(h('div','sub',d.waiting));return;}
+ if(d.activity&&d.activity.kind==='verification'){
+  var check=h('div','active-task');check.append(h('b',null,'Выполняется проверка кода'));
+  var clock=h('span','mono task-time');clock.id='verification-time';check.append(clock);box.append(check);
+ }
+ var running=d.tasks.filter(function(t){return t.status==='running'});
+ running.forEach(function(t){var row=h('div','active-task'),text=h('div');
+  text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · волна '+t.wave));
+  var time=h('span','mono task-time');time.id='active-time-'+t.id;row.append(text,time);box.append(row);});
+ if(!running.length&&!d.activity){
+  var next=d.tasks.find(function(t){return t.status==='pending'&&t.dependsOn&&t.dependsOn.every(function(id){
+   return d.tasks.some(function(other){return other.id===id&&other.status==='completed'})})});
+  var stage=STAGES.find(function(x){return x[0]===(d.displayStage||d.stage)});
+  box.append(h('div','activity-title',stage?stage[1]:'Текущий этап не определён'));
+  if(next)box.append(h('div','sub','Ожидает запуска: '+next.title));
+  else if(d.tasks.some(function(t){return t.status==='blocked'}))box.append(h('div','sub','Незавершённые задачи заблокированы. Причины перечислены ниже.'));
+  else if(d.tasks.length&&d.tasks.every(function(t){return t.status==='completed'}))box.append(h('div','sub','Задачи реализованы. Подготовка итоговой проверки.'));
+ }
+}
+function remainingItem(value,key,reqs,tasks){
+ if(typeof value==='string'){
+  if(key==='blockedTasks'){var task=tasks.find(function(t){return t.id===value});return {id:value,text:task?(task.note||task.title):'Причина блокера не указана'};}
+  if(key==='excluded'){var req=reqs.find(function(r){return r.id===value});return {id:value,text:req?
+   (SCOPE[req.scope]||'Исключено')+': '+req.text+(req.decision?' · «'+req.decision.quote+'»':''):'Исключено по решению владельца'};}
+  return {id:'',text:value};
+ }
+ return {id:value.id||value.requirement||value.task||'',text:[value.criterion,value.text||value.note||value.reason||'Описание не указано'].filter(Boolean).join(' — ')};
+}
+function render(d){
+ var status=viewStatus(d),reqs=d.requirements,tasks=d.tasks,rem=d.remaining||{};
+ $('title').textContent=d.title||'Без названия';$('version').textContent=d.version?'Альфа · '+d.version:'Альфа-версия';
+ $('label').textContent=LABELS[status]||UNKNOWN;$('hint').textContent=HINT[status]||'Обновите состояние или проверьте совместимость версии.';
+ $('statusShort').textContent=SHORT[status]||UNKNOWN;
+ var dot=DOT[status]||DOT.unavailable;$('statusDot').style.background=dot[0];$('statusDot').style.border=dot[1];
+ $('updatedAt').textContent=fmt(d.updatedAt);$('observedAt').textContent=fmt(d.observedAt);
+ var gates=$('gates');gates.replaceChildren();
+ GATES.forEach(function(g){var ok=connected()&&d.gates&&d.gates[g[0]]===true,row=h('div','gate');
+  row.append(h('div','gate-mark '+(ok?'ok':'no'),ok?'✓':'!'));var t=h('div');
+  t.append(h('b',null,g[1]),h('span',null,ok?g[2]:(connected()?'Не подтверждено или устарело':'Нет актуального подтверждения')));row.append(t);gates.append(row)});
+ var idx=STAGES.findIndex(function(x){return x[0]===(d.displayStage||d.stage)}),done=connected()&&finalStatus(status);
+ $('stageName').textContent=idx>=0?STAGES[idx][1]:'Не определён';
+ $('stageText').textContent=idx>=0?'Шаг '+(idx+1)+' из '+STAGES.length+' · '+STAGES[idx][1]:'Этап не определён';
+ var stages=$('stages');stages.replaceChildren();
+ STAGES.forEach(function(x,i){var past=i<idx||(done&&i===idx),cur=i===idx&&!done,c=h('div','stage'+(cur?' cur':past?' past':''));
+  c.append(h('i'));var t=h('div');t.append(h('small',null,pad(i+1)),h('b',null,x[1]));c.append(t);stages.append(c)});
+ renderActivity(d,status);
+ var waveNums=Array.from(new Set(tasks.map(function(t){return t.wave}))).sort(function(a,b){return a-b});
+ var remCount=REMAINING.reduce(function(n,k){return n+(Array.isArray(rem[k[0]])?rem[k[0]].length:0)},0);
+ var doneTasks=tasks.filter(function(t){return t.status==='completed'}).length;
+ var stats=[['Действующие требования',reqs.filter(active).length,'из '+reqs.length,reqs.filter(function(r){return r.core&&active(r)}).length+' в обязательном ядре'],
+  ['Задачи завершены',doneTasks,'из '+tasks.length,'Реализация — не приёмка'],['Волны',waveNums.length,'в плане','Вычислены из зависимостей'],
+  ['Остатки',d.remainingAssessed||remCount?remCount:'—','в учёте',d.remainingAssessed?'Проверки, блокеры, исключения':'Итоговая приёмка ещё не подтверждена']];
+ var sb=$('stats');sb.replaceChildren();stats.forEach(function(x){var c=h('div','stat');c.append(h('span',null,x[0]));var v=h('div');
+  v.append(h('strong',null,x[1]),h('em',null,x[2]));c.append(v,h('small',null,x[3]));sb.append(c)});
+ Object.keys(FILTERS).forEach(function(k){var b=tabButtons[k];if(!b){b=h('button','tab');b.type='button';
+   b.addEventListener('click',function(){filter=k;render(last)});tabButtons[k]=b;$('tabs').append(b)}
+  b.setAttribute('aria-pressed',String(filter===k));b.replaceChildren(document.createTextNode(FILTERS[k][0]+' '),h('span',null,reqs.filter(FILTERS[k][1]).length));});
+ var list=$('requirements');list.replaceChildren();var rows=reqs.filter(FILTERS[filter][1]);
+ if(!rows.length)list.append(h('div','empty','В этом фильтре требований нет.'));
+ rows.forEach(function(r){var off=SCOPE[r.scope],impl=r.implementation,row=h('div','req'),id=h('div','req-id mono');id.append(h('span',null,r.id));
+  if(r.core&&active(r)){var cd=h('span','chrome-dot');cd.style.width=cd.style.height='14px';cd.title='Обязательное ядро';id.append(cd)}
+  var body=h('div','req-body'),meta=[r.kind==='constraint'?'Общее ограничение':isAdd(r)?'Добавление агента'+(r.parent?' · к '+r.parent:''):'Исходный заказ'];
+  if(r.core&&active(r))meta.push('ядро');body.append(h('b',null,r.text),h('small',null,meta.join(' · ')));
+  var tag=h('span','tag '+(off?'off':IMPL[impl]?impl:'unplanned'));tag.append(h('span','dot'),document.createTextNode(off||IMPL[impl]||UNKNOWN));
+  row.append(id,body,tag);list.append(row)});
+ var wv=$('waves');wv.replaceChildren();
+ if(!tasks.length)wv.append(h('div','note','План задач ещё не подготовлен.'));
+ waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
+  var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,'Волна '+n));
+  hd.append(l,h('span',null,c+' из '+ts.length+' завершено'));var box=h('div','tasks');
+  ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')),b=h('div','task-body');
+   b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?'Требования: '+t.requirements.join(', '):'Без привязки к требованиям'));
+   var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(
+    t.status==='running'&&d.status!=='running'?'Приостановлена':TASK[t.status]||UNKNOWN));
+   var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,clock);
+   row.append(h('span','task-id mono',t.id),b,right);box.append(row)});w.append(hd,box);wv.append(w)});
+ var rb=$('remaining');rb.replaceChildren();var any=false;
+ REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;
+  var group=h('div','rem-group');group.append(h('span',null,k[1]));items.forEach(function(value){var it=remainingItem(value,k[0],reqs,tasks),row=h('div','rem');
+   if(it.id)row.append(h('span','mono',it.id));row.append(h('b',null,it.text));group.append(row)});rb.append(group)});
+ if(!any){var clean=connected()&&status==='accepted'&&d.remainingAssessed;
+  var cl=h('div','clean');if(clean)cl.append(h('i',null,'✓'));
+  cl.append(document.createTextNode(clean?'Остатков нет.':connected()?'Итоги ещё не подведены.':'Актуальные остатки не подтверждены.'));rb.append(cl)}
+ var db=$('decisions');db.replaceChildren();
+ if(!d.decisions.length)db.append(h('div','sub','Самостоятельные решения пока не записаны.'));
+ d.decisions.forEach(function(x,i){var r=h('div','dec');r.append(h('span','mono',pad(i+1)),h('b',null,typeof x==='string'?x:x.text||'Описание не указано'));db.append(r)});
+ tick();
+}
+function valid(d){return d&&typeof d.status==='string'&&Array.isArray(d.requirements)&&Array.isArray(d.tasks)&&Array.isArray(d.decisions)&&
+ d.requirements.every(function(r){return r&&typeof r.id==='string'&&typeof r.text==='string'})&&
+ d.tasks.every(function(t){return t&&typeof t.id==='string'&&Array.isArray(t.requirements)});}
+async function refresh(){
+ if(demoMode){source='demo';last=makeDemo(previewStatus);receivedAt=performance.now();renderSource();render(last);return;}
+ if(inFlight)return;inFlight=true;var controller=new AbortController(),timer=setTimeout(function(){controller.abort()},10000);
+ try{var response=await fetch('status.json',{cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error('HTTP '+response.status);
+  var d=await response.json();if(!valid(d))throw new Error('shape');last=d;source='live';receivedAt=performance.now();renderSource();render(d);
+ }catch(error){source=last?'offline':'none';renderSource();if(last)render(last);else renderEmpty();}
+ finally{clearTimeout(timer);inFlight=false;}
+}
+/* Демонстрационные данные не используются при чтении реального status.json. */
+function makeDemo(requested){
+ var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
+ var terminal=finalStatus(status)||status==='stale';
+ var d={version:'0.1.0-alpha.2',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+  displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
+  gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
+  requirements:[
+   {id:'R01',text:'Клиент выбирает услугу, мастера и свободное время в одном экране',core:true},
+   {id:'R02',text:'Запись подтверждается сообщением на почту в течение минуты',core:true},
+   {id:'R03',text:'Администратор видит расписание всех мастеров на неделю',core:true},
+   {id:'R04',text:'Не хранить номера карт и платёжные данные на сервере',core:true,kind:'constraint'},
+   {id:'R05',text:'Напоминание клиенту за сутки до визита',core:false},
+   {id:'R06',text:'Экспорт расписания в календарь мастера',core:false},
+   {id:'A01',text:'Быстрый повтор прошлой записи в один клик',core:false,kind:'addition',parent:'R01'},
+   {id:'R08',text:'Онлайн-оплата предоплаты',core:false,scope:'deferred',decision:{quote:'Предоплату пока отложим'}}],
+  tasks:[{id:'T01',title:'Модель данных и журнал записей',requirements:['R01','R03','R04'],wave:1,status:'completed',elapsedSeconds:960},
+   {id:'T02',title:'Экран выбора услуги и времени',requirements:['R01'],wave:2,status:'completed',elapsedSeconds:1200},
+   {id:'T03',title:'Письмо-подтверждение',requirements:['R02'],wave:2,status:'running',elapsedSeconds:420,activeSince:now},
+   {id:'T04',title:'Недельное расписание администратора',requirements:['R03'],wave:2,status:'pending'},
+   {id:'T05',title:'Напоминания по расписанию',requirements:['R05'],wave:3,status:'pending'},
+   {id:'T06',title:'Повтор прошлой записи',requirements:['A01'],wave:3,status:'pending'},
+   {id:'T07',title:'Экспорт в календарь',requirements:['R06'],wave:3,status:'pending'}],
+  remaining:{checks:[],blockedTasks:[],excluded:['R08']},
+  decisions:['Хранение данных — SQLite: проект небольшой, внешняя база не нужна','Время записи хранится в UTC, отображается в поясе студии',
+   'Добавлен повтор прошлой записи как дополнение к R01','Шаг сетки расписания — 15 минут'],
+  estimate:{reason:'estimate',sampleCount:2,lowerSeconds:1860,upperSeconds:4800},activity:null};
+ d.requirements.forEach(function(r){r.kind=r.kind||'requested';r.scope=r.scope||'active';r.implementation='unfinished'});
+ d.tasks.forEach(function(t){t.dependsOn=[];if(terminal){t.status='completed';t.elapsedSeconds=t.elapsedSeconds||900;delete t.activeSince;}});
+ if(terminal){
+  d.requirements.forEach(function(r){r.implementation='implemented'});
+  d.estimate={reason:status==='stale'?'stale':'finished'};
+  if(status!=='accepted'){
+   ['T05','T07'].forEach(function(id){var t=d.tasks.find(function(x){return x.id===id});t.status='blocked';t.note='Нет доступа к тестовому сервису';});
+   d.remaining.blockedTasks=['T05','T07'];d.remaining.checks=[{requirement:'R05',criterion:'Отправить напоминание',note:'Не проверена отложенная отправка',status:'blocked'}];
+   d.requirements.forEach(function(r){if(r.id==='R05'||r.id==='R06')r.implementation='unfinished'});
+  }else{d.requirements=d.requirements.filter(function(r){return r.id!=='R08'});d.remaining={checks:[],blockedTasks:[],excluded:[]};}
+ }else{
+  d.requirements[0].implementation='implemented';
+  if(status!=='running')d.estimate={reason:status};
+ }
+ return d;
+}
+$('refresh').addEventListener('click',refresh);
+$('refreshText').textContent=demoMode?'Демонстрационный пример · не реальный прогон':'Состояние обновляется каждые 5 с · таймеры каждую секунду';
+refresh();if(!demoMode)setInterval(refresh,REFRESH_SECONDS*1000);setInterval(tick,1000);
+})();
 </script>
+</body>
 </html>

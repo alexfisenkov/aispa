@@ -4,7 +4,7 @@ description: Разработка проекта по исходному бри�
 disable-model-invocation: true
 argument-hint: "[идея проекта или файл с брифом]"
 metadata:
-  version: "0.1.0-alpha.1"
+  version: "0.1.0-alpha.2"
 ---
 
 # AISpa

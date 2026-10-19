@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core.contracts import basis, gate_valid, validate_plan
@@ -312,6 +313,34 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(verification["exitCode"], 125)
         self.assertNotIn('a' * 40, output)
         self.assertIn("withheld", output)
+
+    def test_workflow_task_clock_excludes_pause_and_survives_retry(self):
+        self.prepare()
+        with patch("aispa_core.workflow.timestamp", return_value="2026-10-19T10:00:00Z"):
+            self.flow.start("T01", basis(self.store, self.state, "task", "T01"))
+        with patch("aispa_core.workflow.timestamp", return_value="2026-10-19T10:01:00Z"):
+            self.flow.close("paused", "Пауза владельца")
+        self.assertEqual(self.flow.task("T01")["elapsedSeconds"], 60)
+        self.assertNotIn("activeSince", self.flow.task("T01"))
+        with patch("aispa_core.workflow.timestamp", return_value="2026-10-19T11:00:00Z"):
+            self.flow.resume()
+        with patch("aispa_core.workflow.timestamp", return_value="2026-10-19T11:00:30Z"):
+            self.flow.block("T01", "Нет доступа")
+        self.assertEqual(self.flow.task("T01")["elapsedSeconds"], 90)
+        with patch("aispa_core.workflow.timestamp", return_value="2026-10-19T12:00:00Z"):
+            self.flow.start("T01", basis(self.store, self.state, "task", "T01"))
+        with patch("aispa_core.workflow.timestamp", return_value="2026-10-19T12:00:10Z"):
+            self.flow.reset("T01")
+        self.assertEqual(self.flow.task("T01")["elapsedSeconds"], 100)
+        self.assertEqual(self.flow.task("T01")["attempts"], 2)
+
+    def test_live_projection_includes_blockers_before_final_delivery(self):
+        self.prepare(secondary=True)
+        self.flow.block("T02", "Нет доступа")
+        view = project(self.store, self.state)
+        self.assertEqual(view["remaining"]["blockedTasks"], ["T02"])
+        self.assertFalse(view["remainingAssessed"])
+        self.assertEqual(view["estimate"]["reason"], "blocked")
 
 
 if __name__ == "__main__":

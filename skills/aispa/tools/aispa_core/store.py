@@ -94,6 +94,7 @@ class Journal:
                  "status": "running", "stage": "brief", "createdAt": timestamp(),
                  "briefs": [], "requirements": [], "spec": None, "tasks": [],
                  "gates": {}, "verification": None, "waiting": None, "notes": []}
+        state.update(startedAt=state["createdAt"], activeSince=state["createdAt"], elapsedSeconds=0.0)
         self.append(state, "init")
         atomic_json(self.home / "active.json", {"run": ident})
         return state

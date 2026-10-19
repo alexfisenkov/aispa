@@ -9,6 +9,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
                         evidence_rows, gate_valid, plan_basis, report_header, require,
                         validate_plan, verified)
 from .store import Invalid, timestamp
+from . import timing
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -118,7 +119,12 @@ class Workflow:
             previous = old.get(task["id"])
             task["origin"] = contract
             if previous and definition(previous) == definition(task) and previous.get("origin") == contract:
-                for key in ("status", "proof", "note"):
+                for key in ("status", "proof", "note", *timing.FIELDS):
+                    if key in previous:
+                        task[key] = previous[key]
+            elif previous:
+                timing.stop(previous, timestamp())
+                for key in ("startedAt", "elapsedSeconds", "attempts"):
                     if key in previous:
                         task[key] = previous[key]
         self.s["tasks"] = tasks
@@ -153,6 +159,8 @@ class Workflow:
                     and all(artifact_valid(self.store, a) for a in review.get("artifacts", [])),
                     "Нет актуальной сверки всего брифа после предыдущей волны")
         task["status"] = "running"
+        timing.start(task, timestamp())
+        task["attempts"] = task.get("attempts", 0) + 1
         task.pop("proof", None)
         self.save("task-started:" + tid)
 
@@ -160,6 +168,7 @@ class Workflow:
         self.running()
         require(bool(note.strip()), "Нужна причина препятствия")
         task = self.task(tid)
+        timing.stop(task, timestamp())
         task["status"], task["note"] = "blocked", note
         task.pop("proof", None)
         self.save("task-blocked:" + tid)
@@ -174,6 +183,8 @@ class Workflow:
             affected = next_set
         for task in self.s["tasks"]:
             if task["id"] in affected:
+                timing.stop(task, timestamp())
+                task.pop("finishedAt", None)
                 task["status"] = "pending"
                 task.pop("proof", None)
         self.s["waves"] = {}
@@ -185,12 +196,17 @@ class Workflow:
         require(not SECRET.search(" ".join(command)), "Секреты нельзя передавать аргументами команды")
         code = self.store.code()
         started = time.monotonic()
+        self.s["verification"] = None
+        self.s["activity"] = {"kind": "verification", "startedAt": timestamp()}
+        self.save("verification-started")
         try:
             result = subprocess.run(command, cwd=self.store.root, capture_output=True, timeout=timeout)
             raw, rc = result.stdout + result.stderr, result.returncode
         except subprocess.TimeoutExpired as e:
             raw, rc = (e.stdout or b"") + (e.stderr or b"") + b"\nAISPA: timeout\n", 124
         except OSError:
+            self.s.pop("activity", None)
+            self.save("verification-could-not-start")
             raise Invalid("Не удалось запустить команду проверки")
         output = raw.decode("utf-8", "replace")
         if SECRET.search(output):
@@ -200,6 +216,7 @@ class Workflow:
         self.s["verification"] = {"command": command, "exitCode": rc, "code": code,
                                   "changedCode": code != self.store.code(), "output": artifact,
                                   "durationSeconds": round(time.monotonic() - started, 3), "at": timestamp()}
+        self.s.pop("activity", None)
         self.save("verification-executed")
         return verified(self.store, self.s)
 
@@ -213,6 +230,7 @@ class Workflow:
         artifacts, failures = evidence_rows(self.store, report, {(tid, c) for c in task["criteria"]})
         require(not failures and not report["unmapped"], "Задача не прошла проверку всех критериев")
         task["status"] = "completed"
+        timing.stop(task, timestamp(), completed=True)
         task["proof"] = {"basis": report["basis"], "report": self.store.artifact("reviews", text.encode(), ".json"),
                          "artifacts": artifacts}
         self.save("task-completed:" + tid)
@@ -277,19 +295,29 @@ class Workflow:
         blocked = [t["id"] for t in self.s["tasks"] if t["status"] == "blocked"]
         self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked else "accepted"
         self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked}
-        self.s["finishedAt"] = timestamp()
+        timing.stop(self.s, timestamp(), completed=True)
         self.save("delivery-recorded")
 
     def close(self, status, note):
         require(status in ("paused", "blocked", "cancelled"), "Неизвестная причина остановки")
         require(bool(note.strip()), "Нужна причина остановки")
+        at = timestamp()
+        timing.stop(self.s, at)
+        for task in self.s["tasks"]:
+            timing.stop(task, at)
+        self.s.pop("activity", None)
         self.s["status"], self.s["waiting"] = status, note
         self.save("run-" + status)
 
     def resume(self):
         require(self.s["status"] != "running", "Прогон уже выполняется")
         self.s["status"], self.s["waiting"] = "running", None
-        self.s.pop("finishedAt", None)
+        at = timestamp()
+        timing.start(self.s, at)
+        for task in self.s["tasks"]:
+            if task["status"] == "running":
+                timing.start(task, at)
+        self.s.pop("activity", None)
         self.s["gates"].pop("acceptance", None)
         self.save("run-resumed")
 

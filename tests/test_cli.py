@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.request
 import urllib.error
@@ -135,6 +136,30 @@ class CliTests(unittest.TestCase):
                 urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5)
             self.assertEqual(error.exception.code, 409)
             error.exception.close()
+
+    def test_dashboard_reads_while_verification_holds_writer_lock(self):
+        self.init()
+        with self.server() as url:
+            process = subprocess.Popen([sys.executable, "-B", str(CLI), "--root", str(self.root),
+                                        "verify", "--", sys.executable, "-c", "import time; time.sleep(2); print('checked')"],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                seen = False
+                for _ in range(40):
+                    with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
+                        data = json.load(response)
+                    if (data.get("activity") or {}).get("kind") == "verification":
+                        seen = True
+                        self.assertIsNone(process.poll())
+                        break
+                    time.sleep(.025)
+                self.assertTrue(seen, "The active verification was not visible")
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 0, stdout + stderr)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=5)
 
 
 if __name__ == "__main__":
