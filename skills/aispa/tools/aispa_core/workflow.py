@@ -12,7 +12,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing
 from .team import TaskPipeline, task_proof_valid
-from . import project_context, discovery, carryover, cleanroom, blind, process_runner
+from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -85,6 +85,8 @@ class Workflow:
     def seal(self):
         self.running()
         require(self.s["briefs"] and active(self.s), "Нужны бриф и действующие требования")
+        if self.s.get("policy", {}).get("ideaReview"):
+            require(ideas.valid(self.store, self.s), "До фиксации брифа нужен актуальный разбор идеи: idea --file")
         core = set(self.s.get("core", [])) | {r["id"] for r in active(self.s) if r["core"]}
         require(core & {r["id"] for r in active(self.s)}, "До разработки определите обязательное ядро")
         self.s["core"] = sorted(core)
@@ -95,6 +97,8 @@ class Workflow:
     def spec(self, path):
         self.running()
         require(self.s.get("sealed"), "Сначала зафиксируйте бриф и обязательное ядро")
+        if self.s.get("policy", {}).get("ideaReview"):
+            require(ideas.valid(self.store, self.s), "Разбор идеи отсутствует или устарел; обновите idea --file")
         if self.s.get("policy", {}).get("discovery"):
             require(discovery.valid(self.store, self.s), "Сначала изучите проект: discover и проверенный отчёт discover --file")
         self.s["spec"] = self.store.artifact("specs", read_input(path).encode(), ".md")
@@ -127,7 +131,7 @@ class Workflow:
         self.save("coverage-reviewed")
         return passed
 
-    def plan(self, path):
+    def plan(self, path, review_path=None):
         self.running()
         if self.s.get("policy", {}).get("discovery"):
             require(discovery.valid(self.store, self.s), "Исследование проекта отсутствует или устарело; обновите discover")
@@ -136,6 +140,9 @@ class Workflow:
         text = read_input(path)
         tasks = validate_plan(self.s, json.loads(text))
         self.pipeline.validate_replan(tasks)
+        if self.s.get("policy", {}).get("planReview"):
+            require(review_path is not None, "До плана нужен разбор размера задач: plan-check, затем plan --review")
+        size_review = planning.review(self.store, self.s, tasks, json.loads(read_input(review_path))) if review_path else None
         old = {t["id"]: t for t in self.s["tasks"]}
         contract = basis(self.store, self.s, "coverage")
         for task in tasks:
@@ -151,6 +158,10 @@ class Workflow:
                     if key in previous:
                         task[key] = previous[key]
         self.s["tasks"] = tasks
+        if size_review:
+            self.s["planReview"] = size_review
+        else:
+            self.s.pop("planReview", None)
         self.pipeline.prepare()
         self.s["gates"]["plan"] = {"passed": True, "basis": basis(self.store, self.s, "plan"),
                                      "report": self.store.artifact("plans", text.encode(), ".json")}
@@ -167,6 +178,8 @@ class Workflow:
         require(self.s.get("sealed"), "Бриф изменён; нужна повторная фиксация")
         require(gate_valid(self.store, self.s, "coverage") and gate_valid(self.store, self.s, "plan"),
                 "Проверки брифа или плана отсутствуют, провалены либо устарели")
+        if self.s.get("policy", {}).get("planReview"):
+            require(planning.valid(self.store, self.s), "Разбор размера текущего плана отсутствует, повреждён или устарел")
 
     def start(self, tid, context):
         self.build_ready()
@@ -347,6 +360,8 @@ class Workflow:
         require(gate_valid(self.store, self.s, "acceptance"), "Обязательное ядро не принято или доказательства устарели")
         require(verified(self.store, self.s), "Проверка текущего кода устарела")
         require(self.store.clean(), "Сначала сохраните изменения проекта в Git")
+        if self.s.get("policy", {}).get("projectKnowledge"):
+            require(knowledge.valid(self.store, self.s), "До сдачи сохраните проверенные знания о готовом коде: knowledge-record")
         self.store.git("rev-parse", "HEAD")
         for task in self.s["tasks"]:
             if task["status"] == "completed":

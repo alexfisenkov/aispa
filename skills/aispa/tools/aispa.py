@@ -15,7 +15,7 @@ from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
-from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta
+from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -42,12 +42,26 @@ def parser():
     init.add_argument("--title", required=True)
     init.add_argument("--mode", required=True, choices=("auto", "important", "interview"))
     init.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
-    for name in ("brief", "requirements", "spec", "coverage", "plan", "acceptance"):
+    for name in ("brief", "requirements", "spec", "coverage", "acceptance"):
         sub.add_parser(name).add_argument("--file", required=True)
+    plan = sub.add_parser("plan"); plan.add_argument("--file", required=True); plan.add_argument("--review")
+    sub.add_parser("plan-check").add_argument("--file", required=True)
+    idea = sub.add_parser("idea"); idea.add_argument("--file"); idea.add_argument("--full", action="store_true")
+    know = sub.add_parser("knowledge")
+    know.add_argument("--path", action="append"); know.add_argument("--kind", action="append", choices=("command", "trap", "decision", "glossary"))
+    know.add_argument("--limit", type=int, default=8)
+    know.add_argument("--archive", action="store_true", help="Адресный поиск в архиве знаний")
+    know.add_argument("--archive-depth", type=int, default=4)
+    sub.add_parser("knowledge-compact")
+    writer = sub.add_parser("knowledge-assign")
+    writer.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
+    writer.add_argument("--native-id", required=True); writer.add_argument("--session", required=True)
+    writer.add_argument("--model")
+    sub.add_parser("knowledge-record").add_argument("--file", required=True)
     for name in ("seal", "finish", "resume", "status"):
         sub.add_parser(name)
     ctx = sub.add_parser("context")
-    ctx.add_argument("--kind", choices=("coverage", "task", "wave", "acceptance", "blind"), required=True)
+    ctx.add_argument("--kind", choices=("coverage", "task", "wave", "acceptance", "blind", "knowledge"), required=True)
     ctx.add_argument("--task")
     ctx.add_argument("--role", choices=("worker", "critic1", "critic2", "acceptor"))
     ctx.add_argument("--source", action="append", help="Уже известный точный файл: не вкладывать каталог; можно повторять")
@@ -161,14 +175,18 @@ def execute(args):
                 raise Invalid(".gitignore должен быть обычным файлом; содержимое сохранено")
             if is_link(store.home / "dashboard.html"):
                 raise Invalid("Дашборд не должен быть символической ссылкой")
-            inherited = carryover.capture(store, store.load(handoff_only=True)) if (store.home / "active.json").exists() else None
+            previous_state = store.load(handoff_only=True) if (store.home / "active.json").exists() else None
+            inherited = carryover.capture(store, previous_state) if previous_state else None
+            learned = knowledge.capture(store, previous_state) if previous_state else None
             def initialize_run(state):
-                state["policy"] = {"discovery": True, "cleanClone": True}
+                state["policy"] = {"discovery": True, "cleanClone": True, "ideaReview": True,
+                                   "planReview": True, "projectKnowledge": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["runtime"] = args.runtime
                 state["runtimeDigest"] = runtime_digest()
                 if inherited is not None:
                     carryover.attach(store, state, inherited)
+                knowledge.attach(store, state, learned)
                 shutil.copytree(PACKAGE, store.run / "runtime", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             state = store.create(args.slug, args.title, initializer=initialize_run)
             shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
@@ -182,17 +200,48 @@ def execute(args):
             print(json.dumps(publish(store, state), ensure_ascii=False, indent=2))
             return 0
         state = store.load()
-        read_only = args.action in ("status", "context", "memory", "discovery") or (args.action == "documents" and not args.refresh)
+        read_only = (args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge")
+                     or (args.action == "idea" and not args.file) or (args.action == "documents" and not args.refresh))
         if not read_only and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
         flow = Workflow(store, state)
         ok = True
         receipt = None
         action = args.action
-        if action in ("brief", "requirements", "spec", "coverage", "plan", "acceptance"):
+        if action in ("brief", "requirements", "spec", "coverage", "acceptance"):
             result = getattr(flow, action)(args.file)
             if isinstance(result, bool):
                 ok = result
+        elif action == "plan":
+            flow.plan(args.file, review_path=args.review)
+            receipt = state.get("planReview")
+        elif action == "plan-check":
+            print(json.dumps(planning.analyze(store, state, json.loads(flow.read_input(args.file))), ensure_ascii=False, indent=2))
+            return 0
+        elif action == "idea":
+            if args.file:
+                flow.running()
+                receipt = ideas.record(store, state, json.loads(flow.read_input(args.file)))
+                flow.save("idea-reviewed")
+            else:
+                print(json.dumps(ideas.view(store, state, compact=not args.full), ensure_ascii=False, indent=2))
+                return 0
+        elif action == "knowledge":
+            print(json.dumps(knowledge.query(store, state, paths=args.path, kinds=args.kind, limit=args.limit,
+                                            include_archive=args.archive, archive_depth=args.archive_depth), ensure_ascii=False, indent=2))
+            return 0
+        elif action == "knowledge-compact":
+            flow.running()
+            receipt = knowledge.compact(store, state)
+            flow.save("project-knowledge-checkpointed")
+        elif action == "knowledge-assign":
+            flow.running()
+            receipt = {"actor": knowledge.assign(store, state, args.runtime, args.native_id, args.session, model=args.model)}
+            flow.save("knowledge-writer-assigned")
+        elif action == "knowledge-record":
+            flow.running()
+            receipt = knowledge.record(store, state, json.loads(flow.read_input(args.file)))
+            flow.save("project-knowledge-recorded")
         elif action in ("seal", "finish", "resume"):
             getattr(flow, action)()
         elif action == "scope":

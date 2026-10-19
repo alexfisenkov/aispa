@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from .store import Invalid, digest
 from .portable import is_link, relative_name
-from . import carryover, docmeta
+from . import carryover, docmeta, ideas
 
 
 RUNTIMES = ("codex", "claude-code", "cursor")
@@ -31,7 +31,7 @@ POINTER = BEGIN + b"\n" + (
 CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\n\n".encode()
                + POINTER + b"\n")
 VIEWS = ("INDEX.md", "brief.md", "spec.md", "plan.md", "decisions.md", "progress.md",
-         "memory.md", "requirements.json", "project-study.md", "carryover.md", "documents.yaml", "source-map.json")
+         "memory.md", "requirements.json", "project-study.md", "carryover.md", "idea.md", "knowledge.md", "documents.yaml", "source-map.json")
 VIEW_SUMMARIES = {
     "INDEX.md": "Навигация по контексту, правила чтения и карта существующих файлов проекта.",
     "brief.md": "Точный текст сохранённых брифов владельца и ссылки на неизменные оригиналы.",
@@ -42,6 +42,8 @@ VIEW_SUMMARIES = {
     "memory.md": "Краткая ориентация в текущем прогоне и ссылки на полные источники и остатки.",
     "project-study.md": "Сохранённое изучение проекта, источники исследования и ограничения его свежести.",
     "carryover.md": "Происхождение истории, решений и незакрытых обязательств прошлых прогонов.",
+    "idea.md": "Разбор идеи: пользователь, проблема, результат, альтернативы, предположения и сценарии отказа.",
+    "knowledge.md": "Маршрут к проверенным командам, ловушкам, причинам решений и словарю; адресное чтение по текущим исходникам.",
 }
 SKIP_DIRS = {"node_modules", "vendor", "dist", "build", "coverage", "__pycache__",
              "tests", "test", "fixtures", "fixture", "history", "archive", "archives"}
@@ -297,6 +299,9 @@ def refresh(store, state):
         link, _ = _source(store, plan_report, sources, "plan")
         plan += "Исходный план: " + link + "\n\n"
     plan += _block(state.get("tasks", []))
+    if state.get("planReview"):
+        link, _ = _source(store, state["planReview"]["report"], sources, "plan-review")
+        plan += "\nРазбор размера и сохранённые границы: " + link + "\n"
     decisions = {"agentDecisions": state.get("notes", []), "decisions": state.get("decisions", []),
                  "ownerScopeDecisions": [{"requirement": r["id"], "decision": r["decision"]}
                                          for r in state.get("requirements", []) if r.get("decision")]}
@@ -330,12 +335,31 @@ def refresh(store, state):
         study += "\nЭто снимок изучения. Перед новым планом проверьте свежесть командой discovery.\n"
     else:
         study += "Исследование ещё не записано; инвентаризация имён его не заменяет.\n"
+    idea_text = "# Идея и сценарии продукта\n\n" + lead
+    if state.get("ideaReview"):
+        link, _ = _source(store, state["ideaReview"], sources, "idea-review")
+        idea_text += "Полный разбор: " + link + "\n\n"
+    idea_text += _block(ideas.view(store, state))
+    learned = state.get("knowledge", {})
+    knowledge_text = ("# Практические знания проекта\n\n" + lead +
+        "Читать адресно: `knowledge --path <путь>` или `knowledge --kind command|trap|decision|glossary`.\n"
+        "Команда проверяет свежесть источников. Историческая проверка команды не означает текущий PASS.\n"
+        "Для нового автора: `context --kind knowledge --write`; читать фактический код, а не план.\n\n")
+    if learned.get("inherited"):
+        link, _ = _source(store, learned["inherited"], sources, "knowledge-handoff")
+        knowledge_text += "Переданные знания с историей: " + link + "\n"
+    for item in learned.get("records", []):
+        link, _ = _source(store, item, sources, "knowledge-record")
+        knowledge_text += "Запись знаний: " + link + "\n"
+    if not learned.get("records") and not learned.get("inherited"):
+        knowledge_text += "Проверенные знания ещё не записаны.\n"
     found = inventory(store.root)
     index = ("# Контекст проекта AISpa\n\n" + lead +
              "Читайте [краткую память](memory.md), затем нужный документ:\n\n"
              "- [Бриф](brief.md), [требования](requirements.json), [спецификация](spec.md).\n"
              "- [План](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
              "- [Изучение проекта](project-study.md), [память между прогонами](carryover.md).\n"
+             "- [Разбор идеи](idea.md), [практические знания](knowledge.md); читать по текущему этапу.\n"
              "- [Краткий каталог документов](documents.yaml): назначение, ссылки и свежесть.\n"
              "- [Происхождение и свежесть](source-map.json).\n\n"
              "YAML-заголовки и каталог помогают выбрать нужный файл; они не заменяют его чтение.\n"
@@ -357,7 +381,8 @@ def refresh(store, state):
               "Сжатие памяти не удаляет канонические записи.\n\n"
               "Прошлые прогоны: [история и остатки](carryover.md); незакрытых пунктов: " + str(inherited["summary"]["outstanding"]) + ".\n"
               "Архитектура, команды и неизвестное: [изучение проекта](project-study.md).\n\n"
-              "Для адресного чтения: [каталог документов](documents.yaml); актуальность проверяет documents.\n"
+              "Разбор идеи: [idea.md](idea.md). Знания о коде: [knowledge.md](knowledge.md), читать адресно.\n"
+              "Для поиска неизвестных путей: [каталог документов](documents.yaml); при известных путях он не нужен.\n"
               "Каталог и YAML — навигация, а не доказательство выполнения требований.\n\n"
               "Требований: " + str(len(state.get("requirements", []))) + "; задач: " + str(len(state.get("tasks", []))) +
               "; решений агента: " + str(len(state.get("notes", []))) + ".\n\n"
@@ -369,7 +394,7 @@ def refresh(store, state):
     content = {"INDEX.md": index, "brief.md": brief, "spec.md": spec, "plan.md": plan,
                "decisions.md": "# Решения\n\n" + lead + _block(decisions), "progress.md": progress,
                "memory.md": memory, "requirements.json": _json({"run": state["run"], "requirements": state.get("requirements", [])})}
-    content.update({"project-study.md": study, "carryover.md": carry_text})
+    content.update({"project-study.md": study, "carryover.md": carry_text, "idea.md": idea_text, "knowledge.md": knowledge_text})
     for name, summary in VIEW_SUMMARIES.items():
         content[name] = docmeta.render(content[name], kind="derived-context", summary=summary)
     if len(content["memory.md"]) > MEMORY_LIMIT:

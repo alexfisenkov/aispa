@@ -1,4 +1,4 @@
-# Дашборд AISpa · 0.1.0-alpha.7
+# Дашборд AISpa · 0.1.0-alpha.8
 
 Дашборд использует дизайн владельца Chrome & Graphite: шрифты Unbounded,
 Onest и JetBrains Mono, графитовые карточки и хромовые акценты. В шапке —

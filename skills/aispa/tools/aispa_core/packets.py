@@ -98,6 +98,19 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                 "inheritedBriefs": carryover.brief_sources(store, state),
                 "clone": {k: clone[k] for k in ("path", "head", "tree") if k in clone},
                 "instructions": "Read original briefs and run the cloned product first. Do not open the source project's spec, registry, tasks or reviews. Save independent observations before requesting the reconciliation packet."}
+    if kind == "knowledge":
+        from .discovery import _names, _kind, _safe_path
+        from .store import digest
+        require(source_paths is None, "Для автора знаний используйте список projectFiles и актуальный код")
+        names = [name for name in _names(store) if _kind(name, explicit=True) is not None
+                 and _safe_path(store.root, name).is_file()]
+        check, clean = state.get("verification"), state.get("cleanrun")
+        return {"kind": kind, "basis": store.code(), "writer": state.get("knowledge", {}).get("writer", {}).get("id"),
+                "projectFiles": names[:128], "omittedFiles": max(0, len(names) - 128),
+                "verification": check, "verificationDigest": digest(check) if check else None,
+                "cleanrun": clean, "cleanrunDigest": digest(clean) if clean else None,
+                "runDirectory": str(store.run),
+                "instructions": "Read actual source files and execute or inspect genuine verification evidence. Do not use the plan, spec, brief or task reports as proof of implemented behavior. Record command, trap, decision and glossary knowledge or explicit category uncertainties. A historical command check is not a current PASS."}
     selected = task_closure(state, task_id) if kind == "task" else state["tasks"]
     req_ids = {rid for task in selected for rid in task["requirements"]}
     reqs = [r for r in active(state) if kind != "task" or r["id"] in req_ids or r["kind"] == "constraint"]
@@ -107,6 +120,14 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
               "verification": state["verification"], "projectContext": state.get("projectContext"),
               "discovery": state.get("discovery"), "carryover": state.get("carryover")}
     packet.update(document_context(store, state, kind, selected, source_paths))
+    if state.get("ideaReview") and kind == "coverage":
+        packet["ideaStudy"] = state["ideaReview"]
+    if kind == "task" and state.get("knowledge"):
+        from . import knowledge
+        paths = sorted({z for task in selected for z in task["zones"] + task.get("readZones", [])})
+        hints = knowledge.query(store, state, paths=paths, limit=4, max_chars=3000)
+        if hints.get("entries") or hints.get("omitted", {}).get("stale"):
+            packet["knowledgeHints"] = hints
     packet["documentReadingRule"] = "Read original briefs, constraints and every required check. Known paths need no catalog; warnings require source inspection. Metadata never replaces evidence."
     if kind == "task":
         current = state["taskHistory"][task_id][-1]

@@ -48,8 +48,8 @@ class CliTests(unittest.TestCase):
         self.git("add", ".gitignore", "AGENTS.md")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "ignore local records")
 
-    def input(self, value):
-        p = self.inbox / "input"
+    def input(self, value, name="input"):
+        p = self.inbox / name
         p.write_text(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False), encoding="utf-8", newline="\n")
         return str(p)
 
@@ -57,10 +57,24 @@ class CliTests(unittest.TestCase):
         return self.call("context", "--kind", kind, *extra)
 
     def discover(self):
-        from test_discovery import synthetic_report
+        from tests.test_discovery import synthetic_report
         receipt = self.call("discover")["receipt"]
         evidence = json.loads(Path(receipt["absolutePath"]).read_text(encoding="utf-8"))
         self.call("discover", "--file", self.input(synthetic_report(evidence)))
+
+    def idea(self):
+        from tests.test_ideas import synthetic_report
+        from aispa_core.store import Journal
+        store = Journal(self.root); state = store.load()
+        self.call("idea", "--file", self.input(synthetic_report(store, state)))
+
+    def plan_with_review(self, tasks):
+        draft = self.input(tasks, "draft.json")
+        check = self.call("plan-check", "--file", draft)
+        review = {"basis": check["basis"], "draft": tasks,
+                  "groups": [{"task": t["id"], "from": [t["id"]], "reason": "Synthetic fixture: one coherent scenario"} for t in tasks],
+                  "separate": [{"suggestion": s["id"], "reason": "Synthetic fixture preserves this boundary"} for s in check["suggestions"]]}
+        self.call("plan", "--file", draft, "--review", self.input(review, "size-review.json"))
 
     @contextmanager
     def server(self):
@@ -154,6 +168,8 @@ class CliTests(unittest.TestCase):
         self.call("brief", "--file", self.input("Команда выводит ready"))
         self.call("requirements", "--file", self.input([{"id": "R01", "text": "Команда",
             "brief": "B001", "quote": "Команда выводит ready", "core": True, "acceptance": ["Выводит ready"]}]))
+        self.call("seal", expected=2)
+        self.idea()
         self.call("seal")
         self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."), expected=2)
         self.discover()
@@ -161,8 +177,10 @@ class CliTests(unittest.TestCase):
         ctx = self.context("coverage")
         self.call("coverage", "--file", self.input({"basis": ctx["basis"], "reviewer": "synthetic",
             "independent": True, "unmapped": [], "checks": [{"requirement": "R01", "status": "covered", "specQuote": "Команда выводит ready"}]}))
-        self.call("plan", "--file", self.input([{"id": "T01", "title": "Команда", "requirements": ["R01"],
-            "dependsOn": [], "zones": ["app.py"], "criteria": ["Выводит ready"]}]))
+        tasks = [{"id": "T01", "title": "Команда", "requirements": ["R01"],
+                  "dependsOn": [], "zones": ["app.py"], "criteria": ["Выводит ready"]}]
+        self.call("plan", "--file", self.input(tasks), expected=2)
+        self.plan_with_review(tasks)
         ctx = self.context("task", "--task", "T01")
         self.call("start", "T01", "--context", ctx["basis"])
         for role in ("worker", "critic1", "critic2", "acceptor"):
@@ -211,13 +229,37 @@ class CliTests(unittest.TestCase):
                   "observations": [{"brief": "B001", "quote": "Команда выводит ready", "status": "passed",
                                     "note": "Read original brief first; synthetic clean clone assertion passed", "artifact": clean["output"]["file"]}]}))
         self.call("acceptance", "--file", self.input(proof("acceptance", "R01")))
+        self.call("finish", expected=2)
+        writer = self.call("knowledge-assign", "--runtime", "codex", "--native-id", "synthetic-knowledge",
+                           "--session", "fresh-knowledge-session")["receipt"]["actor"]
+        learned = self.context("knowledge")
+        self.assertNotIn("spec", learned); self.assertNotIn("briefs", learned); self.assertNotIn("tasks", learned)
+        from aispa_core.store import file_hash
+        self.call("knowledge-record", "--file", self.input({"writer": writer["id"], "basis": learned["basis"],
+            "entries": [{"key": "cli.ready", "kind": "command", "text": "Synthetic: stdout check of this CLI.",
+                         "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
+                         "command": learned["verification"]["command"],
+                         "verification": {"kind": "project", "sha256": learned["verificationDigest"]}}],
+            "uncertainties": {k: "Synthetic fixture did not establish additional knowledge in this category." for k in ("trap", "decision", "glossary")}}))
+        self.assertEqual(len(self.call("knowledge", "--path", "app.py")["entries"]), 1)
         state = self.call("finish")
         self.assertEqual(state["status"], "accepted")
         self.assertTrue(state["gates"]["acceptance"])
+        original = (self.root / "app.py").read_bytes()
         with self.server() as url:
             (self.root / "app.py").write_text("print('changed after delivery')\n", encoding="utf-8", newline="\n")
             with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
                 self.assertEqual(json.load(response)["status"], "stale")
+        (self.root / "app.py").write_bytes(original)
+        new = self.call("init", "--slug", "next", "--title", "Next iteration", "--mode", "auto", "--runtime", "codex")
+        self.assertNotEqual(new["runDirectory"], state["runDirectory"])
+        self.assertEqual(new["status"], "running")
+        history = self.call("knowledge", "--path", "app.py", "--archive")
+        self.assertEqual(len(history["entries"]), 1)
+        self.assertTrue(history["historicalOnly"])
+        self.call("knowledge-compact")
+        self.assertEqual(len(self.call("knowledge", "--path", "app.py")["entries"]), 1)
+        self.call("finish", expected=2)
 
     def test_local_dashboard_serves_real_projection(self):
         self.init()
