@@ -120,6 +120,12 @@ class DashboardServerTests(unittest.TestCase):
             self.assertTrue(dashboard.inspect(self.store)["running"])
             self.assertTrue(dashboard.stop(self.store)["stopped"])
 
+    def test_numeric_loopback_bind_never_uses_reverse_dns(self):
+        with patch("socket.getfqdn", side_effect=AssertionError("reverse DNS is not needed")):
+            with dashboard.LoopbackServer((dashboard.HOST, 0), BaseHTTPRequestHandler) as server:
+                self.assertEqual(server.server_name, dashboard.HOST)
+                self.assertGreater(server.server_port, 0)
+
     def test_startup_failure_reports_probe_class_without_token(self):
         with patch.object(dashboard, "_private_request", return_value=(None, "http-421")):
             with self.assertRaisesRegex(Exception, "health-http-421") as failure:

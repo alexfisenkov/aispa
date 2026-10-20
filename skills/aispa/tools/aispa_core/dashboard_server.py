@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import secrets
 import socket
+from socketserver import TCPServer
 import stat
 import subprocess
 import sys
@@ -31,6 +32,18 @@ START_TIMEOUT = 6.0
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 ASSET = Path(__file__).resolve().parents[2] / "assets" / "dashboard.html"
 _CHILDREN = {}  # exact Popen handles in this interpreter; never discovered PIDs
+
+
+class LoopbackServer(ThreadingHTTPServer):
+    """Bind the known numeric loopback address without reverse DNS."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = HOST
+        self.server_port = self.server_address[1]
 
 
 def _root_hash(store):
@@ -339,11 +352,7 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
             else:
                 self._send(404)
 
-    class Server(ThreadingHTTPServer):
-        daemon_threads = True
-        allow_reuse_address = True
-
-    with Server((HOST, port), Handler) as server:
+    with LoopbackServer((HOST, port), Handler) as server:
         if managed:
             metadata = {"marker": MARKER, "rootHash": root_hash, "instance": instance,
                         "token": token, "pid": os.getpid(), "port": server.server_port}
