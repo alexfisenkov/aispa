@@ -1,0 +1,122 @@
+{
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "run_order": [
+    "aispa",
+    "control"
+  ],
+  "arms": {
+    "aispa": {
+      "commit": "96b5dbcfa1cb6f4e8def0475a157a2cbe1d7bf42",
+      "end_to_end_seconds": 2772.941,
+      "native_elapsed_seconds": 2754.71,
+      "dispatch_to_native_start_seconds": 18.231,
+      "threads": 14,
+      "model_responses_with_usage": 432,
+      "input_tokens": 55018304,
+      "cached_input_tokens": 53661696,
+      "uncached_input_tokens": 1356608,
+      "output_tokens": 167828,
+      "reasoning_output_tokens": 39423,
+      "total_tokens": 55186132,
+      "cache_fraction_of_input": 0.9753426059807296,
+      "coordinator_usage": {
+        "input_tokens": 30997880,
+        "cached_input_tokens": 30732416,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 60588,
+        "reasoning_output_tokens": 23344,
+        "total_tokens": 31058468
+      },
+      "descendant_usage": {
+        "input_tokens": 24020424,
+        "cached_input_tokens": 22929280,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 107240,
+        "reasoning_output_tokens": 16079,
+        "total_tokens": 24127664
+      },
+      "provider_telemetry_complete": true,
+      "benchmark_conformant": true
+    },
+    "control": {
+      "commit": "e7a955c0ee87caf4ea084a0792fc26c3f1af6c25",
+      "end_to_end_seconds": 1754.37,
+      "native_elapsed_seconds": 1712.172,
+      "dispatch_to_native_start_seconds": 42.198,
+      "threads": 8,
+      "model_responses_with_usage": 141,
+      "input_tokens": 13095066,
+      "cached_input_tokens": 12755328,
+      "uncached_input_tokens": 339738,
+      "output_tokens": 81507,
+      "reasoning_output_tokens": 26524,
+      "total_tokens": 13176573,
+      "cache_fraction_of_input": 0.9740560299581537,
+      "coordinator_usage": {
+        "input_tokens": 8911913,
+        "cached_input_tokens": 8801664,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 36498,
+        "reasoning_output_tokens": 11436,
+        "total_tokens": 8948411
+      },
+      "descendant_usage": {
+        "input_tokens": 4183153,
+        "cached_input_tokens": 3953664,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 45009,
+        "reasoning_output_tokens": 15088,
+        "total_tokens": 4228162
+      },
+      "provider_telemetry_complete": true,
+      "benchmark_conformant": true
+    }
+  },
+  "measurement": "Unique native provider responses across each exact orchestrator subtree, including final replies; not billing; input includes cache and output includes reasoning.",
+  "limitations": [
+    "One paired project, not statistical superiority.",
+    "Sequential randomized order does not remove cache/backend-load confounding.",
+    "Quality and brief acceptance must be read separately before interpreting productivity.",
+    "Infrastructure-interrupted gpt-6-sol attempt and common preparation/evaluation overhead excluded from both primary arms and disclosed separately.",
+    "Completeness covers telemetry emitted and retained by this host at the checked snapshot; not unreported backend requests or billing.",
+    "Calendar time starts at recorded dispatch_at before spawn; 18.231/42.198 seconds to first task_started include coordinator pre-spawn delay, not proven provider queue. Common coordinator tokens are excluded."
+  ],
+  "aispa_divided_by_control": {
+    "end_to_end_seconds": 1.5805907533758556,
+    "input_tokens": 4.201452974731094,
+    "cached_input_tokens": 4.2070024385104015,
+    "uncached_input_tokens": 3.9931005657300624,
+    "output_tokens": 2.05906241181739,
+    "total_tokens": 4.188200680100964,
+    "model_responses_with_usage": 3.0638297872340425
+  },
+  "skill_sources": {
+    "aispa": {
+      "version": "0.1.0-alpha.10",
+      "commit": "bd1bc61378341860fc0465b9c8d13bdbd6ec29b7"
+    },
+    "control": {
+      "version": "2.1.0",
+      "commit": "9fc898cbe941d5b8a369f1dd657e9119676eb44f",
+      "source_archive": "private; not redistributed"
+    }
+  },
+  "brief_sha256": "a2e61519916e44f0471a58d198def7f6a867fb2e8a80975a44a6ce43b2618844",
+  "common_experiment_overhead": {
+    "included_in_primary_arms": false,
+    "complete_total_measured": false,
+    "scope": "Protocol preparation, oracle, measurement setup, root coordinator and external reviewers. Not zero; no whole-study billing claim."
+  },
+  "aborted_previous_attempt": {
+    "model": "gpt-6-sol",
+    "reason": "Provider capacity failures; stopped, preserved, excluded from both primary arms",
+    "telemetry_complete": false,
+    "observed_input_tokens": 10511189,
+    "observed_cached_input_tokens": 10093568,
+    "observed_uncached_input_tokens": 417621,
+    "observed_output_tokens": 41603,
+    "observed_reasoning_output_tokens": 13191,
+    "observed_total_tokens": 10552792
+  }
+}
