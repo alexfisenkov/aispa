@@ -368,7 +368,14 @@ class CleanroomTests(unittest.TestCase):
         self.prepare()
         receipt = self.execute("print('x' * 1500000)")
         self.assertTrue(receipt["truncated"])
+        self.assertFalse(receipt["passed"])
+        self.assertFalse(cleanroom.valid(self.store, self.state))
         self.assertLess(len(self.store.text(receipt["output"])), cleanroom.MAX_OUTPUT + 200)
+        forged = {k: v for k, v in receipt.items() if k != "artifact"}
+        forged["passed"] = True
+        forged["artifact"] = self.store.artifact("cleanroom", cleanroom._json(forged), ".run.json")
+        self.state["cleanrun"] = forged
+        self.assertFalse(cleanroom.valid(self.store, self.state), "truncated output cannot become a passing receipt")
         # A token beyond the retained prefix must still be detected while draining.
         receipt = self.execute("print('x' * 1100000); print('ghp_' + 'a' * 30)")
         self.assertTrue(receipt["redacted"])

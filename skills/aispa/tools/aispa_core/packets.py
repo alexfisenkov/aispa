@@ -2,9 +2,9 @@
 import json
 
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
-from .store import timestamp, common_input, Invalid
+from .store import common_input, Invalid
 from .portable import match_name, relative_name
-from . import docmeta
+from . import docmeta, telemetry
 
 MAX_PACKET_BYTES = 16000
 
@@ -131,6 +131,14 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
             packet["requiredIdeaChecks"] = list(QUESTIONS)
     if state.get("planReview") and kind == "task":
         packet["deliveryPlan"] = state["planReview"]["report"]
+    if kind == "task":
+        for key in ("briefMap", "featureScenarios", "interfaceContract"):
+            if state.get(key):
+                require(artifact_valid(store, state[key]), "Повреждён источник контекста задачи: " + key)
+                packet[key] = state[key]
+        if state.get("interfaceContract"):
+            from . import design_contract
+            packet["interfaceReferences"] = design_contract.reference_snapshots(store, state)
     if kind == "task" and state.get("knowledge"):
         from . import knowledge
         paths = sorted({z for task in selected for z in task["zones"] + task.get("readZones", [])})
@@ -140,8 +148,11 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
     packet["documentReadingRule"] = "Read original briefs, constraints and every required check. Known paths need no catalog; warnings require source inspection. Metadata never replaces evidence."
     if kind == "task":
         current = state["taskHistory"][task_id][-1]
+        from . import test_intent
         task = next(t for t in selected if t["id"] == task_id)
         packet.update(verification=current.get("verification"), attempt=current["id"],
+                      testIntent=current.get("testIntent"),
+                      testSourceChanges=test_intent.source_changes(store, state, task_id),
                       repairPlan=current.get("repairPlan"),
                       roles={key: value for key, value in current["roles"].items() if role is None or key == role},
                       actors=current["actors"],
@@ -158,6 +169,13 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
     if kind == "acceptance":
         packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                       blindReview=state.get("blindReview"), handoff=state.get("handoff"))
+    if kind == "task" and task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview"):
+        from . import integration
+        packet["branchReview"] = integration.context(store, state, task_id)
+        packet["branchReviewAxes"] = list(integration.AXES)
+    if kind == "task" and state.get("ownerReferences"):
+        ids = {rid for task in selected for rid in task["requirements"]}
+        packet["ownerReferences"] = [ref for ref in state["ownerReferences"] if set(ref["requirements"]) & ids]
     return packet
 
 
@@ -187,30 +205,8 @@ def write(store, packet, *, maximum=MAX_PACKET_BYTES):
 
 
 def record_usage(store, state, value):
-    require(isinstance(value, dict), "Usage должен быть объектом")
-    require(value.get("actor") in state.get("actors", {}), "Usage требует известного нативного участника")
-    for key in ("callId", "source"):
-        require(isinstance(value.get(key), str) and value[key].strip(), "Нет источника метрики или ID вызова")
-    for key in ("inputTokens", "outputTokens", "cachedInputTokens"):
-        require(type(value.get(key)) is int and value[key] >= 0, "Usage: нужны реальные неотрицательные целые tokens")
-    require(value["cachedInputTokens"] <= value["inputTokens"], "Cached input превышает весь input")
-    prior = state.setdefault("usage", [])
-    identity = (value["actor"], value["callId"])
-    require(identity not in {(r["actor"], r["callId"]) for r in prior}, "Метрика вызова уже записана")
-    row = {k: value[k] for k in ("actor", "callId", "source", "inputTokens", "outputTokens", "cachedInputTokens")}
-    row["at"] = timestamp()
-    row["record"] = store.artifact("usage", encode(row), ".json")
-    prior.append(row)
-    return usage_summary(store, state)
+    return telemetry.record(store, state, value)
 
 
 def usage_summary(store, state):
-    rows = state.get("usage", [])
-    for row in rows:
-        require(artifact_valid(store, row["record"]), "Повреждён источник метрики")
-        require(json.loads(store.text(row["record"])) == {k: v for k, v in row.items() if k != "record"}, "Метрика отличается от источника")
-    return {"measuredCalls": len(rows), "complete": False, "unit": "tokens",
-            "inputTokens": sum(r["inputTokens"] for r in rows) if rows else None,
-            "outputTokens": sum(r["outputTokens"] for r in rows) if rows else None,
-            "cachedInputTokens": sum(r["cachedInputTokens"] for r in rows) if rows else None,
-            "note": "Only recorded native measurements; missing calls and token savings are not inferred"}
+    return telemetry.summary(store, state)

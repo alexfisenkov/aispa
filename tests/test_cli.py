@@ -1,4 +1,5 @@
 import json
+import copy
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -19,7 +20,7 @@ sys.path.insert(0, str(PACKAGE / "tools"))
 class CliTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-cli-")
-        self.root = Path(self.temp.name) / "проект with spaces"
+        self.root = Path(self.temp.name) / "проект with spaces 🙂"
         self.root.mkdir()
         self.git("init", "-q")
         (self.root / "app.py").write_text("print('ready')\n", encoding="utf-8", newline="\n")
@@ -32,18 +33,23 @@ class CliTests(unittest.TestCase):
     def git(self, *args):
         subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)
 
-    def call(self, *args, expected=0, cli=CLI):
+    def call(self, *args, expected=0, cli=None):
+        cli = cli or (CLI if args and args[0] == "init" else getattr(self, "cli", CLI))
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
                            text=True, capture_output=True, timeout=20, encoding="utf-8")
         self.assertEqual(r.returncode, expected, r.stderr + r.stdout)
         if expected:
             self.assertNotIn("Traceback", r.stderr)
             return r
-        return json.loads(r.stdout)
+        result = json.loads(r.stdout)
+        if args and args[0] == "init":
+            self.cli = self.root / ".aispa" / result["runDirectory"] / "runtime/tools/aispa.py"
+        return result
 
     def init(self, cli=CLI):
         state = self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", "--runtime", "codex", cli=cli)
         self.run = self.root / ".aispa" / state["runDirectory"]
+        self.cli = self.run / "runtime/tools/aispa.py"
         self.inbox = self.root / ".aispa/inbox"
         self.inbox.mkdir()
         self.git("add", ".gitignore", "AGENTS.md")
@@ -56,6 +62,16 @@ class CliTests(unittest.TestCase):
 
     def context(self, kind, *extra):
         return self.call("context", "--kind", kind, *extra)
+
+    def assert_artifact_tamper_stales_status(self, label, ref):
+        path = self.run / ref["file"]
+        original = path.read_bytes()
+        try:
+            path.write_bytes(original + b"\nfixture-tamper")
+            self.assertEqual(self.call("status")["status"], "stale", label)
+        finally:
+            path.write_bytes(original)
+        self.assertEqual(self.call("status")["status"], "accepted", label + " after restore")
 
     def discover(self):
         from tests.test_discovery import synthetic_report
@@ -81,7 +97,7 @@ class CliTests(unittest.TestCase):
 
     @contextmanager
     def server(self):
-        process = subprocess.Popen([sys.executable, "-B", str(CLI), "--root", str(self.root), "serve"],
+        process = subprocess.Popen([sys.executable, "-B", str(getattr(self, "cli", CLI)), "--root", str(self.root), "serve"],
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
         try:
             url = process.stdout.readline().strip()
@@ -168,8 +184,25 @@ class CliTests(unittest.TestCase):
 
     def test_full_cli_scenario(self):
         self.init()
+        from tests import alpha10_fixtures as fixtures
+        from aispa_core.store import Journal
         runner = "python" if os.name == "nt" else "python3"
         from aispa_core.store import file_hash
+        owner_brief = "Команда выводит ready. Используй README.md как образец для команды."
+        def participant(role):
+            return self.call("participant", "--role", role, "--runtime", "codex",
+                             "--native-id", "synthetic-" + role, "--session", "test-session")["receipt"]["actor"]
+
+        coordinator = participant("coordinator")
+        analyst = participant("brief-analyst")
+        reviewer = participant("brief-reviewer")
+        self.call("usage", "--file", self.input({"actor": coordinator, "callId": "synthetic-coordinator-call",
+            "source": "synthetic native usage fixture", "inputTokens": 20,
+            "outputTokens": 5, "cachedInputTokens": 3}, "usage-coordinator.json"))
+        self.call("usage", "--file", self.input({"actor": analyst, "callId": "synthetic-brief-call",
+            "source": "synthetic native usage fixture", "inputTokens": 12,
+            "outputTokens": 3, "cachedInputTokens": 1}, "usage-brief.json"))
+        self.assertEqual(set(self.call("usage")["byRole"]), {"coordinator", "brief-analyst"})
         (self.root / "README.md").write_text(
             "# CLI fixture\n\n## Quickstart\nPython 3.11+; run `python3 app.py` on macOS or `python app.py` on Windows.\n"
             "The program prints ready. Python standard library only.\n"
@@ -179,31 +212,67 @@ class CliTests(unittest.TestCase):
             "No domain terminology beyond standard output.\n", encoding="utf-8", newline="\n")
         self.git("add", "README.md")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "document synthetic CLI")
-        self.call("brief", "--file", self.input("Команда выводит ready"))
+        self.call("brief", "--file", self.input(owner_brief))
         self.call("requirements", "--file", self.input([{"id": "R01", "text": "Команда",
-            "brief": "B001", "quote": "Команда выводит ready", "core": True, "acceptance": ["Выводит ready"]}]))
+            "brief": "B001", "quote": owner_brief, "core": True, "acceptance": ["Выводит ready"]}]))
+        self.call("reference", "--file", self.input({"path": "README.md", "sha256": file_hash(self.root / "README.md"),
+                  "brief": "B001", "quote": "Используй README.md как образец для команды.",
+                  "requirements": ["R01"], "use": "Use the owner's local README quickstart as a concrete reference for this fixture."},
+                  "owner-reference.json"))
         self.call("seal", expected=2)
+        original = self.call("brief-source")
+        self.call("brief-extract", "--file", self.input(fixtures.source_report(original, analyst), "source-analysis.json"))
+        independent_source = self.call("brief-source")
+        self.assertNotIn(analyst, json.dumps(independent_source))
+        self.call("brief-review", "--file", self.input(fixtures.source_report(independent_source, reviewer), "source-review.json"))
+        mapping = self.call("brief-map-context")
+        self.call("brief-map", "--file", self.input(fixtures.source_map_report(mapping, reviewer), "source-map.json"))
+        self.assertTrue(self.call("preparation")["brief"]["valid"])
+        participant("idea")
         self.idea()
         self.call("seal")
         self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."), expected=2)
+        participant("discovery")
         self.discover()
         challenge = self.call("idea", "--full")["report"]["challenge"]
-        spec = "Команда выводит ready через стандартный вывод.\n" + "\n".join(
+        spec = "Команда выводит ready через стандартный вывод. README.md служит образцом команды.\n" + "\n".join(
             row["decision"] + "\n" + row["validation"] for row in challenge)
         self.call("spec", "--file", self.input(spec))
+        coverage_actor = participant("coverage")
         ctx = self.context("coverage")
-        self.call("coverage", "--file", self.input({"basis": ctx["basis"], "reviewer": "synthetic",
+        self.call("coverage", "--file", self.input({"basis": ctx["basis"], "reviewer": coverage_actor,
             "independent": True, "unmapped": [], "checks": [{"requirement": "R01", "status": "covered", "specQuote": "Команда выводит ready"}],
             "ideaChecks": [{"probe": row["probe"], "status": "covered", "specQuote": row["decision"] + "\n" + row["validation"],
                            "note": "Synthetic correspondence; this test is not semantic review."} for row in challenge]}))
+        current = Journal(self.root); design_state = current.load()
+        self.call("scenarios", "--file", self.input(fixtures.scenarios(design_state,
+                  source_quote=owner_brief, spec_quote="Команда выводит ready"), "scenarios.json"))
+        design_state = current.load()
+        self.call("interfaces", "--file", self.input(fixtures.interfaces(design_state), "interfaces.json"))
+        self.assertTrue(self.call("preparation")["design"]["scenariosValid"])
+        self.assertTrue(self.call("preparation")["design"]["interfacesValid"])
+        participant("planner")
         tasks = [{"id": "T01", "title": "Команда", "requirements": ["R01"],
-                  "dependsOn": [], "zones": ["app.py"], "criteria": ["Выводит ready"]}]
+                  "dependsOn": [], "zones": ["app.py"], "readZones": ["."], "criteria": ["Выводит ready"]}]
         self.call("plan", "--file", self.input(tasks), expected=2)
         self.plan_with_review(tasks)
         ctx = self.context("task", "--task", "T01")
         self.call("start", "T01", "--context", ctx["basis"])
         for role in ("worker", "critic1", "critic2", "acceptor"):
             self.call("assign", "T01", "--role", role, "--runtime", "codex", "--native-id", "synthetic-" + role, "--session", "test-session")
+        task_context = self.context("task", "--task", "T01")
+        self.call("usage", "--file", self.input({"actor": task_context["actors"]["worker"],
+            "callId": "synthetic-worker-call", "source": "synthetic native usage fixture",
+            "inputTokens": 30, "outputTokens": 8, "cachedInputTokens": 5}, "usage-worker.json"))
+        self.assertEqual(self.call("usage")["byRole"]["worker"]["measuredCalls"], 1)
+        intent = fixtures.existing_behavior_intent(task_context, self.root)
+        self.call("test-intent", "--task", "T01", "--file",
+                  self.input(intent, "test-intent-v1.json"))
+        revised_intent = copy.deepcopy(intent)
+        revised_intent["notApplicable"][0]["reason"] += " The source hash is frozen before submission."
+        self.call("test-intent", "--task", "T01", "--file",
+                  self.input(revised_intent, "test-intent-v2.json"))
+        self.assertEqual(self.call("test-intent", "--task", "T01")["revision"], 2)
         self.call("verify", "--task", "T01", "--", sys.executable, "-c",
                   "import subprocess,sys; assert subprocess.check_output([sys.executable,'app.py'],text=True).strip()=='ready'; print('checked')")
 
@@ -211,10 +280,14 @@ class CliTests(unittest.TestCase):
             ctx = self.context(kind, *extra)
             role = extra[extra.index("--role") + 1] if "--role" in extra else None
             checks = ctx.get("expectedChecks", [{"requirement": rid, "criterion": "Выводит ready"}])
-            report = {"basis": ctx["basis"], "reviewer": ctx["actors"][role] if role else "synthetic", "independent": True,
+            report = {"basis": ctx["basis"], "reviewer": ctx["actors"][role] if role else
+                      getattr(self, "blind_actor", "synthetic") if kind == "acceptance" else "synthetic", "independent": True,
                       "unmapped": [], "checks": [dict(c, status="passed", artifact=ctx["verification"]["output"]["file"], note="Проверено тестовой командой") for c in checks]}
+            if role and role != "worker":
+                report["testSourceChanges"] = []
             if role in ("critic1", "critic2"):
                 report["findings"] = []
+                report["branchReview"] = fixtures.branch_review(self.root, "T01", ctx["verification"]["output"]["file"])
             if role == "critic2":
                 report.update(previousReport=ctx["rounds"][0]["report"]["sha256"], repairReceipt=None, resolutions=[])
             if role == "acceptor":
@@ -262,8 +335,10 @@ class CliTests(unittest.TestCase):
         clean = self.call("clean-verify", "--", sys.executable, "-B", "-c",
                   "import subprocess,sys; assert subprocess.check_output([sys.executable,'app.py'],text=True).strip()=='ready'; print('fresh clone checked')")["receipt"]
         self.call("context", "--kind", "acceptance", expected=2)
+        blind_actor = participant("blind")
+        self.blind_actor = blind_actor
         blind = self.context("blind")
-        self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": "synthetic", "independent": True,
+        self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": blind_actor, "independent": True,
                   "observations": [{"brief": "B001", "quote": "Команда выводит ready", "status": "passed",
                                     "note": "Read original brief first; synthetic clean clone assertion passed", "artifact": clean["output"]["file"]}]}))
         self.call("acceptance", "--file", self.input(proof("acceptance", "R01")))
@@ -282,6 +357,21 @@ class CliTests(unittest.TestCase):
         state = self.call("finish")
         self.assertEqual(state["status"], "accepted")
         self.assertTrue(state["gates"]["acceptance"])
+        saved = Journal(self.root).load()
+        attempt = saved["taskHistory"]["T01"][-1]
+        self.assertEqual(len(attempt["testIntentHistory"]), 2)
+        integrity_refs = {
+            "test intent first revision": attempt["testIntentHistory"][0],
+            "test intent second revision": attempt["testIntentHistory"][1],
+            "test baseline": attempt["testBaseline"],
+            "brief map": saved["briefMap"],
+            "feature scenarios": saved["featureScenarios"],
+            "interface contract": saved["interfaceContract"],
+            "owner reference snapshot": saved["ownerReferences"][0]["snapshot"],
+        }
+        for label, ref in integrity_refs.items():
+            with self.subTest(artifact=label):
+                self.assert_artifact_tamper_stales_status(label, ref)
         original = (self.root / "app.py").read_bytes()
         with self.server() as url:
             (self.root / "app.py").write_text("print('changed after delivery')\n", encoding="utf-8", newline="\n")

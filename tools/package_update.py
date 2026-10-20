@@ -34,8 +34,9 @@ def build_release(repository, output, *, commit="HEAD"):
         return result.stdout
 
     source_commit = git("rev-parse", "--verify", "--end-of-options", commit + "^{commit}").decode().strip()
-    tree = git("ls-tree", "-rz", source_commit, "--", "skills/aispa/", "LICENSE")
+    tree = git("ls-tree", "-rz", source_commit, "--", "skills/aispa/", "LICENSE", "tools/install.py")
     content = {}
+    installer = None
     total = 0
     for line in tree.split(b"\0"):
         if not line:
@@ -48,6 +49,9 @@ def build_release(repository, output, *, commit="HEAD"):
         name = "LICENSE" if path == "LICENSE" else path.removeprefix("skills/aispa/")
         _safe_path(name)
         data = git("cat-file", "blob", oid.decode())
+        if path == "tools/install.py":
+            installer = data
+            continue
         if name in content:
             if name == "LICENSE" and content[name] == (data, 0o644) and mode == b"100644":
                 continue  # The installable package carries the same root notice.
@@ -77,18 +81,25 @@ def build_release(repository, output, *, commit="HEAD"):
     _manifest(manifest, {"version": version})
     output.mkdir(parents=True, exist_ok=True)
     archive_path, manifest_path = output / "aispa.zip", output / "aispa-update.json"
-    if archive_path.exists() or is_link(archive_path) or manifest_path.exists() or is_link(manifest_path):
+    installer_path = output / "install.py"
+    if (archive_path.exists() or is_link(archive_path) or manifest_path.exists() or is_link(manifest_path)
+            or installer is not None and (installer_path.exists() or is_link(installer_path))):
         raise Invalid("Выходные файлы уже существуют; выберите свободный каталог")
     with archive_path.open("xb") as stream:
         stream.write(data)
     try:
         with manifest_path.open("x", encoding="utf-8") as stream:
             stream.write(json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+        if installer is not None:
+            with installer_path.open("xb") as stream:
+                stream.write(installer)
     except BaseException:
         archive_path.unlink()
         raise
     return {"version": version, "commit": source_commit, "archive": str(archive_path),
             "manifest": str(manifest_path), "archiveSha256": manifest["archive"]["sha256"],
+            "installer": str(installer_path) if installer is not None else None,
+            "installerSha256": hashlib.sha256(installer).hexdigest() if installer is not None else None,
             "fileCount": len(files), "published": False}
 
 

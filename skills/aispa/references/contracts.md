@@ -1,4 +1,4 @@
-# Данные и отчёты · 0.1.0-alpha.9
+# Данные и отчёты · 0.1.0-alpha.10
 
 ## Каталог документов alpha.7
 
@@ -561,3 +561,108 @@ Windows display строится с PowerShell literal quoting; неподдер
 изменения файлов обнови документы, receipt и manifest. Частная knowledge
 curation проходит только после успешной итоговой приёмки и не подменяет
 обычные документы передачи.
+
+## Дополнения alpha.10: источник, сценарии, интерфейсы
+
+Новый `init` включает `sourceAccounting`, `designContract`, `allRoleUsage`,
+`integrationReview`, `testIntent`. Эти поля не добавляются задним числом в
+активный прогон старого runtime. Команды `template brief-extract|brief-review|brief-map|scenarios|interfaces`
+возвращают каркас с актуальным basis и **пустыми ответами**; его нельзя
+отправить как готовую работу.
+
+`brief-extract` и `brief-review` получают исходные единицы из `brief-source`
+независимо друг от друга. Каждый JSON имеет ровно `basis`, `actor`, `units`;
+строка units — `brief`, `start`, `end`, `text`, `kind: intent|context`, `summary`,
+`reason`. Диапазон измеряется Unicode code points сохранённого UTF-8 текста,
+исходная строка не нормализуется. Проверяющий обязан быть другим реальным
+участником. `brief-map-context` открывается после двух разборов и требований;
+отчёт `brief-map` содержит `basis`, `actor` проверяющего и все `rows`:
+`brief`, `start`, `end`, `disposition: requirement|context|disagreement`,
+`requirements` и `reason`. Разногласие сохраняется с пустым списком ID и
+блокирует `seal`; intent требует исходное требование с точной цитатой всего
+фрагмента. Source span/SHA подтверждают привязку, не смысловую полноту.
+
+После `spec` и coverage `scenarios` записывает `basis`, `depth`,
+`depthReason`, `features`. Для каждой действующей requested/addition функции
+нужны `requirement`, `changeKind`, `sourceQuote`, `specQuote` и восемь
+`dimensions` с `name`, `status: covered|not_applicable`, `scenario`,
+`verification`, `counterexample`. Имена измерений: `first`, `main`, `empty`,
+`error`, `retry`, `access`, `persistence`, `effects`. В `deep` у каждого
+покрытого измерения нужен контрпример. `strict` не принимает инициативную
+addition; пустой набор функций разрешён только когда таких действующих
+функций нет, с `noFeatureReason`.
+
+`interfaces` записывает `basis`, `interfaces` и только при пустом списке
+`noInterfaceReason`. У каждого интерфейса: `name`, `signature`, `ownerZone`,
+`consumers`, `testSeam`, `requirements`, `references`, `referenceReason`.
+`references` — путь и SHA реально прочитанного материала. План должен
+назначить одного первоначального владельца каждому интерфейсу и зависимость
+потребителя от него. `reference --file` отдельно сохраняет только локальный
+материал, прямо порученный владельцем: точный путь/SHA, brief/quote,
+требования и назначение. URL не скачивается автоматически.
+
+## Дополнения alpha.10: RED, интеграция и расход
+
+`test-intent --task T01 --file …` записывается до первой сдачи активной
+попытки. В обоих режимах обязательны `mode`, `attempt`, текущий `basis` и
+**все точные** `criteria` задачи. Для `behavior_change` добавь `newTestFiles`
+с `path`, `sha256`, `expectedFailure`, `criteria` и `redExecution` — ссылку
+на настоящий task receipt из `commands`: purpose check, exit > 0,
+без timeout, усечения, секрета и изменения кода. Вывод RED должен содержать
+ожидаемую ошибку и путь теста в argv либо выводе. После изменения поведения
+нужна свежая GREEN-проверка на ином candidate. Для `not_applicable` вместо
+этих полей укажи массив `notApplicable`: для каждого критерия точные
+`criterion`, `purpose: docs|config|integration|existing_behavior`,
+`source:{path,sha256}`, `reason`. Изменённые тесты до критики требуют нового
+RED; история прежнего контракта не удаляется.
+
+У единственной финальной задачи critic1 и critic2 включают в обычный отчёт
+`branchReview` с точными `basis`, `code`, полными `files`, `changes`, `axes`,
+`note`, `evidence`. Каждая ось `behavior`, `integration`, `maintainability`,
+`data_security`, `test_quality` имеет `status: passed|failed`, `note`,
+`evidence` в текущем `evidence/`. Контекст задачи даёт текущий diff из
+исходного снимка; `failed` остаётся блокером обычного круга критики. Второй
+круг и отдельный task acceptor по-прежнему обязательны.
+
+`participant` регистрирует нативные роли вне задачи по фактическим runtime,
+native ID, session; task роли остаются за `assign`, автор знаний — за
+`knowledge-assign`. Повтор того же native ID с новой session не создаёт
+независимого проверяющего. `usage --file` сохраняет измеренный вызов;
+`usage-import --file … --format codex|claude [--participant <actor>]`
+связывает локальный журнал среды с этими ID. Сводка `usage` имеет
+`coverage.missingParticipants`, `missingRoles`, `unmappedCalls`,
+`incompleteCalls`, `unsupportedCalls`, `finalSources` и
+`finalCoordinatorReplyIncluded`. Только полный набор checkpoint после
+финального ответа координатора может получить `complete: true`;
+байты пакета, пропущенные вызовы и стоимость не оцениваются моделью.
+
+## Дополнения alpha.10: сверка восстановленного журнала
+
+`journal-inspect` возвращает `journalSha256`, `validSequence`, `validHash`,
+`tailBytes`, `tailSha256` и `backupFile` только для неполной последней строки.
+`journal-recover --sha256 <journalSha256> --confirm` сохраняет исходник
+побайтно, добавляет событие и ставит прогон на паузу с `journalRecovery.pending`.
+Следом `journal-verify -- <argv>` записывает отдельную квитанцию purpose
+recovery. `journal-context` даёт basis лишь после свежей успешной записи без
+timeout, усечения, секрета или изменения кода.
+
+Отчёт `journal-reconcile --file …` содержит ровно:
+
+```json
+{
+  "basis": "<basis journal-context>",
+  "reviewer": "<actor recovery-reviewer>",
+  "independent": true,
+  "decision": "resume",
+  "filesystem": {"inspected": true, "paths": ["src/app.py"], "note": "Что проверено", "evidence": [{"file": "evidence/fs.txt", "sha256": "<SHA>"}]},
+  "externalEffects": {"status": "none", "note": "Как сверены внешние действия", "evidence": [{"file": "evidence/external.txt", "sha256": "<SHA>"}]},
+  "note": "Почему безопасно продолжить"
+}
+```
+
+Ссылки в примере — заполнители: файлы должны реально существовать и иметь
+указанные хеши. `externalEffects.status` бывает `none|reconciled|unknown`.
+При unknown допустим только `decision: blocked`; pending остаётся и перед
+следующей сверкой нужна новая проверка. При resume pending снимается, но
+статус остаётся paused до отдельного `resume`. Восстановление не стирает
+историю попыток, критиков и остатки.

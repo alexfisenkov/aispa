@@ -101,41 +101,33 @@ def _artifacts(value):
 
 
 def _journal(store, state):
-    path = _safe(_run(store), "events.jsonl")
-    require(path.is_file(), "Carryover: журнал отсутствует")
-    previous, last, last_state = None, None, None
-    journal_hash = hashlib.sha256()
+    _safe(_run(store), "events.jsonl")
+    journal = store.read_journal(include_events=True)
+    last_state = journal["last"]["state"]
     scopes, retries = {}, {}
     try:
-        with path.open(encoding="utf-8", newline="") as stream:
-            for number, line in enumerate(stream, 1):
-                journal_hash.update(line.encode())
-                row = json.loads(line)
-                require(row["sequence"] == number and row["previous"] == previous
-                        and digest({k: v for k, v in row.items() if k != "hash"}) == row["hash"],
-                        "Carryover: повреждена цепочка журнала")
-                require(row["state"]["run"] == state["run"] == store.run.name,
-                        "Carryover: журнал другого прогона")
-                last_state = row["state"]
-                last = {k: row[k] for k in ("sequence", "hash", "at")}
-                # Retain decisions, not repeated full states from the journal.
-                for req in last_state["requirements"]:
-                    if req.get("decision"):
-                        value = {"requirement": req["id"], **req["decision"]}
-                        scopes[digest(value)] = value
-                for tid, history in last_state.get("taskHistory", {}).items():
-                    for attempt in history:
-                        auth = attempt.get("authorization")
-                        if auth:
-                            value = {"task": tid, "attempt": attempt["id"], "brief": auth["brief"],
-                                     "quote": auth["quote"], "previousAttempt": auth["previousAttempt"]}
-                            retries[digest(value)] = value
-                previous = row["hash"]
+        for row in journal["events"]:
+            event_state = row["state"]
+            require(event_state["run"] == state["run"] == store.run.name,
+                    "Carryover: журнал другого прогона")
+            # Retain decisions, not repeated full states from the journal.
+            for req in event_state["requirements"]:
+                if req.get("decision"):
+                    value = {"requirement": req["id"], **req["decision"]}
+                    scopes[digest(value)] = value
+            for tid, history in event_state.get("taskHistory", {}).items():
+                for attempt in history:
+                    auth = attempt.get("authorization")
+                    if auth:
+                        value = {"task": tid, "attempt": attempt["id"], "brief": auth["brief"],
+                                 "quote": auth["quote"], "previousAttempt": auth["previousAttempt"]}
+                        retries[digest(value)] = value
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise Invalid("Carryover: не удалось проверить журнал") from exc
-    require(last and digest(last_state) == digest(state),
+    require(digest(last_state) == digest(state),
             "Carryover: сначала сохраните последнее состояние прогона")
-    return {"last": last, "sha256": journal_hash.hexdigest(),
+    last = {k: journal["last"][k] for k in ("sequence", "hash", "at")}
+    return {"last": last, "sha256": journal["sha256"],
             "scopes": list(scopes.values()), "retries": list(retries.values())}
 
 
@@ -411,11 +403,8 @@ def attach(store, state, payload):
     previous = type(store)(store.root)
     previous.run = _safe(store.root, ".aispa/runs/" + payload["previous"]["run"])
     try:
-        last = None
-        with _safe(previous.run, "events.jsonl").open(encoding="utf-8") as stream:
-            for line in stream:
-                last = line
-        old_state = json.loads(last)["state"]
+        _safe(previous.run, "events.jsonl")
+        old_state = previous.read_journal()["last"]["state"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise Invalid("Carryover: предыдущий журнал недоступен") from exc
     journal = _journal(previous, old_state)

@@ -509,7 +509,8 @@ def execute(store, state, command, timeout=600):
                "code": prepared["sourceCode"], "path": str(repo), "command": list(command), "timeout": timeout,
                "exitCode": rc, "timedOut": timed_out, "truncated": truncated, "redacted": redacted,
                "changedSource": source_changed, "changedCode": not clone_current,
-               "passed": rc == 0 and not redacted and clone_current and not source_changed,
+               "passed": rc == 0 and not timed_out and not truncated and not redacted
+                         and clone_current and not source_changed,
                "output": artifact, "durationSeconds": round(time.monotonic() - started, 3),
                "at": timestamp(), "limitations": LIMITATIONS.copy()}
     receipt["artifact"] = _artifact(store, "cleanroom", _json(receipt), ".run.json")
@@ -521,7 +522,7 @@ def valid(store, state):
     receipt = state.get("cleanrun")
     try:
         if not (isinstance(receipt, dict) and receipt.get("passed") is True and receipt.get("exitCode") == 0
-                and not any(receipt.get(k) for k in ("timedOut", "redacted", "changedSource", "changedCode"))
+                and not any(receipt.get(k) for k in ("timedOut", "truncated", "redacted", "changedSource", "changedCode"))
                 and receipt.get("run") == state.get("run") and _receipt_valid(store, receipt)):
             return False
         prepared, _repo, _home = _check_prepared(store, state)

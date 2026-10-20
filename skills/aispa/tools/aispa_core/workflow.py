@@ -12,7 +12,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing
 from .team import TaskPipeline, task_proof_valid
-from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions
+from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -45,8 +45,13 @@ class Workflow:
             except (OSError, Invalid) as error:
                 raise Invalid("Событие записано, но память проекта не обновилась. Выполните context-refresh без повтора операции") from error
 
-    def running(self):
+    def running(self, *, allow_wait=False):
+        require(not self.s.get("journalRecovery", {}).get("pending"),
+                "После восстановления сначала проверьте и согласуйте состояние: journal-reconcile")
         require(self.s["status"] == "running", "Прогон закрыт или приостановлен; сначала resume")
+        require(allow_wait or not (isinstance(self.s.get("waiting"), dict)
+                                  and self.s["waiting"].get("kind") == "owner_question"),
+                "Ожидается ответ владельца; сначала сохраните факт ответа командой answered")
 
     def brief(self, path):
         self.running()
@@ -85,6 +90,9 @@ class Workflow:
     def seal(self):
         self.running()
         require(self.s["briefs"] and active(self.s), "Нужны бриф и действующие требования")
+        if self.s.get("policy", {}).get("sourceAccounting"):
+            require(briefmap.valid(self.store, self.s, actor_check=lambda s, a, r: participants.actor_check(self.store, s, a, r)),
+                    "Каждая часть исходного брифа должна пройти независимый разбор и сопоставление: brief-map")
         if self.s.get("policy", {}).get("ideaReview"):
             require(ideas.valid(self.store, self.s), "До фиксации брифа нужен актуальный разбор идеи: idea --file")
         core = set(self.s.get("core", [])) | {r["id"] for r in active(self.s) if r["core"]}
@@ -143,10 +151,17 @@ class Workflow:
         require(gate_valid(self.store, self.s, "coverage"), "Покрытие брифа не подтверждено или устарело")
         text = read_input(path)
         tasks = validate_plan(self.s, json.loads(text))
+        if self.s.get("policy", {}).get("designContract"):
+            require(design_contract.valid_scenarios(self.store, self.s),
+                    "До плана нужны актуальные сценарии всех функций: scenarios")
+            require(design_contract.valid_interfaces(self.store, self.s),
+                    "До плана нужен актуальный контракт интерфейсов: interfaces")
+            design_contract.validate_plan_bindings(self.store, self.s, tasks)
         self.pipeline.validate_replan(tasks)
         if self.s.get("policy", {}).get("planReview"):
             require(review_path is not None, "До плана нужен разбор размера задач: plan-check, затем plan --review")
         size_review = planning.review(self.store, self.s, tasks, json.loads(read_input(review_path))) if review_path else None
+        integration_task = integration.choose_task(self.store, self.s, tasks) if self.s.get("policy", {}).get("integrationReview") else None
         old = {t["id"]: t for t in self.s["tasks"]}
         contract = basis(self.store, self.s, "coverage")
         for task in tasks:
@@ -162,6 +177,8 @@ class Workflow:
                     if key in previous:
                         task[key] = previous[key]
         self.s["tasks"] = tasks
+        if integration_task:
+            self.s["integrationTask"] = integration_task
         if size_review:
             self.s["planReview"] = size_review
         else:
@@ -180,6 +197,15 @@ class Workflow:
     def build_ready(self):
         self.running()
         require(self.s.get("sealed"), "Бриф изменён; нужна повторная фиксация")
+        if self.s.get("policy", {}).get("sourceAccounting"):
+            require(briefmap.valid(self.store, self.s, actor_check=lambda s, a, r: participants.actor_check(self.store, s, a, r)),
+                    "Исходный разбор брифа отсутствует, повреждён или устарел")
+        if self.s.get("policy", {}).get("designContract"):
+            require(design_contract.valid_scenarios(self.store, self.s)
+                    and design_contract.valid_interfaces(self.store, self.s, check_sources=False),
+                    "Сохранённые сценарии или контракт интерфейсов повреждены либо устарели")
+            require(all(artifact_valid(self.store, ref.get("snapshot", {})) for ref in self.s.get("ownerReferences", [])),
+                    "Исходный материал владельца повреждён")
         require(gate_valid(self.store, self.s, "coverage") and gate_valid(self.store, self.s, "plan"),
                 "Проверки брифа или плана отсутствуют, провалены либо устарели")
         if self.s.get("policy", {}).get("planReview"):
@@ -209,6 +235,8 @@ class Workflow:
                 require(review["basis"] == basis(self.store, self.s, "wave"), "Последняя сверка волны устарела; повторите общую проверку")
         if opening:
             self.s["waveEntries"][str(task["wave"])] = {"plan": plan_basis(self.s), "openedAt": timestamp()}
+        if self.s.get("policy", {}).get("testIntent"):
+            test_intent.capture_baseline(self.store, self.s, tid)
         at = timestamp()
         task["status"] = "running"
         task["phase"] = "implementation"
@@ -217,6 +245,49 @@ class Workflow:
         task["attempts"] = task.get("attempts", 0) + 1
         task.pop("proof", None)
         self.save("task-started:" + tid, at)
+
+    def ready(self):
+        """Addressed scheduler: ready peers only; never bypass the wave gate."""
+        self.build_ready()
+        unfinished = [t for t in self.s["tasks"] if t["status"] not in ("completed", "blocked")]
+        wave = min((t["wave"] for t in unfinished), default=None)
+        tasks = []
+        for task in unfinished:
+            if task["wave"] != wave or task["status"] != "pending":
+                continue
+            closure = {t["id"] for t in task_closure(self.s, task["id"])} - {task["id"]}
+            if all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure) for dep in task["dependsOn"]):
+                prior = [w for w in {t["wave"] for t in self.s["tasks"]} if w < wave]
+                if any(not self.s.get("waves", {}).get(str(w), {}).get("passed") for w in prior):
+                    continue
+                tasks.append({"id": task["id"], "title": task["title"],
+                              "context": basis(self.store, self.s, "task", task["id"])})
+        return {"wave": wave, "tasks": tasks, "startRechecksAllGuards": True}
+
+    def wait(self, note):
+        self.running()
+        require(not self.s.get("sealed") and not self.s.get("tasks"), "Вопросы допустимы только при подготовке брифа")
+        require(note.strip() and not SECRET.search(note), "Нужно безопасное описание ожидаемого ответа")
+        at = timestamp()
+        timing.stop(self.s, at)
+        self.s["waiting"] = {"kind": "owner_question", "note": note, "since": at}
+        self.save("owner-answer-awaited", at)
+        return self.s["waiting"]
+
+    def answered(self, path):
+        self.running(allow_wait=True)
+        require(isinstance(self.s.get("waiting"), dict) and self.s["waiting"].get("kind") == "owner_question",
+                "Нет ожидаемого ответа владельца")
+        text = read_input(path)
+        artifact = self.store.artifact("briefs", text.encode(), ".md")
+        artifact["id"] = "B%03d" % (len(self.s["briefs"]) + 1)
+        self.s["briefs"].append(artifact)
+        self.s["sealed"], self.s["stage"] = False, "brief"
+        self.s["waiting"] = None
+        at = timestamp()
+        timing.start(self.s, at)
+        self.save("owner-answer-received", at)
+        return {"waiting": None, "brief": artifact}
 
     def block(self, tid, note):
         self.running()
@@ -287,6 +358,7 @@ class Workflow:
         artifact = self.store.artifact("evidence", output.encode() or b"(no output)\n", ".log")
         after = task_basis(self.store, self.s, task_id) if task_id else self.store.code()
         receipt = {"command": command, "exitCode": rc, "code": code, "changedCode": code != after,
+                   "launchError": rc == 127 and raw == process_runner._START_FAILED,
                    "timedOut": timed_out, "truncated": truncated, "redacted": redacted,
                    "output": artifact, "durationSeconds": round(time.monotonic() - started, 3), "at": timestamp()}
         if attempt is not None:
@@ -322,6 +394,9 @@ class Workflow:
         return passed
 
     def handoff_ready(self):
+        if self.s.get("policy", {}).get("integrationReview"):
+            require(integration.proof_valid(self.store, self.s),
+                    "До сдачи нужны два общих code/security-ревью в финальной задаче и её приёмка")
         if self.s.get("policy", {}).get("deliveryDocs"):
             require(handoff.valid(self.store, self.s, command_receipt=lambda ref: executions.resolve(self.store, self.s, ref)),
                     "До чистого клона и приёмки подготовьте и проверьте отслеживаемые документы проекта: handoff --file")
@@ -403,6 +478,8 @@ class Workflow:
         self.save("run-" + status, at)
 
     def resume(self):
+        require(not self.s.get("journalRecovery", {}).get("pending"),
+                "После восстановления сначала journal-verify и journal-reconcile")
         require(self.s["status"] != "running", "Прогон уже выполняется")
         self.s["status"], self.s["waiting"] = "running", None
         at = timestamp()

@@ -64,15 +64,11 @@ def _read(store, ref, prefix):
 
 
 def _last_event(store, state):
-    journal = carryover._journal(store, state)
-    path = confined(store.run, "events.jsonl")
-    with path.open(encoding="utf-8") as stream:
-        last, previous = None, None
-        for line in stream:
-            previous = last
-            last = json.loads(line)
-    _require(last is not None and last["hash"] == journal["last"]["hash"], "журнал изменился")
-    return last, previous
+    journal = store.read_journal()
+    last = journal["last"]
+    _require(last["state"]["run"] == state["run"]
+             and digest(last["state"]) == digest(state), "журнал изменился или состояние не сохранено")
+    return last, journal["previous"]
 
 
 def _started(previous, event, kind, task_id):
@@ -189,6 +185,7 @@ def record(store, state, *, kind, purpose="check", task_id=None):
             "timedOut": bool(receipt.get("timedOut")), "truncated": bool(receipt.get("truncated")),
             "redacted": bool(receipt.get("redacted")), "changedCode": bool(receipt.get("changedCode")),
             "changedSource": bool(receipt.get("changedSource")),
+            **({"launchError": bool(receipt["launchError"])} if "launchError" in receipt else {}),
             "successful": receipt.get("exitCode") == 0 and not any(receipt.get(key) for key in
                           ("timedOut", "truncated", "redacted", "changedCode", "changedSource"))
                           and (kind != "cleanrun" or receipt.get("passed") is True),
@@ -208,8 +205,7 @@ def record(store, state, *, kind, purpose="check", task_id=None):
     return copy.deepcopy(ref)
 
 
-def resolve(store, state, ref):
-    """Resolve only an indexed current-run execution, never a caller record."""
+def _resolve(store, state, ref, journal):
     _require(isinstance(ref, dict) and isinstance(ref.get("sha256"), str)
              and SHA.fullmatch(ref["sha256"]), "нужна точная SHA-ссылка исполнения")
     match = next((item for item in _refs(store, state) if item.get("sha256") == ref["sha256"]
@@ -222,18 +218,14 @@ def resolve(store, state, ref):
              and artifact_valid(store, body.get("output", {})), "повреждена запись исполнения")
     # The immutable artifact and index must point back to an actual saved
     # executor event, rather than merely to a plausible receipt object.
-    carryover._journal(store, state)
+    _require(journal["last"]["state"]["run"] == state["run"]
+             and digest(journal["last"]["state"]) == digest(state),
+             "журнал изменился или состояние не сохранено")
     anchor = body.get("journal", {})
     _require(type(anchor.get("sequence")) is int and anchor["sequence"] > 0,
              "нет события исполнения")
-    event, previous = None, None
-    with confined(store.run, "events.jsonl").open(encoding="utf-8") as stream:
-        for number, line in enumerate(stream, 1):
-            current = json.loads(line)
-            if number == anchor["sequence"]:
-                event = current
-                break
-            previous = current
+    sequence = anchor["sequence"]
+    event, previous = store.event_pair(sequence)
     expected = "clean-verification-recorded" if body["kind"] == "cleanrun" else "verification-executed"
     _require(event is not None and event.get("hash") == anchor.get("hash")
              and event.get("event") == expected, "событие исполнения отсутствует")
@@ -257,10 +249,16 @@ def resolve(store, state, ref):
              and body.get("code") == receipt.get("sourceCode" if body["kind"] == "cleanrun" else "code")
              and body.get("at") == receipt.get("at")
              and body.get("successful") is expected_success
+             and body.get("launchError", False) is bool(receipt.get("launchError"))
              and all(body.get(field) is bool(receipt.get(field)) for field in
                      ("timedOut", "truncated", "redacted", "changedCode", "changedSource")),
              "метаданные исполнения не соответствуют receipt")
     return body
+
+
+def resolve(store, state, ref):
+    """Resolve only an indexed current-run execution on a fully verified chain."""
+    return _resolve(store, state, ref, store.read_journal())
 
 
 def view(store, state, *, kind=None, purpose=None, limit=20):
@@ -268,9 +266,10 @@ def view(store, state, *, kind=None, purpose=None, limit=20):
     _require(kind is None or kind in KINDS, "неверный вид выборки")
     _require(purpose is None or purpose in PURPOSES, "неверное назначение выборки")
     _require(type(limit) is int and 1 <= limit <= MAX_VIEW, "неверный лимит выборки")
+    journal = store.read_journal()
     items = []
     for ref in _refs(store, state):
-        body = resolve(store, state, ref)
+        body = _resolve(store, state, ref, journal)
         if (kind and body["kind"] != kind) or (purpose and body["purpose"] != purpose):
             continue
         items.append({"ref": {"id": body["id"], "sha256": ref["sha256"]},

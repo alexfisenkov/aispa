@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """AISpa local CLI. Run this file directly; no installation or network required."""
 import argparse
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import functools
 import json
 from pathlib import Path
 import shutil
 import sys
-from urllib.parse import urlsplit
 
 from aispa_core import VERSION
 from aispa_core.contracts import basis, active, task_closure
@@ -15,7 +12,7 @@ from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
-from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff
+from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -42,6 +39,8 @@ def parser():
     init.add_argument("--title", required=True)
     init.add_argument("--mode", required=True, choices=("auto", "important", "interview"))
     init.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
+    init.add_argument("--depth", choices=("strict", "balanced", "deep"), default="balanced")
+    controls.parsers(sub)
     for name in ("brief", "requirements", "spec", "coverage", "acceptance"):
         sub.add_parser(name).add_argument("--file", required=True)
     plan = sub.add_parser("plan"); plan.add_argument("--file", required=True); plan.add_argument("--review")
@@ -147,35 +146,26 @@ def execute(args):
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     store = Journal(args.root)
+    if args.action in ("journal-inspect", "journal-recover"):
+        value = store.inspect_recovery() if args.action == "journal-inspect" else store.apply_recovery(
+            args.sha256, confirmed=args.confirm)
+        print(json.dumps(value, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "dashboard" and args.operation != "archive":
+        if args.operation == "start":
+            value = dashboard_server.start(store, port=args.port)
+        elif args.operation == "stop":
+            value = dashboard_server.stop(store)
+        else:
+            value = dashboard_server.inspect(store)
+        print(json.dumps(value, ensure_ascii=False, indent=2))
+        return 0
     if args.action == "serve":
         # The lock is never held while a long-lived read-only server runs.
         with store.lock():
             state = store.load()
             publish(store, state)
-        class Handler(SimpleHTTPRequestHandler):
-            def do_GET(self):
-                if urlsplit(self.path).path == "/status.json":
-                    try:
-                        # Each reader has its own run pointer. Never wait for a long
-                        # verification command's writer lock, and never edit the journal.
-                        reader = Journal(args.root)
-                        payload = json.dumps(project(reader, reader.load()), ensure_ascii=False).encode()
-                    except (Invalid, OSError, ValueError):
-                        self.send_error(409, "Current state could not be verified")
-                        return
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
-                    return
-                super().do_GET()
-
-        handler = functools.partial(Handler, directory=str(store.home))
-        with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
-            print(f"http://127.0.0.1:{server.server_port}/dashboard.html", flush=True)
-            server.serve_forever()
+        dashboard_server.serve(store, port=args.port)
         return 0
     with store.lock():
         if args.action == "init":
@@ -191,10 +181,14 @@ def execute(args):
             def initialize_run(state):
                 state["policy"] = {"discovery": True, "cleanClone": True, "ideaReview": True,
                                    "planReview": True, "projectKnowledge": True, "productChallenge": True,
-                                   "deliveryPlan": True, "repairDiagnosis": True, "deliveryDocs": True}
+                                   "deliveryPlan": True, "repairDiagnosis": True, "deliveryDocs": True,
+                                   "sourceAccounting": True, "designContract": True, "allRoleUsage": True,
+                                   "integrationReview": True, "testIntent": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
+                state["depth"] = args.depth
                 state["runtime"] = args.runtime
                 state["runtimeDigest"] = runtime_digest()
+                integration.capture(store, state)
                 if inherited is not None:
                     carryover.attach(store, state, inherited)
                 knowledge.attach(store, state, learned)
@@ -212,15 +206,32 @@ def execute(args):
             return 0
         state = store.load()
         read_only = (args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
+                     or args.action in controls.READS
+                     or args.action == "test-intent" and not args.file
                      or (args.action in ("idea", "repair-plan") and not args.file)
                      or (args.action == "documents" and not args.refresh))
         if not read_only and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
         flow = Workflow(store, state)
+        if state.get("journalRecovery", {}).get("pending") and not read_only and args.action not in (
+                "journal-verify", "journal-reconcile", "context-refresh") and not (
+                args.action == "participant" and args.role == "recovery-reviewer"):
+            raise Invalid("Восстановление ещё не сверено: journal-context, journal-verify, journal-reconcile")
         ok = True
         receipt = None
         action = args.action
-        if action in ("brief", "requirements", "spec", "coverage", "acceptance"):
+        if action in controls.READS | controls.WRITES:
+            receipt = controls.execute(store, state, flow, args)
+            if action in controls.READS or action == "test-intent" and not args.file:
+                print(json.dumps(receipt, ensure_ascii=False, indent=2))
+                return 0
+            if action == "brief-map":
+                from aispa_core import briefmap, preparation
+                ok = briefmap.valid(store, state, preparation.actor_check(store))
+        elif action == "dashboard":
+            from aispa_core.dashboard_export import archive
+            receipt = archive(store, state)
+        elif action in ("brief", "requirements", "spec", "coverage", "acceptance"):
             result = getattr(flow, action)(args.file)
             if isinstance(result, bool):
                 ok = result

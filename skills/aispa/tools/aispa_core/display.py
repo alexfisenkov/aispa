@@ -13,6 +13,30 @@ LABELS = {"running": "В работе", "paused": "Приостановлено"
           "cancelled": "Отменено", "accepted": "Все действующие требования приняты",
           "delivered_with_remaining": "Основная часть готова, есть остатки"}
 
+EVENT_LABELS = {
+    "brief-added": "Бриф сохранён", "brief-sealed": "Бриф зафиксирован",
+    "plan-validated": "План проверен", "task-started": "Началась задача",
+    "task-submitted": "Задача передана критикам", "task-repaired": "Исправления переданы на проверку",
+    "wave-reviewed": "Весь бриф сверен после волны", "acceptance-reviewed": "Проверена итоговая приёмка",
+    "delivery-recorded": "Результат сдан", "owner-answer-awaited": "Ожидается ответ владельца",
+    "owner-answer-received": "Ответ владельца получен", "run-paused": "Работа приостановлена",
+    "run-resumed": "Работа продолжена", "recovery-reconciled": "Восстановление журнала проверено",
+}
+
+
+def _events(store):
+    rows = store.read_journal().get("eventTail", [])
+    result = []
+    for row in reversed(rows):
+        name, _, target = row["event"].partition(":")
+        if name not in EVENT_LABELS:
+            continue
+        # Only identifiers, not arbitrary note/brief content, enter the feed.
+        suffix = " · " + target if target and len(target) <= 32 and target.replace("-", "").isalnum() else ""
+        result.append({"type": name, "at": row["at"], "text": EVENT_LABELS[name] + suffix})
+        if len(result) == 12:
+            break
+    return list(reversed(result))
 
 def _record_intact(store, record):
     try:
@@ -117,7 +141,8 @@ def project(store, state):
             "remaining": remaining, "remainingAssessed": current_assessment, "decisions": state["notes"],
             "elapsedSeconds": elapsed(state, observed), "finishedAt": state.get("finishedAt"),
             "estimate": estimate(estimate_tasks, status, observed), "activity": state.get("activity"),
-            "waiting": state.get("waiting"), "runDirectory": "runs/" + state["run"]}
+            "waiting": state.get("waiting"), "events": _events(store),
+            "runDirectory": "runs/" + state["run"]}
 
 
 def publish(store, state):

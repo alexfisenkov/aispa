@@ -130,6 +130,9 @@ def assign(store, state, runtime, native_id, session, fresh=True, model=None):
     if model is not None:
         model = _safe_text(model, 100)
     aid = digest([runtime, native_id, session])
+    if state.get("policy", {}).get("allRoleUsage"):
+        from .participants import require_unused_identity
+        require_unused_identity(state, runtime, native_id)
     _unused_identity(state, native_id, aid)
     memory = state.get("knowledge", {"schema": SCHEMA, "records": [], "writerHistory": []})
     _require(memory.get("schema") == SCHEMA, "неподдерживаемая схема знаний")

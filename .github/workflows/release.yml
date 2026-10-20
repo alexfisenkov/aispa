@@ -56,10 +56,10 @@ jobs:
           version = tag[1:] if tag.startswith("v") else tag
           if manifest["version"] != version or manifest["commit"] != commit:
               raise SystemExit("Tag must equal the package version, optionally prefixed with v")
-          if {path.name for path in output.iterdir()} != {"aispa.zip", "aispa-update.json"}:
+          if {path.name for path in output.iterdir()} != {"aispa.zip", "aispa-update.json", "install.py"}:
               raise SystemExit("Unexpected release asset set")
           PY
-      - name: Upload the two assets without replacing existing files
+      - name: Upload the release assets without replacing existing files
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -76,12 +76,13 @@ jobs:
                   or release["tag_name"] != os.environ["AISPA_RELEASE_TAG"]
                   or release["draft"] or not release["published_at"]):
               raise SystemExit("The existing published release does not match the event")
-          if {asset["name"] for asset in release["assets"]} & {"aispa.zip", "aispa-update.json"}:
+          if {asset["name"] for asset in release["assets"]} & {"aispa.zip", "aispa-update.json", "install.py"}:
               raise SystemExit("Release assets already exist; automatic replacement is forbidden")
           PY
           gh release upload "$AISPA_RELEASE_TAG" \
             "$RUNNER_TEMP/aispa-release/aispa.zip" \
             "$RUNNER_TEMP/aispa-release/aispa-update.json" \
+            "$RUNNER_TEMP/aispa-release/install.py" \
             --repo "$GITHUB_REPOSITORY"
           gh api "repos/$GITHUB_REPOSITORY/releases/$AISPA_RELEASE_ID" > "$RUNNER_TEMP/aispa-release-after.json"
           python - <<'PY'
@@ -91,10 +92,10 @@ jobs:
 
           temporary = Path(os.environ["RUNNER_TEMP"])
           release = json.loads((temporary / "aispa-release-after.json").read_text())
-          for name in ("aispa.zip", "aispa-update.json"):
+          for name in ("aispa.zip", "aispa-update.json", "install.py"):
               matches = [asset for asset in release["assets"] if asset["name"] == name]
               if (len(matches) != 1 or matches[0]["state"] != "uploaded"
                       or matches[0]["size"] != (temporary / "aispa-release" / name).stat().st_size):
                   raise SystemExit("Release asset read-back failed: " + name)
-          print("Both release assets are uploaded and match their local sizes")
+          print("All three release assets are uploaded and match their local sizes")
           PY

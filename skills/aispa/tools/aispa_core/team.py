@@ -8,7 +8,7 @@ import copy
 import json
 import uuid
 
-from . import timing, repairs
+from . import timing, repairs, participants, integration, test_intent
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -119,6 +119,7 @@ def _writer_valid(store, state, attempt, aid):
 
 def _verification_valid(store, value, candidate):
     return bool(isinstance(value, dict) and value.get("exitCode") == 0 and not value.get("changedCode")
+                and not any(value.get(k) for k in ("timedOut", "truncated", "redacted"))
                 and value.get("candidate") == candidate and artifact_valid(store, value.get("output", {})))
 
 
@@ -126,6 +127,8 @@ def _record_valid(store, record):
     if not _sealed_valid(store, record) or not artifact_valid(store, record.get("report", {})):
         return False
     if not all(artifact_valid(store, item) for item in record.get("artifacts", [])):
+        return False
+    if record.get("testIntent") and not artifact_valid(store, record["testIntent"]):
         return False
     report = _json(store.text(record["report"]))
     return (report.get("basis") == record.get("basis") and report.get("reviewer") == record.get("actor")
@@ -159,6 +162,15 @@ def _historical_one(store, state, tid):
         return None
     first, second = rounds
     if not submitted or not all(_record_valid(store, r) for r in (submitted, first, second, accepted)):
+        return None
+    if state.get("policy", {}).get("testIntent") and (
+            not attempt.get("testIntent") or any(r.get("testIntent") != attempt["testIntent"]
+                                                for r in (submitted, first, second, accepted))
+            or not test_intent.history_valid(store, state, tid)):
+        return None
+    if state.get("policy", {}).get("integrationReview") and not all(
+            integration.record_valid(store, state, tid, "critic" + str(n), record)
+            for n, record in enumerate(rounds, 1)):
         return None
     if not second.get("passed") or not _writer_valid(store, state, attempt, submitted.get("actor")):
         return None
@@ -332,6 +344,10 @@ class TaskPipeline:
             require(nonempty(specialization) and isinstance(checks, list) and all(nonempty(c) for c in checks),
                     "Роли нужны специализация и строковые проверки")
             all_checks = list(dict.fromkeys(task["criteria"] + LENSES[role] + checks))
+            if self.s.get("policy", {}).get("testIntent") and role.startswith("critic"):
+                all_checks.append("Тестовый контракт и изменения тестов действительно проверяют критерии задачи")
+            if self.s.get("policy", {}).get("integrationReview") and tid == self.s.get("integrationTask") and role.startswith("critic"):
+                all_checks += ["Вся ветка: " + axis for axis in integration.AXES]
             card = {**context, "role": role, "specialization": specialization, "checks": all_checks,
                     "routing": routing(self.s, task, role, attempt, self.store), "discovery": self.s.get("discovery"),
                     "freshContext": role != "worker", "maximumCriticRounds": 2}
@@ -395,6 +411,8 @@ class TaskPipeline:
             else:
                 require(attempt["acceptance"] is None, "Приёмщика после отчёта нельзя заменить")
         require(aid not in self.s.setdefault("actors", {}), "Этот native actor уже использован в другой роли или попытке")
+        if self.s.get("policy", {}).get("allRoleUsage"):
+            participants.require_unused_identity(self.s, runtime, native_id)
         actor = {"id": aid, "runtime": runtime, "nativeId": native_id, "session": session, "fresh": fresh,
                  "task": tid, "attempt": attempt["id"], "role": role,
                  "card": attempt["roles"][role]["sha256"], "model": model, "at": timestamp()}
@@ -444,7 +462,23 @@ class TaskPipeline:
         if role != "worker":
             require(report.get("independent") is True, "Проверяющему нужен независимый контекст")
         require(task_verified(self.store, self.s, tid), "Нет успешной адресной проверки текущей задачи")
+        if self.s.get("policy", {}).get("testIntent") and role != "worker":
+            repaired = bool(attempt.get("rounds") and not attempt["rounds"][0]["passed"] and attempt.get("repair"))
+            require(test_intent.valid(self.store, self.s, tid, allow_source_changes=repaired),
+                    "Тестовый контракт отсутствует, повреждён или не подтверждён реальным RED/GREEN")
+            changes = test_intent.source_changes(self.store, self.s, tid)
+            require(report.get("testSourceChanges", []) == changes,
+                    "Критик должен явно сверить изменения тестовых источников после RED")
         artifacts, failures = evidence_rows(self.store, report, self.expected_checks(tid, role))
+        if self.s.get("policy", {}).get("integrationReview") and role.startswith("critic"):
+            extra_artifacts, extra_failures = integration.check(self.store, self.s, tid, role, report)
+            artifacts.extend(extra_artifacts)
+            failures.extend(extra_failures)
+            if extra_failures:
+                blocking = [f for f in self._findings(report, self.expected_checks(tid, role))
+                            if f["severity"] == "blocking"]
+                require(all(any(f.get("criterion") == "Вся ветка: " + row["axis"] for f in blocking)
+                            for row in extra_failures), "Каждое проваленное направление общего ревью требует блокирующее замечание")
         return text, report, artifacts, failures
 
     def _record(self, tid, role, text, report, artifacts, **extra):
@@ -452,11 +486,15 @@ class TaskPipeline:
         return _seal(self.store, {"actor": attempt["actors"][role], "basis": report["basis"],
                                  "report": self.store.artifact("reviews", text.encode(), ".json"),
                                  "artifacts": artifacts, "verification": copy.deepcopy(attempt["verification"]),
+                                 **({"testIntent": copy.deepcopy(attempt.get("testIntent"))}
+                                    if self.s.get("policy", {}).get("testIntent") else {}),
                                  **extra})
 
     def submit(self, tid, path):
         task, attempt = self._live(tid)
         require(not attempt["rounds"], "После начала критики используйте repair; повторная сдача не сбрасывает раунды")
+        require(test_intent.valid(self.store, self.s, tid),
+                "До сдачи нужен сохранённый тестовый контракт: реальный RED→GREEN либо адресное обоснование неприменимости")
         text, report, artifacts, failures = self._read(tid, "worker", path)
         require(not failures and not report["unmapped"], "Исполнитель ещё не подтвердил все проверки")
         if attempt["submitted"]:

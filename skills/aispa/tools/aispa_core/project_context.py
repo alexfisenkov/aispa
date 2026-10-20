@@ -19,7 +19,7 @@ RUNTIMES = ("codex", "claude-code", "cursor")
 MEMORY_LIMIT = 8000
 BEGIN = b"<!-- AISPA_CONTEXT_BEGIN_V1 -->"
 END = b"<!-- AISPA_CONTEXT_END_V1 -->"
-POINTER = BEGIN + b"\n" + (
+_LEGACY_POINTER = BEGIN + b"\n" + (
     "## AISpa: проектный контекст\n\n"
     "Перед работой прочитайте `.aispa/context/INDEX.md` и `.aispa/context/memory.md`.\n"
     "Бриф, спецификация, план, решения и прогресс: `.aispa/context/`.\n"
@@ -28,8 +28,23 @@ POINTER = BEGIN + b"\n" + (
     "Не редактируйте представления вручную; изменения фиксируются движком AISpa.\n"
     "Правила проекта вне этого блока сохраняют силу.\n"
 ).encode() + END
+POINTER = BEGIN + b"\n" + (
+    "## AISpa: проектный контекст\n\n"
+    "Если `.aispa/context/INDEX.md` существует, прочитайте его и `.aispa/context/memory.md`.\n"
+    "В чистом Git-клоне приватного `.aispa/context/` может не быть: тогда читайте\n"
+    "существующие `README.md`, публичные документы в `docs/` и корневые правила проекта.\n"
+    "Отсутствующие файлы не считайте доказательством отсутствия контекста;\n"
+    "сверяйте фактические файлы и сохранённый бриф доступного прогона.\n"
+    "При локальном прогоне бриф, спецификация, план, решения и прогресс — в `.aispa/context/`.\n"
+    "Это производные представления: источники истины — неизменные источники и\n"
+    "журнал `.aispa/runs/`; их ссылки и контрольные суммы — в `source-map.json`.\n"
+    "Не редактируйте представления вручную; изменения фиксируются движком AISpa.\n"
+    "Правила проекта вне этого блока сохраняют силу.\n"
+).encode() + END
 CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\n\n".encode()
                + POINTER + b"\n")
+_LEGACY_CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\n\n".encode()
+                       + _LEGACY_POINTER + b"\n")
 VIEWS = ("INDEX.md", "brief.md", "spec.md", "plan.md", "decisions.md", "progress.md",
          "memory.md", "requirements.json", "project-study.md", "carryover.md", "idea.md", "knowledge.md", "documents.yaml", "source-map.json")
 VIEW_SUMMARIES = {
@@ -136,9 +151,19 @@ def inventory(root):
 
 def _rules(existing, target):
     if BEGIN in existing or END in existing:
-        if existing.count(BEGIN) != 1 or existing.count(END) != 1 or POINTER not in existing:
+        if existing.count(BEGIN) != 1 or existing.count(END) != 1:
             raise Invalid("AISpa context: изменён управляемый блок в " + target + "; содержимое сохранено")
-        return existing
+        begin = existing.index(BEGIN)
+        marker_end = existing.find(END, begin)
+        if marker_end < 0:
+            raise Invalid("AISpa context: изменён управляемый блок в " + target + "; содержимое сохранено")
+        end = marker_end + len(END)
+        current = existing[begin:end]
+        if current == POINTER:
+            return existing
+        if current == _LEGACY_POINTER:
+            return existing[:begin] + POINTER + existing[end:]
+        raise Invalid("AISpa context: изменён управляемый блок в " + target + "; содержимое сохранено")
     return existing + (b"\n\n" if existing and not existing.endswith(b"\n") else b"\n" if existing else b"") + POINTER + b"\n"
 
 
@@ -185,7 +210,7 @@ def initialize(store, state, runtime):
             raise Invalid("AISpa context: файл правил занят каталогом: " + target)
         before = path.read_bytes() if path.exists() else None
         if target.endswith(".mdc"):
-            if before is not None and before != CURSOR_RULE:
+            if before is not None and before not in (CURSOR_RULE, _LEGACY_CURSOR_RULE):
                 raise Invalid("AISpa context: чужой или изменённый .cursor/rules/aispa.mdc; содержимое сохранено")
             after = CURSOR_RULE
         else:
@@ -222,18 +247,16 @@ def _journal(store, state):
     except ValueError as exc:
         raise Invalid("AISpa context: прогон вне проекта") from exc
     path = _path(store.root, relative / "events.jsonl")
-    raw = path.read_bytes()
     try:
-        row = json.loads(raw.splitlines()[-1])
-        if digest({k: v for k, v in row.items() if k != "hash"}) != row["hash"]:
-            raise ValueError("event hash")
-        if row["state"]["run"] != state["run"] or store.run.name != state["run"]:
-            raise ValueError("run mismatch")
-        return {"file": path.relative_to(store.root).as_posix(), "sha256": hashlib.sha256(raw).hexdigest(),
+        journal = store.read_journal()
+        row = journal["last"]
+        if journal["count"] != row["sequence"] or row["state"]["run"] != state["run"]:
+            raise Invalid("AISpa context: журнал другого прогона")
+        return {"file": path.relative_to(store.root).as_posix(), "sha256": journal["sha256"],
                 "sequence": row["sequence"], "event": row["event"], "eventDigest": row["hash"],
                 "recordedStateDigest": digest(row["state"])}
-    except (KeyError, IndexError, ValueError) as exc:
-        raise Invalid("AISpa context: повреждена последняя запись журнала") from exc
+    except (KeyError, TypeError) as exc:
+        raise Invalid("AISpa context: повреждён журнал") from exc
 
 
 def _source(store, artifact, sources, kind, read=False):

@@ -5,10 +5,10 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const html=fs.readFileSync(path.join(__dirname,'../skills/aispa/assets/dashboard.html'),'utf8');
-const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const script=html.match(/<script id="aispa-app">([\s\S]*?)<\/script>/)[1];
 
 class Element {
- constructor(tag='div',text=''){this.tag=tag;this._text=text;this.children=[];this.style={};this.events={};this.attributes={};this.className='';}
+ constructor(tag='div',text=''){this.tag=tag;this._text=text;this.children=[];this.style={};this.events={};this.attributes={};this.className='';this.hidden=false;this.value='';}
  append(...items){this.children.push(...items);}
  replaceChildren(...items){this._text='';this.children=[...items];}
  set textContent(value){this._text=String(value);this.children=[];}
@@ -16,25 +16,35 @@ class Element {
  set innerHTML(value){throw new Error('Unsafe HTML assignment');}
  addEventListener(name,fn){this.events[name]=fn;}
  setAttribute(name,value){this.attributes[name]=value;}
+ getAttribute(name){return this.attributes[name];}
  click(){return this.events.click?.();}
+ change(value){this.value=value;return this.events.change?.call(this);}
 }
 function descend(el,id){if(el.id===id)return el;for(const child of el.children){if(typeof child==='object'){const found=descend(child,id);if(found)return found;}}return null;}
-async function fixture(search='',data=sample()){
+async function fixture(search='',data=sample(),options={}){
  const elements={};for(const match of html.matchAll(/\bid="([^"]+)"/g)){elements[match[1]]=new Element();elements[match[1]].id=match[1];}
+ const staticEls=[];for(const match of html.matchAll(/<[^>]*\bdata-i18n="([^"]+)"[^>]*>/g)){
+  const el=new Element();el.setAttribute('data-i18n',match[1]);staticEls.push(el);
+ }
  const intervals=[];let response=data,error=null,clock=0,calls=0;
  const document={getElementById(id){return elements[id]||Object.values(elements).map(e=>descend(e,id)).find(Boolean)||null;},
-  createElement(tag){return new Element(tag);},createTextNode(text){return new Element('#text',String(text));}};
+  createElement(tag){return new Element(tag);},createTextNode(text){return new Element('#text',String(text));},
+  documentElement:new Element('html'),querySelectorAll(selector){return selector==='[data-i18n]'?staticEls:[];}};
  const context={document,location:{search},URLSearchParams,Date,Set,Array,Number,AbortController,
   performance:{now:()=>clock},setInterval:fn=>intervals.push(fn),setTimeout:()=>1,clearTimeout(){},
+  window:{AISPA_ARCHIVE:options.archive,matchMedia:()=>({matches:!!options.systemDark,addEventListener(){}})},
   fetch:async()=>{calls++;if(error)throw Error('network');return {ok:true,json:async()=>response};}};
+ if(options.storage)context.localStorage=options.storage;
  vm.runInNewContext(script,context);
  async function settle(){for(let i=0;i<8;i++)await Promise.resolve();}
  await settle();
  return {el:id=>document.getElementById(id),text:id=>document.getElementById(id).textContent,
+  staticText:key=>staticEls.find(el=>el.getAttribute('data-i18n')===key)?.textContent,
+  htmlElement:document.documentElement,
   async update(data){response=data;error=null;await elements.refresh.click();await settle();},
   async fail(){error=true;await elements.refresh.click();await settle();},
   advance(ms){clock+=ms;intervals.forEach(fn=>{if(fn.name==='tick')fn();});},
-  fetchCount:()=>calls};
+  fetchCount:()=>calls,intervalCount:()=>intervals.length};
 }
 function sample(status='running'){
  return {version:'0.1.0-alpha.2',status,title:'Тестовый проект',stage:'build',displayStage:'build',
@@ -184,4 +194,53 @@ test('stale task proof is visibly awaiting a new check',async()=>{
 test('inherited unfinished work is visible independently of current tasks',async()=>{
  const d=sample();d.remaining.inherited=[{id:'C-example',status:'outstanding',text:'Экспорт из прошлого прогона'}];
  const f=await fixture('',d);assert.match(f.text('remaining'),/Остатки прошлых прогонов/);assert.match(f.text('remaining'),/Экспорт из прошлого прогона/);
+});
+test('optional history is collapsed and renders event text safely',async()=>{
+ const empty=await fixture();assert.equal(empty.el('historyPanel').hidden,true);
+ const d=sample();d.events=[{type:'verification-executed',at:d.observedAt,text:'<img src=x onerror=bad()>'}];
+ const f=await fixture('',d);assert.equal(f.el('historyPanel').hidden,false);
+ assert.match(html,/<details class="card history" id="historyPanel" hidden>/);
+ assert.match(f.text('events'),/Проверка выполнена/);
+ assert.match(f.text('events'),/<img src=x onerror=bad\(\)>/);
+ assert.equal(f.text('historyCount'),'1');
+});
+test('owner question and paused wait are distinct and do not invent wait time',async()=>{
+ const owner=sample();owner.waiting={kind:'owner_question',note:'Утвердить границу до seal?',since:owner.observedAt};
+ const f=await fixture('',owner);assert.equal(f.el('waitingPanel').hidden,false);
+ assert.equal(f.text('waitingKind'),'Вопрос владельцу');assert.match(f.text('waitingNote'),/до seal/);
+ const paused=sample('paused');paused.waiting={kind:'paused',note:'Ожидаем доступ',since:paused.observedAt};
+ const p=await fixture('',paused);assert.equal(p.text('waitingKind'),'Ожидание');
+ p.advance(60000);assert.equal(p.text('runElapsed'),'2 мин 00 с');
+ assert.doesNotMatch(p.text('waitingSince'),/мин|час/);
+});
+test('locale and theme controls work with missing or blocked storage',async()=>{
+ const f=await fixture();f.el('language').change('en');f.el('theme').change('dark');
+ assert.equal(f.text('label'),'In progress');assert.equal(f.staticText('checks'),'Checks');
+ assert.equal(f.htmlElement.attributes['data-theme'],'dark');assert.equal(f.htmlElement.lang,'en');
+ const blocked={getItem(){throw Error('disabled')},setItem(){throw Error('disabled')}};
+ const b=await fixture('',sample(),{storage:blocked,systemDark:true});
+ assert.equal(b.htmlElement.attributes['data-theme'],'dark');b.el('language').change('en');
+ assert.equal(b.text('label'),'In progress');
+});
+test('saved locale and theme are restored and can switch back to system',async()=>{
+ const values=new Map([['aispa.locale','en'],['aispa.theme','light']]);
+ const storage={getItem:k=>values.get(k),setItem:(k,v)=>values.set(k,v)};
+ const f=await fixture('',sample(),{storage,systemDark:true});
+ assert.equal(f.text('label'),'In progress');assert.equal(f.htmlElement.attributes['data-theme'],'light');
+ f.el('theme').change('system');assert.equal(f.htmlElement.attributes['data-theme'],'dark');
+ assert.equal(values.get('aispa.theme'),'system');
+});
+test('embedded accepted archive is explicitly historical and never fetches or ticks',async()=>{
+ const archive={...sample('accepted'),archive:true,events:[{type:'init',at:'2026-10-19T12:00:00Z',text:'Начало'}]};
+ const f=await fixture('?status=running&demo',sample(),{archive});
+ assert.equal(f.fetchCount(),0);assert.equal(f.intervalCount(),0);
+ assert.equal(f.text('label'),'Принято на дату снимка');assert.match(f.text('sourceLabel'),/Архивный снимок/);
+ assert.equal(f.el('refresh').hidden,true);assert.equal(f.text('runElapsed'),'2 мин 00 с');
+ f.advance(90000);assert.equal(f.text('runElapsed'),'2 мин 00 с');
+ await f.el('refresh').click();assert.equal(f.fetchCount(),0);
+});
+test('invalid archive does not fall through to live or claim acceptance',async()=>{
+ const f=await fixture('?status=accepted',{...sample(),status:'accepted'},{archive:{archive:true,status:'accepted'}});
+ assert.equal(f.fetchCount(),0);assert.equal(f.intervalCount(),0);
+ assert.equal(f.text('label'),'Состояние недоступно');assert.match(f.text('sourceLabel'),/недоступен/);
 });

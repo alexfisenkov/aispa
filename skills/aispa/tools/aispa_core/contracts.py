@@ -42,6 +42,7 @@ def task_closure(state, task_id):
 
 def task_contract(state, task_id):
     return digest({"scope": scope_basis(state), "spec": state["spec"],
+                   **design_basis(state),
                    "closure": [{k: v for k, v in definition(t).items() if k != "wave"}
                                for t in task_closure(state, task_id)],
                    **({"delivery": state.get("planReview", {}).get("deliveryDigest")}
@@ -64,11 +65,22 @@ def scope_basis(state):
              "core": state.get("core", []), "sealed": state.get("sealed", False)}
     if state.get("policy", {}).get("productChallenge"):
         value["ideaReview"] = state.get("ideaReview")
+    if state.get("policy", {}).get("sourceAccounting"):
+        value["briefMap"] = state.get("briefMap")
     return digest(value)
+
+
+def design_basis(state):
+    if not state.get("policy", {}).get("designContract"):
+        return {}
+    return {"scenarios": state.get("featureScenarios"), "interfaces": state.get("interfaceContract"),
+            "references": state.get("ownerReferences", []), "depth": state.get("depth", "balanced"),
+            "integrationTask": state.get("integrationTask")}
 
 
 def plan_basis(state):
     return digest({"scope": scope_basis(state), "spec": state["spec"],
+                   **design_basis(state),
                    "tasks": [definition(t) for t in state["tasks"]],
                    **({"delivery": state.get("planReview", {}).get("deliveryDigest")}
                       if state.get("policy", {}).get("deliveryPlan") else {})})
@@ -107,6 +119,20 @@ def gate_valid(store, state, name):
     gate = state["gates"].get(name)
     if not gate or not gate.get("passed"):
         return False
+    if state.get("policy", {}).get("sourceAccounting"):
+        from . import briefmap, participants
+        if not briefmap.valid(store, state, lambda s, a, r: participants.actor_check(store, s, a, r)):
+            return False
+    if name in ("plan", "acceptance") and state.get("policy", {}).get("designContract"):
+        from . import design_contract
+        if (not design_contract.valid_scenarios(store, state)
+                or not design_contract.valid_interfaces(store, state, check_sources=False)
+                or not all(artifact_valid(store, ref.get("snapshot", {})) for ref in state.get("ownerReferences", []))):
+            return False
+    if name == "acceptance" and state.get("policy", {}).get("integrationReview"):
+        from . import integration
+        if not integration.proof_valid(store, state):
+            return False
     if name == "acceptance" and state.get("policy", {}).get("cleanClone"):
         from .cleanroom import valid
         from .blind import valid as blind_valid
@@ -124,13 +150,15 @@ def gate_valid(store, state, name):
 def verified(store, state):
     check = state["verification"]
     return bool(check and check["exitCode"] == 0 and check["code"] == store.code()
-                and not check.get("changedCode") and artifact_valid(store, check["output"]))
+                and not any(check.get(k) for k in ("changedCode", "timedOut", "truncated", "redacted"))
+                and artifact_valid(store, check["output"]))
 
 
 def task_verified(store, state, task_id):
     attempt = (state.get("taskHistory", {}).get(task_id) or [{}])[-1]
     check = attempt.get("verification")
     return bool(check and check["exitCode"] == 0 and not check.get("changedCode")
+                and not any(check.get(k) for k in ("timedOut", "truncated", "redacted"))
                 and check["candidate"] == task_basis(store, state, task_id)
                 and artifact_valid(store, check["output"]))
 
