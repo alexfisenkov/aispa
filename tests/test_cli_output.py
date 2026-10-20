@@ -83,11 +83,14 @@ class CliOutputTests(unittest.TestCase):
 
     def test_status_receipts_are_bounded_and_never_overwrite_previous_responses(self):
         self.init()
-        note = "Подробное решение владельца. " * 1500
+        # Exercise a large response without exceeding Windows CreateProcess's
+        # command-line limit before the CLI has any opportunity to run.
+        note = "Подробное решение владельца. " * 300
         self.call("decision", note)
         first_process = self.call("status", compact_mode=True)
         first = json.loads(first_process.stdout)
         first_bytes = Path(first["absolutePath"]).read_bytes()
+        self.assertGreater(len(first_bytes), 10000)
         self.assertLess(len(first_process.stdout.encode("utf-8")), 4096)
         full = self.full_response(first)
         self.assertEqual(full["decisions"][0]["text"], note)
