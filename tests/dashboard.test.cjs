@@ -58,6 +58,20 @@ function sample(status='running'){
   remaining:{checks:[],blockedTasks:[],excluded:[],unmapped:[]},decisions:[],
   estimate:{reason:'insufficient_data',sampleCount:0},activity:null};
 }
+function archivedSample(status='accepted'){
+ const d=sample(status);
+ d.archive=true;d.run='fixture';d.archivedAt='2026-10-19T12:00:01Z';d.verified=status==='accepted'||status==='delivered_with_remaining';
+ d.events=[];d.remaining.inherited=[];
+ d.requirements.forEach(r=>{r.core=!!r.core});
+ d.tasks.forEach(t=>{t.proofCurrent=false});
+ if(status==='accepted'){
+  d.requirements=[{id:'R01',text:'Отправка формы',scope:'active',kind:'requested',core:true,implementation:'implemented'}];
+  d.tasks=[{id:'T01',title:'Форма',wave:1,requirements:['R01'],dependsOn:[],status:'completed',
+   proofCurrent:true,elapsedSeconds:30}];
+  d.gates={coverage:true,plan:true,acceptance:true};d.remainingAssessed=true;
+ }
+ return d;
+}
 test('live query cannot turn running data into accepted',async()=>{
  const f=await fixture('?status=accepted');assert.equal(f.text('label'),'В работе');assert.equal(f.fetchCount(),1);
 });
@@ -182,7 +196,10 @@ test('demo illustrates repair and second review as examples only',async()=>{
 test('approved brand geometry is inline and long titles can wrap on narrow screens',()=>{
  assert.match(html,/<svg[^>]*role="img"[^>]*aria-label="AI Мастерская/);
  assert.match(html,/<path d="M122 211V84L173 159L224 84V211"/);
- assert.match(html,/<small>AI мастерская<\/small><b>AISpa<\/b>/);
+ assert.match(html,/<small>AI мастерская<\/small><h1>AISpa<\/h1>/);
+ assert.equal((html.match(/<h1\b/g)||[]).length,1);
+ assert.ok((html.match(/<h2\b/g)||[]).length>=6);
+ assert.match(html,/h1,h2\{margin:0\}/);
  assert.match(html,/\.task-body b,.dec b,.rem b,.activity-title/);
  assert.match(html,/overflow-wrap:anywhere/);
  assert.match(html,/@media\(max-width:650px\)/);
@@ -208,6 +225,8 @@ test('owner question and paused wait are distinct and do not invent wait time',a
  const owner=sample();owner.waiting={kind:'owner_question',note:'Утвердить границу до seal?',since:owner.observedAt};
  const f=await fixture('',owner);assert.equal(f.el('waitingPanel').hidden,false);
  assert.equal(f.text('waitingKind'),'Вопрос владельцу');assert.match(f.text('waitingNote'),/до seal/);
+ f.advance(4000);assert.equal(f.text('runElapsed'),'2 мин 00 с');
+ assert.equal(f.text('time-T01'),'30 с');
  const paused=sample('paused');paused.waiting={kind:'paused',note:'Ожидаем доступ',since:paused.observedAt};
  const p=await fixture('',paused);assert.equal(p.text('waitingKind'),'Ожидание');
  p.advance(60000);assert.equal(p.text('runElapsed'),'2 мин 00 с');
@@ -231,10 +250,12 @@ test('saved locale and theme are restored and can switch back to system',async()
  assert.equal(values.get('aispa.theme'),'system');
 });
 test('embedded accepted archive is explicitly historical and never fetches or ticks',async()=>{
- const archive={...sample('accepted'),archive:true,events:[{type:'init',at:'2026-10-19T12:00:00Z',text:'Начало'}]};
+ const archive=archivedSample();archive.events=[{type:'init',at:'2026-10-19T12:00:00Z',text:'Начало'}];
  const f=await fixture('?status=running&demo',sample(),{archive});
  assert.equal(f.fetchCount(),0);assert.equal(f.intervalCount(),0);
  assert.equal(f.text('label'),'Принято на дату снимка');assert.match(f.text('sourceLabel'),/Архивный снимок/);
+ assert.match(f.text('waves'),/1 из 1 задач принято · на дату снимка/);
+ assert.match(f.text('waves'),/Задача принята · на дату снимка/);
  assert.equal(f.el('refresh').hidden,true);assert.equal(f.text('runElapsed'),'2 мин 00 с');
  f.advance(90000);assert.equal(f.text('runElapsed'),'2 мин 00 с');
  await f.el('refresh').click();assert.equal(f.fetchCount(),0);
@@ -243,4 +264,44 @@ test('invalid archive does not fall through to live or claim acceptance',async()
  const f=await fixture('?status=accepted',{...sample(),status:'accepted'},{archive:{archive:true,status:'accepted'}});
  assert.equal(f.fetchCount(),0);assert.equal(f.intervalCount(),0);
  assert.equal(f.text('label'),'Состояние недоступно');assert.match(f.text('sourceLabel'),/недоступен/);
+});
+test('terminal archive rejects empty arrays, missing proof, broken gates and dates',async()=>{
+ const bad=[
+  {...archivedSample(),requirements:[],tasks:[]},
+  {...archivedSample(),archivedAt:'2026-02-30T12:00:00Z'},
+  {...archivedSample(),gates:{coverage:true,plan:true,acceptance:false}},
+  {...archivedSample(),verified:false},
+  {...archivedSample(),tasks:[{...archivedSample().tasks[0],proofCurrent:false}]},
+  {...archivedSample(),tasks:[{...archivedSample().tasks[0],requirements:[]}]},
+ ];
+ for(const archive of bad){const f=await fixture('',sample(),{archive});
+  assert.equal(f.text('label'),'Состояние недоступно');assert.equal(f.fetchCount(),0);}
+});
+test('running archive uses exporter fields and labels work as historical',async()=>{
+ const archive=archivedSample('running');const f=await fixture('',sample(),{archive});
+ assert.equal(f.fetchCount(),0);assert.equal(f.text('label'),'В работе · на дату снимка');
+ assert.match(f.text('sourceLabel'),/Архивный снимок/);
+ assert.match(f.text('waves'),/Была в работе · на дату снимка/);
+});
+test('offline and demo acceptance stay qualified; global stale preserves scoped task proof',async()=>{
+ const live=sample('accepted');live.tasks[0].status='completed';live.tasks[0].proofCurrent=true;
+ const f=await fixture('',live);await f.fail();
+ assert.equal(f.text('label'),'Состояние не подтверждено');
+ assert.match(f.text('waves'),/1 из 1 задач принято · последний снимок/);
+ assert.match(f.text('waves'),/Задача принята · последний снимок/);
+ const demo=await fixture('?demo&status=accepted');
+ assert.match(demo.text('label'),/пример/);assert.match(demo.text('waves'),/Задача принята · пример/);
+ const stale=sample('stale');stale.tasks[0].status='completed';stale.tasks[0].proofCurrent=true;
+ const s=await fixture('',stale);
+ assert.match(s.text('label'),/устарела/);assert.match(s.text('waves'),/Задача принята/);
+});
+test('light faint text and touch controls meet stated size and contrast',()=>{
+ const faint=html.match(/--faint:(#[0-9A-Fa-f]{6})/)[1];
+ function lum(hex){const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255);
+  return rgb.map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4)
+   .reduce((sum,v,i)=>sum+v*[0.2126,0.7152,0.0722][i],0);}
+ function contrast(a,b){const [hi,lo]=[lum(a),lum(b)].sort((x,y)=>y-x);return (hi+0.05)/(lo+0.05);}
+ assert.ok(contrast(faint,'#FFFFFF')>=4.5);assert.ok(contrast(faint,'#F4F5F6')>=4.5);
+ assert.match(html,/\.pref\{height:44px/);assert.match(html,/\.btn\{height:44px/);assert.match(html,/\.tab\{[^}]*height:44px/);
+ assert.match(html,/\.task-body b\{font-size:16px/);assert.match(html,/\.dec b\{[^}]*font-size:16px/);
 });

@@ -104,6 +104,8 @@ class PreparationTests(unittest.TestCase):
         self.assertTrue(result["private"])
         self.assertIn("window.AISPA_ARCHIVE=", text)
         self.assertIn('"archive": true', text)
+        self.assertNotIn("fonts.googleapis.com", text)
+        self.assertNotIn("fonts.gstatic.com", text)
         self.assertNotIn(self.state["title"], text)
         self.assertTrue(Path(result["absolutePath"]).is_relative_to(self.store.run))
 

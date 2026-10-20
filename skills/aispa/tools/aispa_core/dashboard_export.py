@@ -1,5 +1,6 @@
 """Private standalone historical snapshot; never a claim about current code."""
 import json
+import re
 from pathlib import Path
 
 from .contracts import require
@@ -10,6 +11,10 @@ from .store import timestamp
 def archive(store, state):
     template = Path(__file__).resolve().parents[2] / "assets" / "dashboard.html"
     html = template.read_text(encoding="utf-8")
+    # Offline archives use the declared system-font fallbacks, without even
+    # optional font/preconnect requests to external providers.
+    html = re.sub(r'<link\b[^>]*href="https://fonts\.(?:googleapis|gstatic)\.com[^>]*>\s*',
+                  "", html)
     marker = '<script id="aispa-app">'
     require(html.count(marker) == 1, "Неизвестная версия шаблона панели")
     value = {**project(store, state), "archive": True, "archivedAt": timestamp()}

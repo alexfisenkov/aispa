@@ -98,6 +98,26 @@ class JournalConsumerTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             executions.resolve(self.store, self.state, refs[0])
 
+    def test_addressed_event_and_task_projection_are_detached_and_recheck_bytes(self):
+        self.state["taskHistory"] = {"T01": [{"id": "A1", "testIntentHistory": [{"file": "example", "sha256": "a"}],
+                                            "privateLongField": "not copied into the timeline"}]}
+        self.append("task-submitted:T01")
+        event, previous = self.store.event_pair(2)
+        self.assertEqual(previous["event"], "init")
+        event["state"]["notes"].append("forged")
+        rows = self.store.task_timeline("T01")
+        projected = rows[-1]["state"]["taskHistory"]["T01"][-1]
+        self.assertEqual(set(projected), {"id", "testIntentHistory"})
+        projected["testIntentHistory"][0]["file"] = "forged"
+        self.assertEqual(self.store.event_pair(2)[0]["state"]["notes"], ["task-submitted:T01"])
+        self.assertEqual(self.store.task_timeline("T01")[-1]["state"]["taskHistory"]["T01"][-1]
+                         ["testIntentHistory"][0]["file"], "example")
+        self.corrupt_first_event_preserving_mtime()
+        with self.assertRaises(Invalid):
+            self.store.event_pair(2)
+        with self.assertRaises(Invalid):
+            self.store.task_timeline("T01")
+
 
 if __name__ == "__main__":
     unittest.main()

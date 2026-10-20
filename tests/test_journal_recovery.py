@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
-from aispa_core.store import Invalid, Journal, timestamp
+from aispa_core.store import Invalid, Journal, timestamp, digest
 
 
 class RecoveryTests(unittest.TestCase):
@@ -208,6 +208,20 @@ class RecoveryTests(unittest.TestCase):
                 self.path.write_bytes(prefix + tail)
                 with self.assertRaises(Invalid):
                     self.store.inspect_recovery()
+
+    def test_partial_hash_must_match_the_fully_known_row(self):
+        prefix = self.path.read_bytes()
+        last = json.loads(prefix.splitlines()[-1])
+        row = {"sequence": 2, "previous": last["hash"], "at": timestamp(), "event": "fixture",
+               "state": last["state"]}
+        expected = digest(row)
+        body = json.dumps(row, ensure_ascii=False, separators=(",", ":"))[:-1].encode() + b',"hash":"'
+        self.path.write_bytes(prefix + body + expected[:8].encode())
+        self.assertTrue(self.store.inspect_recovery()["recoverable"])
+        wrong = ("0" if expected[0] != "0" else "1") + expected[1:8]
+        self.path.write_bytes(prefix + body + wrong.encode())
+        with self.assertRaises(Invalid):
+            self.store.inspect_recovery()
 
 
 if __name__ == "__main__":

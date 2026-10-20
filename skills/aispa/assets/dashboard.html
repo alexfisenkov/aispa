@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700&family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --paper:#F4F5F6;--white:#FFFFFF;--ink:#181A1C;--muted:#55585E;--faint:#888B91;--line:#E3E4E7;
+  --paper:#F4F5F6;--white:#FFFFFF;--ink:#181A1C;--muted:#55585E;--faint:#62666D;--line:#E3E4E7;
   --graphite:#171717;--silver:#C7C9CC;--silver-light:#ECEDEF;--ok:#1F8A5B;
   --chrome:linear-gradient(180deg,#FFFFFF 0%,#E0E2E5 40%,#A9ACB1 62%,#EEF0F2 100%);
   --dark:linear-gradient(165deg,#202123 0%,#0E0E10 100%);
@@ -18,6 +18,7 @@
   --display:'Unbounded',sans-serif;--text:'Onest',-apple-system,sans-serif;--mono:'JetBrains Mono',ui-monospace,monospace;
 }
 *{box-sizing:border-box}
+h1,h2{margin:0}
 html,body{margin:0;padding:0;background:var(--paper)}
 body{color:var(--ink);font-family:var(--text);background:radial-gradient(1200px 600px at 80% -10%,#FFFFFF,transparent 70%),var(--paper);min-height:100vh;padding:28px clamp(16px,3vw,44px) 64px}
 a{color:var(--muted);text-decoration:none}a:hover{color:var(--ink)}
@@ -42,7 +43,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .brand{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
 .logo{width:50px;height:50px;flex:none;filter:drop-shadow(0 6px 12px rgba(20,20,22,.18))}
 .logo svg{display:block;width:100%;height:100%}
-.brand b{display:block;font-family:var(--display);font-weight:700;font-size:25px;line-height:1.1;letter-spacing:-.01em}
+.brand h1{display:block;font-family:var(--display);font-weight:700;font-size:25px;line-height:1.1;letter-spacing:-.01em}
 .brand small{display:block;margin-bottom:3px;font-size:12px;color:var(--faint)}
 .pill{padding:6px 12px;border-radius:999px;background:var(--white);border:1px solid var(--line);font-size:13px;color:var(--muted)}
 .hdr-r{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
@@ -71,7 +72,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 /* stages */
 .stages-card{border-radius:24px;padding:22px 24px;gap:16px}
 .row-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline}
-.row-head b{font-family:var(--display);font-weight:600;font-size:17px}.row-head span{font-size:13px;color:var(--faint)}
+.row-head h2{font-family:var(--display);font-weight:600;font-size:17px}.row-head span{font-size:13px;color:var(--faint)}
 .stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px}
 .stage{display:grid;gap:10px;padding:12px 12px 14px;border-radius:14px;background:var(--white);color:var(--faint);border:1px solid var(--line)}
 .stage i{height:3px;border-radius:999px;background:var(--line)}
@@ -89,7 +90,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .req{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:15px 4px;border-top:1px solid var(--line)}
 .req-id{flex:none;width:64px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .req-body{flex:1 1 220px;display:grid;gap:4px;min-width:0}
-.req-body b{font-weight:400;font-size:15.5px;line-height:1.45;text-wrap:pretty}
+.req-body b{font-weight:400;font-size:16px;line-height:1.45;text-wrap:pretty}
 .req-body small{font-size:12.5px;color:var(--faint)}
 .tag{flex:none;margin-left:auto;display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:500;white-space:nowrap;border:1px solid var(--line)}
 .tag .dot{width:7px;height:7px}
@@ -113,7 +114,7 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .task.blocked{background:var(--white);border-color:var(--silver)}
 .task-id{flex:none;width:36px;font-size:13px;color:var(--muted)}
 .task-body{flex:1 1 180px;display:grid;gap:2px;min-width:0}
-.task-body b{font-size:14.5px;font-weight:500;line-height:1.35}.task-body small{font-size:12.5px;color:var(--faint)}
+.task-body b{font-size:16px;font-weight:500;line-height:1.35}.task-body small{font-size:12.5px;color:var(--faint)}
 .task-phase{display:grid;gap:5px;margin-top:7px;font-size:12px;color:var(--muted)}
 .phase-steps{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
 .phase-step{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid var(--line);border-radius:8px;font-size:11px;color:var(--muted);background:var(--white)}
@@ -129,11 +130,11 @@ header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-betw
 .rem-group{display:grid;gap:8px}
 .rem-group>span{font-family:var(--display);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--faint)}
 .rem{display:flex;gap:12px;padding:13px 15px;border-radius:14px;background:var(--paper);border-left:3px solid var(--graphite)}
-.rem span{flex:none;font-size:13px;color:var(--muted)}.rem b{font-weight:400;font-size:14.5px;line-height:1.45;text-wrap:pretty;min-width:0}
-.clean{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:var(--paper);font-size:14.5px}
+.rem span{flex:none;font-size:13px;color:var(--muted)}.rem b{font-weight:400;font-size:16px;line-height:1.45;text-wrap:pretty;min-width:0}
+.clean{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:var(--paper);font-size:16px}
 .clean i{width:22px;height:22px;border-radius:999px;background:var(--ok);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;font-style:normal}
 .dec{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;padding:13px 0;border-top:1px solid rgba(255,255,255,.14)}
-.dec span{font-size:12px;color:#8A8D92;padding-top:2px}.dec b{font-weight:400;font-size:14.5px;line-height:1.5;color:var(--silver-light);text-wrap:pretty}
+.dec span{font-size:12px;color:#8A8D92;padding-top:2px}.dec b{font-weight:400;font-size:16px;line-height:1.5;color:var(--silver-light);text-wrap:pretty}
 footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;padding:6px 4px;font-size:13px;color:var(--faint)}
 [hidden]{display:none!important}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -152,13 +153,14 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 .eyebrow{line-height:1.6}.tag{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .btn:focus-visible,.tab:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
 @media(max-width:650px){.activity-card{grid-template-columns:minmax(0,1fr)}.time-summary{border-top:1px solid var(--line);padding-top:18px}.label{font-size:clamp(26px,7vw,38px)}}
-.pref{height:40px;padding:0 10px;border:1px solid var(--line);border-radius:11px;background:var(--white);color:var(--ink);font:600 13px var(--text);cursor:pointer}
+.pref{height:44px;padding:0 10px;border:1px solid var(--line);border-radius:11px;background:var(--white);color:var(--ink);font:600 13px var(--text);cursor:pointer}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .pref:focus-visible,.history summary:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
 .waiting-card{gap:7px;border-left:4px solid var(--graphite)}
 .waiting-card b{font-size:17px;line-height:1.4;font-weight:600;overflow-wrap:anywhere}
 .history{padding:16px clamp(20px,2.4vw,30px);gap:0}
 .history summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;font-family:var(--display);font-size:15px;font-weight:600}
+.history summary h2{font:inherit}
 .history-list{display:grid;gap:0;margin-top:8px}
 .history-event{display:grid;grid-template-columns:minmax(100px,150px) minmax(0,1fr);gap:8px 16px;padding:12px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.45;overflow-wrap:anywhere}
 .history-event time{color:var(--faint);font-family:var(--mono);font-size:12px}
@@ -184,7 +186,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
   <path d="M122 211V84L173 159L224 84V211" fill="none" stroke="#F4F5F6" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
   <rect x="110" y="33" width="24" height="24" rx="6" fill="#F4F5F6"/>
 </svg></div>
-    <div><small>AI мастерская</small><b>AISpa</b></div>
+    <div><small>AI мастерская</small><h1>AISpa</h1></div>
     <span class="pill" id="version">Альфа-версия</span>
   </div>
   <div class="hdr-r">
@@ -213,7 +215,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
     </div>
   </div>
   <div class="card gates">
-    <div class="eyebrow" data-i18n="checks">Проверки</div>
+    <h2 class="eyebrow" data-i18n="checks">Проверки</h2>
     <div id="gates" style="display:grid;gap:10px"></div>
     <div class="note" data-i18n="gateNote">Изменение брифа, плана или кода делает связанные проверки устаревшими.</div>
   </div>
@@ -224,7 +226,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 </section>
 
 <section class="card activity-card" aria-label="Текущая работа и время" data-aria-i18n="activityAria">
-  <div class="activity-list"><div class="eyebrow" data-i18n="now">Сейчас выполняется</div><div id="currentActivity" class="activity-list"></div></div>
+  <div class="activity-list"><h2 class="eyebrow" data-i18n="now">Сейчас выполняется</h2><div id="currentActivity" class="activity-list"></div></div>
   <div class="time-summary">
   <div><span class="sub" data-i18n="runTime">Время прогона · без отмеченных пауз</span><strong id="runElapsed">—</strong></div>
     <div><span class="sub" data-i18n="estimate">Примерно до завершения</span><strong id="eta">Пока нет оценки</strong><span class="note" id="etaNote"></span></div>
@@ -232,23 +234,23 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 </section>
 
 <details class="card history" id="historyPanel" hidden>
-  <summary><span data-i18n="history">История</span><span class="note" id="historyCount"></span></summary>
+  <summary><h2 data-i18n="history">История</h2><span class="note" id="historyCount"></span></summary>
   <div class="history-list" id="events"></div>
 </details>
 
 <section class="card waves-card" aria-label="Задачи по волнам" data-aria-i18n="wavesAria">
-  <div style="display:grid;gap:6px"><span class="h2" data-i18n="waves">Задачи по волнам</span><span class="sub" data-i18n="wavesNote">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
+  <div style="display:grid;gap:6px"><h2 class="h2" data-i18n="waves">Задачи по волнам</h2><span class="sub" data-i18n="wavesNote">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
   <div id="waves" style="display:grid;gap:20px"></div>
 </section>
 
 <section class="card stages-card">
-  <div class="row-head"><b data-i18n="stageHeading">Этап</b><span id="stageText"></span></div>
+  <div class="row-head"><h2 data-i18n="stageHeading">Этап</h2><span id="stageText"></span></div>
   <div class="stages" id="stages"></div>
 </section>
 
 <section class="card">
   <div class="req-head">
-    <div><span class="h2" data-i18n="requirements">Требования</span><span class="sub" data-i18n="requirementsNote">«Реализовано по задачам» ещё не означает, что требование принято.</span></div>
+    <div><h2 class="h2" data-i18n="requirements">Требования</h2><span class="sub" data-i18n="requirementsNote">«Реализовано по задачам» ещё не означает, что требование принято.</span></div>
     <div class="tabs" id="tabs"></div>
   </div>
   <div id="requirements"></div>
@@ -260,12 +262,12 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 
 <section class="lower">
   <div class="card" style="gap:16px">
-    <div style="display:grid;gap:6px"><span class="h2" data-i18n="remaining">Остатки</span><span class="sub" data-i18n="remainingNote">Остаются обязательствами и сохраняются в учёте.</span></div>
+    <div style="display:grid;gap:6px"><h2 class="h2" data-i18n="remaining">Остатки</h2><span class="sub" data-i18n="remainingNote">Остаются обязательствами и сохраняются в учёте.</span></div>
     <div id="remaining" style="display:grid;gap:16px"></div>
   </div>
   <div class="card dark" style="gap:16px">
     <div class="glow"></div>
-    <div style="position:relative;display:grid;gap:6px"><span class="h2" data-i18n="decisions">Решения агента</span><span class="sub" data-i18n="decisionsNote">Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.</span></div>
+    <div style="position:relative;display:grid;gap:6px"><h2 class="h2" data-i18n="decisions">Решения агента</h2><span class="sub" data-i18n="decisionsNote">Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.</span></div>
     <div id="decisions" style="position:relative"></div>
   </div>
 </section>
@@ -356,6 +358,8 @@ var EN={
  'Состояние недоступно':'State unavailable','Нет данных':'No data','Пока нет оценки':'No estimate yet',
  'Задача принята':'Task accepted','Проверки устарели':'Checks are stale',
  'Архив':'Archive','на дату снимка':'as of the snapshot','На дату снимка':'As of snapshot',
+ 'пример':'example','Была в работе':'Was in progress',
+ 'Фаза на дату снимка: ':'Phase as of snapshot: ',
  'Это историческое состояние. Текущий статус проекта здесь не проверяется.':'This is historical state. The current project status is not checked here.',
  'Состояние на дату снимка':'State as of snapshot','Архивный снимок недоступен':'Archived snapshot unavailable',
  'Встроенный архивный снимок повреждён или неполон.':'The embedded archived snapshot is damaged or incomplete.',
@@ -397,6 +401,7 @@ Object.assign(EN,{
  'последний снимок':'last snapshot','Была в работе · последний снимок':'Was in progress · last snapshot',
  'Приостановлена':'Paused','Фаза: ':'Phase: ','Фаза на момент снимка: ':'Phase at snapshot: ',
  'Остатков нет.':'No remaining work.','Остатков не было на дату снимка.':'No remaining work as of snapshot.',
+ 'В примере остатков нет.':'No remaining work in this example.',
  'Итоги ещё не подведены.':'The result has not been assessed yet.',
  'Актуальные остатки не подтверждены.':'Current remaining work is unconfirmed.',
  'Самостоятельные решения пока не записаны.':'No agent decisions recorded yet.','Описание не указано':'No description',
@@ -439,7 +444,19 @@ function isAdd(r){return r.kind==='addition'}
 function connected(){return source==='live'||source==='demo'||source==='archive'}
 function finalStatus(s){return s==='accepted'||s==='delivered_with_remaining'}
 function viewStatus(d){return connected()?(previewStatus&&LABELS[previewStatus]?previewStatus:d.status):'unavailable'}
-function delta(){return source==='live'||source==='demo'?Math.max(0,(performance.now()-receivedAt)/1000):0}
+function delta(){if(last&&last.waiting&&typeof last.waiting==='object'&&last.waiting.kind==='owner_question')return 0;
+ return source==='live'||source==='demo'?Math.max(0,(performance.now()-receivedAt)/1000):0}
+function sourceSuffix(){return source==='archive'?' · '+tr('на дату снимка'):
+ source==='offline'?' · '+tr('последний снимок'):source==='demo'?' · '+tr('пример'):''}
+function taskLabel(t,d){
+ var label=t.phaseStale?tr('Проверки устарели'):
+  (source==='archive'||source==='offline')&&t.status==='running'?tr('Была в работе'):
+  t.status==='running'&&d.status!=='running'?tr('Приостановлена'):
+  t.status==='running'&&phaseName(t)?phaseName(t):
+  t.status==='completed'&&t.proofCurrent===false?tr('Нужна повторная проверка'):
+  t.status==='completed'&&t.proofCurrent===true?tr('Задача принята'):tr(TASK[t.status]||UNKNOWN);
+ return label+sourceSuffix();
+}
 function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
  (t.activeSince&&t.status==='running'&&d.status==='running'?delta():0)}
 function phaseTime(t,d){var p=t.phaseTiming;if(t.phaseStale||!p||!Number.isFinite(p.elapsedSeconds))return null;
@@ -460,7 +477,7 @@ function renderSource(){
  archive:['#8A8D92','Архивный снимок'],
  'archive-invalid':['#55585E','Архивный снимок недоступен'],
  offline:['#55585E','Нет актуальных данных — последний снимок'],none:['#55585E','Состояние недоступно']}[source];
- $('sourceDot').style.background=m[0];$('sourceLabel').textContent=tr(m[1])+(source==='archive'?' · '+fmt(last.observedAt||last.updatedAt):'');
+ $('sourceDot').style.background=m[0];$('sourceLabel').textContent=tr(m[1])+(source==='archive'?' · '+fmt(last.archivedAt):'');
 }
 function renderEmpty(){
  $('title').textContent='AISpa';$('label').textContent=tr('Состояние недоступно');
@@ -501,7 +518,7 @@ function renderActivity(d,status){
  var box=$('currentActivity');box.replaceChildren();
  if(!connected()){box.append(h('div','activity-title',tr('Последний подтверждённый снимок')));return;}
  if(source==='archive'){box.append(h('div','activity-title',tr('Состояние на дату снимка')));return;}
- if(status!=='running'){box.append(h('div','activity-title',tr(SHORT[status]||UNKNOWN)));
+ if(status!=='running'){box.append(h('div','activity-title',tr(SHORT[status]||UNKNOWN)+sourceSuffix()));
   return;}
  if(d.activity&&d.activity.kind==='verification'){
   var check=h('div','active-task');check.append(h('b',null,tr('Выполняется проверка кода')));
@@ -562,16 +579,17 @@ function render(d){
  var status=viewStatus(d),reqs=d.requirements,tasks=d.tasks,rem=d.remaining||{};
  $('title').textContent=d.title||tr('Без названия');$('version').textContent=d.version?tr('Альфа')+' · '+d.version:tr('Альфа-версия');
  $('label').textContent=source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
-  tr(LABELS[status]||UNKNOWN)+(source==='archive'?' · '+tr('на дату снимка'):'');
+  tr(LABELS[status]||UNKNOWN)+(source==='archive'||source==='demo'?sourceSuffix():'');
  $('hint').textContent=source==='archive'?tr('Это историческое состояние. Текущий статус проекта здесь не проверяется.'):
   tr(HINT[status]||'Обновите состояние или проверьте совместимость версии.');
- $('statusShort').textContent=source==='archive'?tr('Архив'):tr(SHORT[status]||UNKNOWN);
+ $('statusShort').textContent=source==='archive'?tr('Архив'):tr(SHORT[status]||UNKNOWN)+(source==='demo'?sourceSuffix():'');
  var dot=DOT[status]||DOT.unavailable;$('statusDot').style.background=dot[0];$('statusDot').style.border=dot[1];
  $('updatedAt').textContent=fmt(d.updatedAt);$('observedAt').textContent=fmt(d.observedAt);
  var gates=$('gates');gates.replaceChildren();
  GATES.forEach(function(g){var ok=connected()&&d.gates&&d.gates[g[0]]===true,row=h('div','gate');
   row.append(h('div','gate-mark '+(ok?'ok':'no'),ok?'✓':'!'));var t=h('div');
-  t.append(h('b',null,tr(g[1])),h('span',null,ok?(source==='archive'?tr('На дату снимка')+' · ':'')+tr(g[2]):
+  t.append(h('b',null,tr(g[1])),h('span',null,ok?(source==='archive'?tr('На дату снимка')+' · ':
+   source==='demo'?tr('пример')+' · ':'')+tr(g[2]):
    tr(connected()?'Не подтверждено или устарело':'Нет актуального подтверждения')));row.append(t);gates.append(row)});
  var idx=STAGES.findIndex(function(x){return x[0]===(d.displayStage||d.stage)}),done=connected()&&finalStatus(status);
  $('stageName').textContent=idx>=0?tr(STAGES[idx][1]):tr('Не определён');
@@ -597,21 +615,17 @@ function render(d){
  waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
   var hasProof=ts.some(function(t){return typeof t.proofCurrent==='boolean'}),accepted=ts.filter(function(t){return t.status==='completed'&&t.proofCurrent===true}).length;
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,tr('Волна')+' '+n));
-  hd.append(l,h('span',null,hasProof?(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято'):
-   (locale==='en'?c+' of '+ts.length+' completed':c+' из '+ts.length+' завершено')));var box=h('div','tasks');
+  hd.append(l,h('span',null,(hasProof?(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято'):
+   (locale==='en'?c+' of '+ts.length+' completed':c+' из '+ts.length+' завершено'))+sourceSuffix()));var box=h('div','tasks');
   ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')+(t.status==='completed'&&t.proofCurrent===false?' proof-stale':'')),b=h('div','task-body');
    b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?tr('Требования: ')+t.requirements.join(', '):tr('Без привязки к требованиям')));
    var steps=phaseSteps(t);if(steps)b.append(steps);
-   var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(
-   t.phaseStale?(tr('Проверки устарели')+(!connected()?' · '+tr('последний снимок'):'')):
-    !connected()&&t.status==='running'?tr('Была в работе · последний снимок'):
-    t.status==='running'&&d.status!=='running'?tr('Приостановлена'):
-    t.status==='running'&&phaseName(t)?phaseName(t):t.status==='completed'&&t.proofCurrent===false?tr('Нужна повторная проверка'):
-    t.status==='completed'&&t.proofCurrent===true?tr('Задача принята'):tr(TASK[t.status]||UNKNOWN)));
+   var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));
    var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,h('span','task-time',tr('Вся задача')),clock);
    if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
     var pclock=h('span','mono task-time');pclock.id='phase-time-'+t.id;
-    right.append(h('span','task-time',tr(connected()?'Фаза: ':'Фаза на момент снимка: ')+phaseName(t)),pclock)}
+    right.append(h('span','task-time',tr(source==='archive'?'Фаза на дату снимка: ':
+     connected()?'Фаза: ':'Фаза на момент снимка: ')+phaseName(t)),pclock)}
    row.append(h('span','task-id mono',t.id),b,right);box.append(row)});w.append(hd,box);wv.append(w)});
  var rb=$('remaining');rb.replaceChildren();var any=false;
  REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;
@@ -619,7 +633,8 @@ function render(d){
    if(it.id)row.append(h('span','mono',it.id));row.append(h('b',null,it.text));group.append(row)});rb.append(group)});
  if(!any){var clean=connected()&&status==='accepted'&&d.remainingAssessed;
   var cl=h('div','clean');if(clean)cl.append(h('i',null,'✓'));
-  cl.append(document.createTextNode(tr(clean?(source==='archive'?'Остатков не было на дату снимка.':'Остатков нет.'):
+  cl.append(document.createTextNode(tr(clean?(source==='archive'?'Остатков не было на дату снимка.':
+   source==='demo'?'В примере остатков нет.':'Остатков нет.'):
    connected()?'Итоги ещё не подведены.':'Актуальные остатки не подтверждены.')));rb.append(cl)}
  var db=$('decisions');db.replaceChildren();
  if(!d.decisions.length)db.append(h('div','sub',tr('Самостоятельные решения пока не записаны.')));
@@ -629,9 +644,48 @@ function render(d){
 function valid(d){return d&&typeof d.status==='string'&&Array.isArray(d.requirements)&&Array.isArray(d.tasks)&&Array.isArray(d.decisions)&&
  d.requirements.every(function(r){return r&&typeof r.id==='string'&&typeof r.text==='string'})&&
  d.tasks.every(function(t){return t&&typeof t.id==='string'&&Array.isArray(t.requirements)});}
+function archiveDate(value){
+ if(typeof value!=='string')return null;
+ var m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+ if(!m)return null;
+ var y=+m[1],month=+m[2],day=+m[3],hour=+m[4],minute=+m[5],second=+m[6];
+ var zone=m[7],zoneHours=zone==='Z'?0:+zone.slice(1,3),zoneMinutes=zone==='Z'?0:+zone.slice(4,6);
+ if(month<1||month>12||day<1||day>new Date(Date.UTC(y,month,0)).getUTCDate()||
+    hour>23||minute>59||second>59||zoneHours>23||zoneMinutes>59)return null;
+ var time=Date.parse(value);return Number.isFinite(time)?time:null;
+}
+function validArchive(d){
+ // Exporter-shaped evidence check, not a signature or proof of current status.
+ if(!d||d.archive!==true||!valid(d)||!LABELS[d.status]||d.status==='unavailable'||
+    typeof d.run!=='string'||!d.run||typeof d.title!=='string'||!d.title||
+    typeof d.version!=='string'||!d.version||typeof d.stage!=='string'||typeof d.displayStage!=='string'||
+    !Number.isFinite(d.elapsedSeconds)||d.elapsedSeconds<0||
+    !d.gates||typeof d.gates!=='object'||typeof d.verified!=='boolean'||typeof d.remainingAssessed!=='boolean'||
+    !d.remaining||typeof d.remaining!=='object'||!Array.isArray(d.events)||
+    !['coverage','plan','acceptance'].every(function(k){return typeof d.gates[k]==='boolean'})||
+    !['checks','blockedTasks','excluded','unmapped','inherited'].every(function(k){return Array.isArray(d.remaining[k])})||
+    !d.requirements.every(function(r){return typeof r.core==='boolean'&&
+      ['active','deferred','dropped'].includes(r.scope)&&typeof r.implementation==='string'})||
+    !d.tasks.every(function(t){return typeof t.proofCurrent==='boolean'&&
+      ['pending','running','blocked','completed'].includes(t.status)}))return false;
+ var archived=archiveDate(d.archivedAt),observed=archiveDate(d.observedAt),updated=archiveDate(d.updatedAt);
+ if(archived===null||observed===null||updated===null||updated>observed||observed>archived)return false;
+ if(!finalStatus(d.status))return true;
+ if(!d.gates.coverage||!d.gates.plan||!d.gates.acceptance||!d.verified||!d.remainingAssessed||
+    !d.requirements.length||!d.tasks.length||
+    d.tasks.some(function(t){return t.status==='completed'&&t.proofCurrent!==true}))return false;
+ var core=d.requirements.filter(function(r){return r.core&&r.scope==='active'});
+ if(!core.length||!core.every(function(r){var holders=d.tasks.filter(function(t){return t.requirements.includes(r.id)});
+   return holders.length&&holders.every(function(t){return t.status==='completed'&&t.proofCurrent===true})}))return false;
+ if(d.status==='accepted'&&(
+    d.tasks.some(function(t){return t.status!=='completed'})||
+    d.requirements.some(function(r){return r.scope==='active'&&r.implementation!=='implemented'})||
+    ['checks','blockedTasks','excluded','unmapped','inherited'].some(function(k){return d.remaining[k].length})))return false;
+ return true;
+}
 async function refresh(){
  if(archiveMode){
-  if(valid(archiveData)){source='archive';last=archiveData;receivedAt=performance.now();renderSource();render(last)}
+  if(validArchive(archiveData)){source='archive';last=archiveData;receivedAt=performance.now();renderSource();render(last)}
   else{source='archive-invalid';renderSource();renderEmpty()}
   return;
  }
