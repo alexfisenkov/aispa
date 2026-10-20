@@ -39,6 +39,51 @@ class PacketTests(unittest.TestCase):
         self.assertEqual(receipt["sectionCount"], 0)
         self.assertEqual(json.loads(Path(receipt["absolutePath"]).read_text(encoding="utf-8")), packet)
 
+    def test_identical_sections_keep_addresses_without_losing_changed_fields(self):
+        packet = {"kind": "task", "basis": "candidate-1", "briefs": ["Original " * 10000],
+                  "expectedChecks": [{"requirement": "R01", "criterion": "Keep every check"}]}
+        first = packets.write(self.store, packet)
+        before = set((self.store.run / "contexts").rglob("*.json"))
+        repeated = packets.write(self.store, packet)
+        self.assertEqual(first, repeated)
+        self.assertEqual(before, set((self.store.run / "contexts").rglob("*.json")))
+        changed = packets.write(self.store, dict(packet, basis="candidate-2"))
+        self.assertNotEqual(first["file"], changed["file"])
+        old = json.loads(Path(first["absolutePath"]).read_text(encoding="utf-8"))
+        new = json.loads(Path(changed["absolutePath"]).read_text(encoding="utf-8"))
+        self.assertEqual(old["sections"], new["sections"])
+        self.assertEqual(new["expectedChecks"], packet["expectedChecks"])
+        self.assertEqual(new["basis"], "candidate-2")
+        altered = packets.write(self.store, dict(packet, briefs=["Different " * 10000]))
+        other = json.loads(Path(altered["absolutePath"]).read_text(encoding="utf-8"))
+        self.assertNotEqual(old["sections"]["briefs"], other["sections"]["briefs"])
+
+    def test_corrupted_context_is_rejected_and_not_rewritten(self):
+        packet = {"kind": "task", "basis": "x", "briefs": ["Original " * 10000]}
+        first = packets.write(self.store, packet)
+        envelope = json.loads(Path(first["absolutePath"]).read_text(encoding="utf-8"))
+        section = Path(envelope["sections"]["briefs"]["absolutePath"])
+        section.write_bytes(b"tampered")
+        with self.assertRaises(Invalid):
+            packets.write(self.store, packet)
+        self.assertEqual(section.read_bytes(), b"tampered")
+
+    def test_context_cache_rejects_symlinks_without_touching_target(self):
+        packet = {"kind": "task", "basis": "x"}
+        first = packets.write(self.store, packet)
+        path = Path(first["absolutePath"])
+        outside = Path(self.temp.name) / "outside.json"
+        outside.write_bytes(path.read_bytes())
+        path.unlink()
+        try:
+            path.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest("Filesystem cannot create symlinks: " + str(exc))
+        before = outside.read_bytes()
+        with self.assertRaises(Invalid):
+            packets.write(self.store, packet)
+        self.assertEqual(outside.read_bytes(), before)
+
     def test_blind_packet_contains_no_registry_spec_or_old_reviews(self):
         self.state["briefs"] = [dict(self.store.artifact("briefs", b"Original request", ".md"), id="B001")]
         self.state["spec"] = {"file": "do-not-show-spec"}

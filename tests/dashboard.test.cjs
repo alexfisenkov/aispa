@@ -72,6 +72,27 @@ function archivedSample(status='accepted'){
  }
  return d;
 }
+test('logo, workshop label and AISpa title share an accessible external channel link',async()=>{
+ const header=html.match(/<header>([\s\S]*?)<\/header>/)[1];
+ const links=[...header.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)];
+ assert.equal(links.length,1);
+ const [,attributes,content]=links[0];
+ const attrs=Object.fromEntries([...attributes.matchAll(/([\w-]+)="([^"]*)"/g)].map(m=>[m[1],m[2]]));
+ assert.equal(attrs.href,'https://t.me/masterskaya_video');
+ assert.equal(attrs.target,'_blank');
+ assert.deepEqual(new Set(attrs.rel.split(/\s+/)),new Set(['noopener','noreferrer']));
+ assert.equal(attrs.tabindex,undefined);
+ assert.match(content,/<div class="logo"><svg\b[^>]*aria-hidden="true"/);
+ assert.match(content,/<small>AI мастерская<\/small>/);
+ assert.match(content,/<h1>AISpa<\/h1>/);
+ assert.doesNotMatch(content,/\bid="version"/);
+ assert.match(header,/<\/a>\s*<span class="pill" id="version">/);
+ assert.match(html,/\.brand-link:focus-visible\{[^}]*outline:2px solid var\(--ink\)/);
+ const f=await fixture();
+ assert.match(f.staticText('workshopLink'),/Telegram-канал, новая вкладка/);
+ f.el('language').change('en');
+ assert.match(f.staticText('workshopLink'),/Telegram channel, new tab/);
+});
 test('live query cannot turn running data into accepted',async()=>{
  const f=await fixture('?status=accepted');assert.equal(f.text('label'),'В работе');assert.equal(f.fetchCount(),1);
 });
@@ -194,7 +215,7 @@ test('demo illustrates repair and second review as examples only',async()=>{
  }
 });
 test('approved brand geometry is inline and long titles can wrap on narrow screens',()=>{
- assert.match(html,/<svg[^>]*role="img"[^>]*aria-label="AI Мастерская/);
+ assert.match(html,/<svg[^>]*viewBox="0 0 256 256"[^>]*aria-hidden="true"[^>]*focusable="false"/);
  assert.match(html,/<path d="M122 211V84L173 159L224 84V211"/);
  assert.match(html,/<small>AI мастерская<\/small><h1>AISpa<\/h1>/);
  assert.equal((html.match(/<h1\b/g)||[]).length,1);

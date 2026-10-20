@@ -28,6 +28,10 @@ handoff manifest сам по себе не доказывает, что влад
 в reviewer, independent: true, unmapped, checks. PreviousReport — SHA отчёта
 critic2. InheritedProofs скопируй точно из пакета, включая пустой массив, если
 предков нет; это ссылки на подтверждённые исторические приёмки, не их замена.
+Для формы используй выданную координатором заготовку
+`template acceptor --task <id> --write`: точные связи и цитаты уже заполнены.
+Самостоятельно заполни каждый результат, объяснение, evidence и подтверждение
+свежего контекста. Не проставляй aligned/passed автоматически по наличию формы.
 
 Trace должен содержать каждое исходное требование из traceRequirements:
 точные requirement/brief/quote, result aligned или drift, note и artifact.

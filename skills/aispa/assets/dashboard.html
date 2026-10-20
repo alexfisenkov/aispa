@@ -41,6 +41,8 @@ a{color:var(--muted);text-decoration:none}a:hover{color:var(--ink)}
 /* header */
 header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
 .brand{display:flex;flex-wrap:wrap;align-items:center;gap:14px}
+.brand-link{display:flex;align-items:center;gap:14px;color:var(--ink);border-radius:12px}
+.brand-link:focus-visible{outline:2px solid var(--ink);outline-offset:5px}
 .logo{width:50px;height:50px;flex:none;filter:drop-shadow(0 6px 12px rgba(20,20,22,.18))}
 .logo svg{display:block;width:100%;height:100%}
 .brand h1{display:block;font-family:var(--display);font-weight:700;font-size:25px;line-height:1.1;letter-spacing:-.01em}
@@ -179,7 +181,8 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 
 <header>
   <div class="brand">
-    <div class="logo"><svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="AI Мастерская — сглаженный модульный знак a i m">
+    <a class="brand-link" href="https://t.me/masterskaya_video" target="_blank" rel="noopener noreferrer">
+    <div class="logo"><svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" aria-hidden="true" focusable="false">
   <rect width="256" height="256" rx="52" fill="#171717"/>
   <rect x="22" y="102" width="112" height="109" rx="14" fill="#F4F5F6"/>
   <rect x="45" y="124" width="62" height="66" rx="8" fill="#171717"/>
@@ -187,6 +190,8 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
   <rect x="110" y="33" width="24" height="24" rx="6" fill="#F4F5F6"/>
 </svg></div>
     <div><small>AI мастерская</small><h1>AISpa</h1></div>
+    <span class="sr-only" data-i18n="workshopLink"> — Telegram-канал, новая вкладка</span>
+    </a>
     <span class="pill" id="version">Альфа-версия</span>
   </div>
   <div class="hdr-r">
@@ -311,7 +316,7 @@ var GATES=[['coverage','Покрытие','Бриф отражён в специ
 var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],['inherited','Остатки прошлых прогонов'],
  ['unmapped','Не попало в требования']];
 var UNKNOWN='Состояние не определено';
-var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['Обновить','Refresh'],updated:['Последняя запись агента','Last agent entry'],
+var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['Обновить','Refresh'],workshopLink:[' — Telegram-канал, новая вкладка',' — Telegram channel, new tab'],updated:['Последняя запись агента','Last agent entry'],
  observed:['Актуальность проверена','Observed'],stage:['Текущий этап','Current stage'],checks:['Проверки','Checks'],
  now:['Сейчас выполняется','Current work'],history:['История','History'],runTime:['Время прогона · без отмеченных пауз','Run time · excluding recorded pauses'],
  estimate:['Примерно до завершения','Approximate time remaining'],waves:['Задачи по волнам','Tasks by wave'],

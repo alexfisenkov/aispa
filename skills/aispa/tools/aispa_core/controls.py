@@ -1,6 +1,6 @@
 """CLI controls for source-first planning, usage and recovery."""
 import argparse
-from . import participants, preparation, briefmap, design_contract, telemetry
+from . import participants, preparation, briefmap, design_contract, telemetry, task_reports
 from .contracts import require
 
 READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context"}
@@ -13,8 +13,11 @@ def parsers(sub):
     for name in sorted(READS - {"template"}):
         sub.add_parser(name)
     t = sub.add_parser("template")
-    t.add_argument("kind", choices=("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces"))
+    t.add_argument("kind", choices=("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces",
+                                   *task_reports.ROLES))
     t.add_argument("--actor")
+    t.add_argument("--task")
+    t.add_argument("--write", action="store_true")
     test = sub.add_parser("test-intent")
     test.add_argument("--task", required=True)
     test.add_argument("--file")
@@ -61,6 +64,13 @@ def execute(store, state, flow, args):
     if action == "preparation":
         return {"brief": briefmap.view(store, state, actor_check), "design": design_contract.view(store, state)}
     if action == "template":
+        if args.kind in task_reports.ROLES:
+            require(args.task, "Для шаблона роли нужен --task")
+            require(args.actor is None, "Actor шаблона задачи берётся из назначенной роли; --actor не нужен")
+            report = task_reports.template(flow.pipeline, args.task, args.kind)
+            return task_reports.write(store, report, args.task, args.kind) if args.write else report
+        require(args.task is None and not args.write,
+                "--task и --write поддерживаются только для шаблонов worker, critic1, critic2, acceptor")
         return preparation.template(store, state, args.kind, actor=args.actor)
     if action == "ready":
         return flow.ready()

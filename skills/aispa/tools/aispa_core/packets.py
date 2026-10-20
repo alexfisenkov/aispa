@@ -1,8 +1,9 @@
 """Bounded dispatch envelopes. Full evidence is referenced, never truncated."""
+import hashlib
 import json
 
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
-from .store import common_input, Invalid
+from .store import common_input, confined, Invalid
 from .portable import match_name, relative_name
 from . import docmeta, telemetry
 
@@ -11,6 +12,28 @@ MAX_PACKET_BYTES = 16000
 
 def encode(value):
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
+
+
+def _context_artifact(store, value):
+    """Stable references for derived context only; never replace damaged bytes.
+
+    CLI callers hold the journal lock. Fresh actors still read independently;
+    address reuse is not evidence that any actor has read these bytes.
+    """
+    data = encode(value)
+    sha = hashlib.sha256(data).hexdigest()
+    name = "contexts/by-sha/" + sha + ".json"
+    path = confined(store.run, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path = confined(store.run, name)
+    try:
+        with path.open("xb") as stream:
+            stream.write(data)
+    except FileExistsError:
+        path = confined(store.run, name)
+        require(path.is_file() and path.read_bytes() == data,
+                "Повреждён сохранённый раздел контекста; автоматическая замена запрещена")
+    return {"file": name, "sha256": sha}
 
 
 def routing(state, task, role, attempt=None, store=None):
@@ -192,13 +215,13 @@ def write(store, packet, *, maximum=MAX_PACKET_BYTES):
             break
         if len(encode(packet[key])) < 500:
             continue
-        reference = store.artifact("contexts", encode(packet[key]), ".json")
+        reference = _context_artifact(store, packet[key])
         sections[key] = {**reference, "absolutePath": str(store.run / reference["file"])}
         envelope.pop(key)
         envelope["sections"] = sections
         envelope["readingRule"] = "Open every referenced section needed for the role. All expectedChecks, original briefs and constraints remain mandatory; no summary replaces them."
     require(len(encode(envelope)) <= maximum, "Не удалось вместить указатели контекста; пакет не усечён")
-    artifact = store.artifact("contexts", encode(envelope), ".json")
+    artifact = _context_artifact(store, envelope)
     return {**artifact, "basis": packet["basis"], "absolutePath": str(store.run / artifact["file"]),
             "envelopeBytes": len(encode(envelope)), "inlineBytesBefore": original_bytes,
             "sectionCount": len(sections), "tokenCount": None}

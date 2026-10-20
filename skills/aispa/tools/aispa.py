@@ -13,6 +13,7 @@ from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
 from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
+from aispa_core.cli_output import emit
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -26,6 +27,8 @@ def runtime_digest():
 def parser():
     p = argparse.ArgumentParser(description="AISpa " + VERSION)
     p.add_argument("--root", default=".", help="Корень Git-проекта")
+    p.add_argument("--compact", action="store_true",
+                   help="Краткий ответ изменений/status/init со ссылкой и SHA-256 полного JSON; перед подкомандой")
     p.add_argument("--version", action="version", version=VERSION)
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("update-check")
@@ -202,11 +205,12 @@ def execute(args):
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
             project_context.refresh(store, state)
-            print(json.dumps(publish(store, state), ensure_ascii=False, indent=2))
+            emit(store, publish(store, state), compact_mode=args.compact)
             return 0
         state = store.load()
         read_only = (args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
-                     or args.action in controls.READS
+                     or (args.action in controls.READS
+                         and not (args.action == "template" and args.write))
                      or args.action == "test-intent" and not args.file
                      or (args.action in ("idea", "repair-plan") and not args.file)
                      or (args.action == "documents" and not args.refresh))
@@ -417,7 +421,7 @@ def execute(args):
             "counts": {name: sum(t["status"] == name for t in state["tasks"])
                        for name in ("pending", "running", "blocked", "completed")},
             "contextIndex": str(store.home / "context/INDEX.md")}
-        print(json.dumps(output, ensure_ascii=False, indent=2))
+        emit(store, output, compact_mode=args.compact)
         return 0 if ok else 2
 
 
