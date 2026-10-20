@@ -1,0 +1,68 @@
+{
+  "candidate_commit": "ba8ce7c3882d13595993ee410981f81196843237",
+  "ci_url": "https://github.com/alexfisenkov/aispa/actions/runs/39464558131",
+  "ci_status": "success",
+  "jobs": [
+    {
+      "name": "python (windows-latest, 3.13)",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (ubuntu-latest, 3.11)",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (macos-latest, 3.11)",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (windows-latest, 3.11)",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (ubuntu-latest, 3.13)",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (macos-latest, 3.13)",
+      "conclusion": "success"
+    }
+  ],
+  "local_python": {
+    "total": 547,
+    "passed": 527,
+    "skipped_os_specific": 20
+  },
+  "local_node": {
+    "total": 36,
+    "passed": 36
+  },
+  "example": {
+    "total": 15,
+    "passed": 15
+  },
+  "first_ci": {
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/39461530565",
+    "result": "failure",
+    "cause": "New test passed an oversized CLI argument, exceeding Windows CreateProcess limit before application startup; only fixture changed."
+  },
+  "review": {
+    "rounds": 2,
+    "closed_findings": [
+      "Draft write pin/recovery guard",
+      "Compact archive failure must preserve actual mutation result"
+    ],
+    "round2": "OK"
+  },
+  "ui": {
+    "target": "https://t.me/masterskaya_video",
+    "verified": [
+      "semantic brand anchor",
+      "visible Tab focus",
+      "Enter and click opened expected public channel"
+    ],
+    "surface": "local updated dashboard asset demo"
+  },
+  "native_model_comparison": "in progress; not a token savings claim",
+  "release": "No new release in this iteration"
+}
