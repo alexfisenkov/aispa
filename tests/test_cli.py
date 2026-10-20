@@ -22,6 +22,15 @@ class CliTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-cli-")
         self.root = Path(self.temp.name) / "проект with spaces 🙂"
         self.root.mkdir()
+        self.command_env = dict(os.environ)
+        runner_directory = Path(sys.executable).parent
+        if os.name != "nt":
+            # A directly selected python3.11 need not be the host's default
+            # python3. Model an activated interpreter without changing the host.
+            runner_directory = Path(self.temp.name) / "selected-python"
+            runner_directory.mkdir()
+            (runner_directory / "python3").symlink_to(Path(sys.executable).resolve())
+        self.command_env["PATH"] = str(runner_directory) + os.pathsep + os.environ.get("PATH", "")
         self.git("init", "-q")
         (self.root / "app.py").write_text("print('ready')\n", encoding="utf-8", newline="\n")
         self.git("add", "app.py")
@@ -36,7 +45,7 @@ class CliTests(unittest.TestCase):
     def call(self, *args, expected=0, cli=None):
         cli = cli or (CLI if args and args[0] == "init" else getattr(self, "cli", CLI))
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
-                           text=True, capture_output=True, timeout=20, encoding="utf-8")
+                           text=True, capture_output=True, timeout=20, encoding="utf-8", env=self.command_env)
         self.assertEqual(r.returncode, expected, r.stderr + r.stdout)
         if expected:
             self.assertNotIn("Traceback", r.stderr)

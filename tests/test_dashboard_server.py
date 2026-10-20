@@ -8,6 +8,7 @@ import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import dashboard_server as dashboard
@@ -29,6 +30,8 @@ class DashboardServerTests(unittest.TestCase):
     def test_start_status_stop_and_port_reuse(self):
         first = dashboard.start(self.store)
         self.assertTrue(first["running"])
+        child = dashboard._CHILDREN[first["instance"]]
+        self.assertTrue(child.stdout.closed, "A live dashboard must not keep an unread diagnostic pipe")
         self.assertEqual(dashboard.start(self.store)["instance"], first["instance"])
         self.assertEqual(dashboard.inspect(self.store)["port"], first["port"])
         with urlopen(first["url"], timeout=3) as response:
@@ -43,6 +46,7 @@ class DashboardServerTests(unittest.TestCase):
             self.assertEqual(metadata.stat().st_mode & 0o777, 0o600)
         result = dashboard.stop(self.store)
         self.assertTrue(result["stopped"])
+        self.assertIsNotNone(child.poll(), "The exact spawned process must exit after authenticated stop")
         self.assertFalse(dashboard.inspect(self.store)["running"])
         again = dashboard.start(self.store)
         self.assertTrue(again["running"])
@@ -104,6 +108,24 @@ class DashboardServerTests(unittest.TestCase):
             other.shutdown()
             other.server_close()
             thread.join(timeout=3)
+
+    def test_private_health_and_shutdown_ignore_host_proxy_configuration(self):
+        # Host-side proxy settings must never intercept control traffic or
+        # receive the private token. Public browser requests are outside this.
+        with patch.dict(os.environ, {"HTTP_PROXY": "http://127.0.0.1:1",
+                                     "HTTPS_PROXY": "http://127.0.0.1:1",
+                                     "ALL_PROXY": "http://127.0.0.1:1"}):
+            service = dashboard.start(self.store)
+            self.assertTrue(service["running"])
+            self.assertTrue(dashboard.inspect(self.store)["running"])
+            self.assertTrue(dashboard.stop(self.store)["stopped"])
+
+    def test_startup_failure_reports_probe_class_without_token(self):
+        with patch.object(dashboard, "_private_request", return_value=(None, "http-421")):
+            with self.assertRaisesRegex(Exception, "health-http-421") as failure:
+                dashboard.start(self.store)
+        self.assertNotIn("token", str(failure.exception).lower())
+        self.assertFalse(dashboard.inspect(self.store)["running"])
 
 
 if __name__ == "__main__":

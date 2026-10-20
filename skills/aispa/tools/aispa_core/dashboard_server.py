@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import errno
 import hashlib
+from http.client import HTTPConnection, HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -13,8 +14,6 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, ProxyHandler, build_opener
 from urllib.parse import urlsplit
 
 from .display import project
@@ -112,19 +111,23 @@ def _url(port, suffix="dashboard.html"):
 
 
 def _private_request(meta, method, endpoint, timeout=.5):
-    request = Request(_url(meta["port"], endpoint), method=method,
-                      headers={TOKEN_HEADER: meta["token"]})
+    """Direct loopback control request, independent of process proxy settings."""
+    connection = HTTPConnection(HOST, meta["port"], timeout=timeout)
     try:
-        with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
-            if response.status not in (200, 204):
-                return None
-            return json.load(response) if response.status == 200 else {}
-    except (HTTPError, URLError, OSError, ValueError):
-        return None
+        connection.request(method, "/" + endpoint,
+                           headers={"Host": f"{HOST}:{meta['port']}", TOKEN_HEADER: meta["token"]})
+        response = connection.getresponse()
+        if response.status not in (200, 204):
+            return None, "http-" + str(response.status)
+        return (json.loads(response.read()) if response.status == 200 else {}), "ok"
+    except (OSError, HTTPException, ValueError) as exc:
+        return None, type(exc).__name__
+    finally:
+        connection.close()
 
 
 def _verified(store, meta):
-    response = _private_request(meta, "GET", "_control/health")
+    response, _reason = _private_request(meta, "GET", "_control/health")
     return bool(isinstance(response, dict) and response.get("marker") == MARKER
                 and response.get("rootHash") == _root_hash(store)
                 and response.get("instance") == meta["instance"]
@@ -169,7 +172,7 @@ def stop(store):
             cleaned = _remove_matching(store, meta) if _port_closed(meta["port"]) else False
             return {"running": False, "stopped": False, "staleMetadataRemoved": cleaned,
                     "port": meta["port"], "instance": meta["instance"]}
-        response = _private_request(meta, "POST", "_control/shutdown", timeout=2)
+        response, _reason = _private_request(meta, "POST", "_control/shutdown", timeout=2)
         if response is None:
             return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
         deadline = time.monotonic() + 5
@@ -192,7 +195,7 @@ def _spawn(store, port):
     token = secrets.token_urlsafe(48)
     config = {"root": str(store.root), "port": port, "instance": instance, "token": token}
     child = subprocess.Popen([sys.executable, "-B", "-m", "aispa_core.dashboard_server"],
-                             cwd=str(TOOLS_DIR), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                             cwd=str(TOOLS_DIR), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, close_fds=True,
                              start_new_session=os.name != "nt",
                              creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0)
@@ -201,14 +204,26 @@ def _spawn(store, port):
         child.stdin.close()
     except OSError:
         child.terminate()  # exact Popen handle, never a discovered PID
+        child.wait(timeout=2)
+        child.stdout.close()
         raise
     deadline = time.monotonic() + START_TIMEOUT
+    phase = "metadata-absent"
     while time.monotonic() < deadline:
         meta = _read_meta(store)
-        if meta and meta["instance"] == instance and meta["pid"] == child.pid and _verified(store, meta):
-            _write_last_port(store, meta["port"])
-            _CHILDREN[instance] = child
-            return inspect(store)
+        if meta:
+            if meta["instance"] == instance and meta["pid"] == child.pid:
+                response, reason = _private_request(meta, "GET", "_control/health")
+                if (isinstance(response, dict) and response.get("marker") == MARKER
+                        and response.get("rootHash") == _root_hash(store)
+                        and response.get("instance") == instance and response.get("pid") == child.pid):
+                    _write_last_port(store, meta["port"])
+                    child.stdout.close()  # one-shot diagnostic channel, never held by a live daemon
+                    _CHILDREN[instance] = child
+                    return inspect(store)
+                phase = "health-" + ("identity-mismatch" if reason == "ok" else reason)
+            else:
+                phase = "metadata-other-instance"
         if child.poll() is not None:
             break
         time.sleep(.05)
@@ -217,11 +232,20 @@ def _spawn(store, port):
         try:
             child.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            pass
+            child.kill()  # exact Popen handle; no numeric PID lookup
+            child.wait(timeout=2)
+    child_state = "exit-" + str(child.returncode)
+    if child.stdout is not None:
+        child_error = child.stdout.read(4096).decode("utf-8", "replace")
+        child.stdout.close()
+        marker = next((line for line in child_error.splitlines()
+                       if line.startswith("AISPA_DASHBOARD_START_ERROR:")), None)
+        if marker:
+            child_state += "/" + marker.split(":", 1)[1][:80]
     meta = _read_meta(store)
     if meta and meta["instance"] == instance and _port_closed(meta["port"]):
         _remove_matching(store, meta)
-    raise Invalid("Dashboard не подтвердил запуск на loopback")
+    raise Invalid("Dashboard не подтвердил запуск на loopback (" + phase + ", " + child_state + ")")
 
 
 def start(store, port=0):
@@ -331,14 +355,18 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
 
 
 def child_main():
+    stage = "config"
     try:
         config = json.loads(sys.stdin.buffer.readline(8192))
         if not isinstance(config, dict) or not all(isinstance(config.get(key), str) and config[key]
                                                    for key in ("root", "instance", "token")):
             raise Invalid("Неверный запуск dashboard child")
+        stage = "serve"
         serve(Journal(config["root"]), port=config["port"], instance=config["instance"],
               token=config["token"], managed=True, announce=False)
-    except (Invalid, OSError, ValueError, KeyError, TypeError):
+    except (Invalid, OSError, ValueError, KeyError, TypeError) as exc:
+        detail = "os-" + str(exc.errno) if isinstance(exc, OSError) else type(exc).__name__
+        print("AISPA_DASHBOARD_START_ERROR:" + stage + "/" + detail, file=sys.stdout)
         return 2
     return 0
 

@@ -100,7 +100,7 @@ class PreparationTests(unittest.TestCase):
         self.state["title"] = "</script><script>alert('x')</script>"
         self.flow.save("title-set")
         result = archive(self.store, self.state)
-        text = Path(result["absolutePath"]).read_text()
+        text = Path(result["absolutePath"]).read_text(encoding="utf-8")
         self.assertTrue(result["private"])
         self.assertIn("window.AISPA_ARCHIVE=", text)
         self.assertIn('"archive": true', text)
