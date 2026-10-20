@@ -10,8 +10,8 @@ import hashlib
 import json
 import re
 
-from . import carryover, cleanroom, discovery
-from .contracts import gate_valid, verified
+from . import carryover, cleanroom, discovery, executions
+from .contracts import artifact_valid, gate_valid, verified, task_basis
 from .portable import relative_name, match_name
 from .store import Invalid, digest, timestamp
 
@@ -208,20 +208,41 @@ def _command_shape(entry):
         return
     proof, command = entry.get("evidence"), entry.get("command")
     _require(isinstance(proof, dict) and proof.get("verifiedAtRecording") is True and proof.get("exitCode") == 0
-             and proof.get("kind") in ("project", "cleanrun") and isinstance(command, list) and command
+             and proof.get("kind") in ("project", "cleanrun", "execution") and isinstance(command, list) and command
              and len(command) <= 64 and all(isinstance(arg, str) and "\0" not in arg and len(arg) <= 2000 for arg in command)
              and proof.get("command") == command
              and isinstance(proof.get("receiptSha256"), str) and SHA.fullmatch(proof["receiptSha256"])
              and isinstance(proof.get("code"), str) and SHA.fullmatch(proof["code"])
              and isinstance(proof.get("output"), dict) and isinstance(proof["output"].get("sha256"), str)
-             and SHA.fullmatch(proof["output"]["sha256"]), "повреждено свидетельство команды")
+             and SHA.fullmatch(proof["output"]["sha256"])
+             and (proof.get("kind") != "execution" or
+                  (isinstance(proof.get("executionId"), str) and SHA.fullmatch(proof["executionId"])
+                   and type(proof.get("currentAtCuration")) is bool)), "повреждено свидетельство команды")
     _safe_text(" ".join(command), 8000)
 
 
 def _proof(store, state, entry):
     requested = entry.get("verification")
-    _require(isinstance(requested, dict) and requested.get("kind") in ("project", "cleanrun"),
+    _require(isinstance(requested, dict) and requested.get("kind") in ("project", "cleanrun", "execution"),
              "команде нужно свидетельство реальной проверки")
+    if requested["kind"] == "execution":
+        execution = executions.resolve(store, state, {"sha256": requested.get("sha256"),
+                                                      **({"id": requested["id"]} if "id" in requested else {})})
+        command = entry.get("command")
+        _require(isinstance(command, list) and command == execution["command"],
+                 "команда не соответствует записанному исполнению")
+        _safe_text(" ".join(command), 8000)
+        _require(execution["successful"] is True and execution["exitCode"] == 0
+                 and artifact_valid(store, execution["output"]), "историческая команда не прошла проверку")
+        current_code = store.code()
+        if execution["kind"] == "task":
+            tid = execution.get("task")
+            current_code = task_basis(store, state, tid) if any(t["id"] == tid for t in state["tasks"]) else None
+        return {"kind": "execution", "executionId": execution["id"],
+                "receiptSha256": execution["receiptSha256"], "output": copy.deepcopy(execution["output"]),
+                "code": execution["code"], "at": execution["at"], "exitCode": 0,
+                "verifiedAtRecording": True, "currentAtCuration": execution["code"] == current_code,
+                "command": copy.deepcopy(command)}
     receipt = state.get("verification" if requested["kind"] == "project" else "cleanrun")
     _require(isinstance(receipt, dict) and digest(receipt) == requested.get("sha256"), "чужое свидетельство команды")
     command = entry.get("command")

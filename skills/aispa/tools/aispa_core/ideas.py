@@ -6,7 +6,7 @@ successful. It never adds, removes or weakens requirements on an agent's behalf.
 """
 import json
 
-from . import discovery
+from . import discovery, product
 from .contracts import active, artifact_valid
 from .store import Invalid, confined, digest, file_hash
 
@@ -107,7 +107,7 @@ def _observations(store, state, report, *, check_sources):
 
 
 def _validate(store, state, report, *, check_sources=True):
-    _object(report, _FIELDS, ("collection",))
+    _object(report, _FIELDS, ("collection", "challenge"))
     _require(_size(report) <= MAX_REPORT_CHARS, "отчёт слишком большой; сократите изложение, сохранив все требования")
     _require(report["basis"] == basis(state), "бриф или требования изменились; обновите разбор идеи")
     _require(isinstance(report["depth"], str) and report["depth"] in LIMITS,
@@ -169,6 +169,8 @@ def _validate(store, state, report, *, check_sources=True):
         _text(row["text"], "предложенное дополнение", 1200)
         _text(row["rationale"], "обоснование дополнения", 1200)
     _observations(store, state, report, check_sources=check_sources)
+    if state.get("policy", {}).get("productChallenge") or "challenge" in report:
+        product.validate(state, report.get("challenge"))
     return report
 
 
@@ -188,7 +190,7 @@ def _saved_report(store, state, *, check_sources=True):
     _object(saved, ("schema", "run", "report"))
     _require(type(saved["schema"]) is int and saved["schema"] == SCHEMA
              and saved["run"] == state["run"], "чужой или неподдерживаемый разбор идеи")
-    _object(saved["report"], _FIELDS, ("collection",))
+    _object(saved["report"], _FIELDS, ("collection", "challenge"))
     _require(ref.get("basis") == saved["report"].get("basis"), "связь отчёта с основанием нарушена")
     history = state.get("ideaHistory", [])
     _require(isinstance(history, list) and history and history[-1] == ref,
@@ -234,6 +236,8 @@ def view(store, state, *, compact=True):
     fresh = report is not None
     result = {"basis": basis(state), "recorded": bool(state.get("ideaReview")), "fresh": fresh,
               "assessment": "structure-and-source-checks-only", "requiredAreas": list(AREAS)}
+    if state.get("policy", {}).get("productChallenge"):
+        result["challengeQuestions"] = product.QUESTIONS
     if not fresh:
         return result
     result.update(artifact=dict(state["ideaReview"]), depth=report["depth"], summary=report["summary"])
@@ -241,12 +245,13 @@ def view(store, state, *, compact=True):
         result["report"] = report
         return result
     result["omitted"] = {}
-    for field in ("areas", "coverage", "assumptions", "additions", "sourceObservations"):
+    fields = ("challenge", "coverage", "areas", "assumptions", "additions", "sourceObservations")
+    for field in fields:
         result[field] = []
     # A stable budget is shared across lists. Important coverage is visible first;
     # a large list cannot silently exclude later observations from the artifact.
-    for field in ("coverage", "areas", "assumptions", "additions", "sourceObservations"):
-        rows = report[field]
+    for field in fields:
+        rows = report.get(field, [])
         result["omitted"][field] = len(rows)
         for row in rows:
             result[field].append(row)

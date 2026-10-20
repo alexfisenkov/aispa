@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
-from aispa_core import cleanroom, knowledge
+from aispa_core import cleanroom, executions, knowledge
 from aispa_core.store import Invalid, Journal, digest
 from aispa_core.workflow import Workflow
 
@@ -173,6 +173,31 @@ class KnowledgeTests(unittest.TestCase):
         row = knowledge.query(self.store, self.state, kinds=["command"])["entries"][0]
         self.assertEqual(row["evidence"]["kind"], "cleanrun")
         self.assertEqual(row["evidence"]["receiptSha256"], digest(self.state["cleanrun"]))
+
+    def test_historical_execution_can_be_curated_after_source_candidate_drift(self):
+        historical = executions.record(self.store, self.state, kind="project", purpose="run")
+        self.store.append(self.state, "execution-recorded")
+        self.write("app.py", "print('changed')\n")
+        self.workflow.verify([sys.executable, "app.py"], 10)
+        entry = {"key": "cli.historical", "kind": "command", "text": "Earlier CLI invocation succeeded.",
+                 "sources": [self.source()], "command": [sys.executable, "app.py"],
+                 "verification": {"kind": "execution", "sha256": historical["sha256"]}}
+        self.record(self.report([entry]))
+        row = knowledge.query(self.store, self.state, kinds=["command"])["entries"][0]
+        self.assertTrue(row["evidence"]["verifiedAtRecording"])
+        self.assertFalse(row["evidence"]["currentAtCuration"])
+        self.assertEqual(row["evidence"]["executionId"], historical["id"])
+
+    def test_failed_recorded_execution_is_not_command_proof(self):
+        self.workflow.verify([sys.executable, "-c", "raise SystemExit(2)"], 10)
+        failed = executions.record(self.store, self.state, kind="project", purpose="test")
+        self.store.append(self.state, "execution-recorded")
+        self.workflow.verify([sys.executable, "app.py"], 10)
+        entry = {"key": "cli.failed", "kind": "command", "text": "A failed command cannot be recommended.",
+                 "sources": [self.source()], "command": [sys.executable, "-c", "raise SystemExit(2)"],
+                 "verification": {"kind": "execution", "sha256": failed["sha256"]}}
+        with self.assertRaises(Invalid):
+            self.record(self.report([entry]))
 
     def test_categories_need_honest_explanations_and_empty_result_is_allowed(self):
         report = self.report()

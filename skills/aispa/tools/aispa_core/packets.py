@@ -23,7 +23,8 @@ def routing(state, task, role, attempt=None, store=None):
                               and item["mapping"]["requirement"] in task.get("requirements", [])
                               for item in view(store, state)["items"] if item.get("mapping"))
     strong = (role != "worker" or task.get("risk", "normal") != "low" or foundation
-              or bool((attempt or {}).get("authorization")) or inherited_retry)
+              or bool((attempt or {}).get("authorization")) or inherited_retry
+              or bool((attempt or {}).get("repairPlan")))
     return {"tier": "strong" if strong else "standard", "advisory": True,
             "reason": "Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation",
             "selection": "Use only models exposed by the host and permitted by project rules; otherwise keep the current model",
@@ -99,6 +100,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                 "clone": {k: clone[k] for k in ("path", "head", "tree") if k in clone},
                 "instructions": "Read original briefs and run the cloned product first. Do not open the source project's spec, registry, tasks or reviews. Save independent observations before requesting the reconciliation packet."}
     if kind == "knowledge":
+        from . import executions
         from .discovery import _names, _kind, _safe_path
         from .store import digest
         require(source_paths is None, "Для автора знаний используйте список projectFiles и актуальный код")
@@ -109,6 +111,8 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                 "projectFiles": names[:128], "omittedFiles": max(0, len(names) - 128),
                 "verification": check, "verificationDigest": digest(check) if check else None,
                 "cleanrun": clean, "cleanrunDigest": digest(clean) if clean else None,
+                "commandHistory": executions.view(store, state, limit=8),
+                "handoff": state.get("handoff"),
                 "runDirectory": str(store.run),
                 "instructions": "Read actual source files and execute or inspect genuine verification evidence. Do not use the plan, spec, brief or task reports as proof of implemented behavior. Record command, trap, decision and glossary knowledge or explicit category uncertainties. A historical command check is not a current PASS."}
     selected = task_closure(state, task_id) if kind == "task" else state["tasks"]
@@ -122,6 +126,11 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
     packet.update(document_context(store, state, kind, selected, source_paths))
     if state.get("ideaReview") and kind == "coverage":
         packet["ideaStudy"] = state["ideaReview"]
+        if state.get("policy", {}).get("productChallenge"):
+            from .product import QUESTIONS
+            packet["requiredIdeaChecks"] = list(QUESTIONS)
+    if state.get("planReview") and kind == "task":
+        packet["deliveryPlan"] = state["planReview"]["report"]
     if kind == "task" and state.get("knowledge"):
         from . import knowledge
         paths = sorted({z for task in selected for z in task["zones"] + task.get("readZones", [])})
@@ -133,6 +142,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         current = state["taskHistory"][task_id][-1]
         task = next(t for t in selected if t["id"] == task_id)
         packet.update(verification=current.get("verification"), attempt=current["id"],
+                      repairPlan=current.get("repairPlan"),
                       roles={key: value for key, value in current["roles"].items() if role is None or key == role},
                       actors=current["actors"],
                       rounds=[{k: r[k] for k in ("number", "passed", "report") if k in r} for r in current["rounds"]],
@@ -146,7 +156,8 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
             packet["expectedChecks"] = [{"requirement": rid, "criterion": criterion}
                                         for rid, criterion in sorted(pipeline.expected_checks(task_id, role))]
     if kind == "acceptance":
-        packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"), blindReview=state.get("blindReview"))
+        packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
+                      blindReview=state.get("blindReview"), handoff=state.get("handoff"))
     return packet
 
 

@@ -1,4 +1,4 @@
-# Данные и отчёты · 0.1.0-alpha.8
+# Данные и отчёты · 0.1.0-alpha.9
 
 ## Каталог документов alpha.7
 
@@ -73,7 +73,7 @@ Requested и constraint требуют дословную цитату указ�
 его не меняют. Исходные слова и решения по объёму остаются отдельным каноном.
 
 Обязательные поля: basis, depth (`compact`/`deep`), depthReason, summary,
-anchors, coverage, areas, assumptions, additions, sourceObservations.
+anchors, coverage, areas, assumptions, additions, sourceObservations, challenge.
 Anchors содержит `{brief, sha256, quote}` для каждого текущего брифа; coverage —
 `{requirement, role, proposal}` для каждого действующего требования. Роли
 requested → outcome, constraint → constraint, addition → addition.
@@ -170,6 +170,13 @@ separate. Basis и нормализованный draft берутся из plan
   "checks": [
     {"requirement": "R01", "status": "covered", "specQuote": "<точная цитата спецификации>"},
     {"requirement": "A01", "status": "partial"}
+  ],
+  "ideaChecks": [
+    {"probe": "adoption", "status": "covered", "specQuote": "<цитата о спросе или гипотезе>", "note": "Решение отражено."},
+    {"probe": "value_cost", "status": "covered", "specQuote": "<цитата о пользе и затратах>", "note": "Решение отражено."},
+    {"probe": "operations", "status": "covered", "specQuote": "<цитата об операторе и данных>", "note": "Решение отражено."},
+    {"probe": "lifecycle", "status": "covered", "specQuote": "<цитата о повторном применении>", "note": "Решение отражено."},
+    {"probe": "actors", "status": "covered", "specQuote": "<цитата о правах участников>", "note": "Решение отражено."}
   ]
 }
 ```
@@ -377,14 +384,17 @@ file/sha256/absolutePath. Данные не удаляются: полный н�
 После успешной актуальной acceptance назначается новый независимый участник:
 `knowledge-assign --runtime … --native-id … --session …`. Пакет
 `context --kind knowledge --write` содержит его ID, снимок кода и настоящие
-квитанции проверок с digest; бриф, спецификация и чужие ревью не нужны автору
+квитанции проверок с digest и короткую выборку `commandHistory`; бриф,
+спецификация и чужие ревью не нужны автору
 для пересказа намерений. Он изучает фактическую реализацию.
 
 `knowledge-record --file …` принимает basis снимка кода, writer назначенного
 участника, entries и uncertainties. Запись имеет key, kind, text, sources;
 source — `{path, sha256}`. Kind: command, trap, decision, glossary. Command
-дополнительно содержит точный argv и `verification: {kind, sha256}`; kind здесь
-project или cleanrun, sha256 — digest соответствующего receipt. Для каждой
+дополнительно содержит точный argv и `verification: {kind, sha256}`. Для
+alpha.9 `kind: execution`, sha256 — SHA подлинной успешной записи из commands
+этого прогона; legacy `project|cleanrun` и digest текущего receipt сохраняют
+совместимость. Для каждой
 категории без entries обязательно явное объяснение в uncertainties.
 
 История сохраняет происхождение, последовательность и замены supersedes;
@@ -405,3 +415,149 @@ stale. По умолчанию без выбора путей/типов зна�
 показывает точную ссылку на оставшуюся непрочитанную историю.
 `archive.archivedRecordCount` — число отчётов автора, а не уникальных знаний.
 При устаревании новой редакции старая не возвращается как действующая.
+
+## Проверяемое развитие продукта alpha.9
+
+Новый `idea --file` требует ровно пять строк `challenge` по probe:
+`adoption`, `value_cost`, `operations`, `lifecycle`, `actors`. Строка имеет ровно
+`probe`, `status`, `finding`, `decision`, `validation`, `requirements`.
+`status` — `resolved|assumption|blocker|not_applicable`; три текстовых поля
+непустые, до 1600 символов каждое. `requirements` — непустые уникальные ID
+действующих требований. Это структурная проверка, не подтверждение спроса.
+`compact` и `deep` различаются обоснованной глубиной, не числом обязательных
+вопросов. Неизвестное помечают гипотезой, N/A объясняют предметно.
+
+Независимый отчёт `coverage` для новых прогонов добавляет ровно пять
+`ideaChecks`: `{probe, status, specQuote, note}`. `status` —
+`covered|missing|partial`. Для `covered` нужна дословная непустая цитата из
+текущей спецификации, в которой отражены **выбранное решение и способ его
+проверки** из соответствующего challenge. `missing` и `partial` снижают
+результат покрытия. Проверяющий сверяет смысл решения, гипотезы или блокера;
+автоматический поиск слов не удостоверяет рыночный факт. Вопросы владельцу —
+только до `seal` согласно
+выбранному `auto|important|interview`; позже координатор принимает и
+записывает самостоятельные решения.
+
+Отчёт `plan --review` новых прогонов содержит прежние `basis`, `draft`,
+`groups`, `separate` и обязательный `delivery`:
+
+```json
+{
+  "profile": "feature",
+  "reason": "Несколько зависимых частей дают один сценарий пользователя.",
+  "slices": [{"id": "S01", "kind": "user", "outcome": "Пользователь завершает сценарий.", "tasks": ["T01"], "demonstration": {"task": "T01", "criterion": "<точный критерий T01>"}, "supports": []}],
+  "migrations": [],
+  "migrationReason": "У существующего интерфейса нет прежних потребителей или формата для переноса."
+}
+```
+
+`profile` — `small|feature|system|migration`. Каждый срез содержит ровно
+`id, kind, outcome, tasks, demonstration, supports`; задача входит в один
+срез, демонстрация ссылается на её настоящий критерий. Нужен хотя бы один
+`user`; `enabler` указывает ID пользовательских срезов, которым помогает.
+При миграции строка содержит ровно `id, reason, expand, migrate, contract,
+consumers, compatibility, rollback`. Три непустых непересекающихся списка
+задач задают порядок через `dependsOn`. Каждый `consumer` — `{path, task}`
+в зоне записи задачи migrate. Каждая строка compatibility/rollback —
+`{task, criterion}` для каждого этапа. На одном этапе критерий rollback
+отличается от критерия compatibility; одна проверка не доказывает и
+совместимость, и восстановление. Для `profile: migration` список
+миграций непуст; иначе пустой допустим с конкретной `migrationReason`.
+Проверка схемы не находит неизвестных проектных потребителей сама.
+
+## Диагностика после первого FAIL
+
+Перед `repair` запроси `repair-plan T01` без `--file`: read-only ответ даёт
+`basis`, `task`, `attempt`, `firstReport`, `blockingFindings`, `recorded` и
+правило маршрутизации. Не вычисляй basis вручную. Затем сохрани
+`repair-plan T01 --file <JSON>` с полученным basis. Он связан с ID попытки,
+контрактом, первым отчётом критика и исходным worker. Отчёт имеет ровно поля:
+
+```json
+{
+  "basis": "<текущий repair basis>",
+  "cause": "implementation_gap",
+  "diagnosis": "Ошибка локализована в обработке пустого входа.",
+  "route": "same",
+  "reason": "Исходный worker знает верный подход; нужен адресный фикс.",
+  "changes": "Исправить ветку пустого входа и повторить критерий.",
+  "addresses": ["<каждый blocking finding ID critic1>"],
+  "context": []
+}
+```
+
+`cause`: `implementation_gap|missing_context|wrong_approach|external_blocker`.
+`route`: `same|fresh|blocked`. Локальный дефект допускает исходного worker;
+недостающий контекст или неверный подход требует нового worker со свежим
+контекстом и записанной сильной моделью; внешний блокер остаётся blocked.
+`addresses` перечисляет **все** blocking ID первого отчёта. Для fresh
+`context` непуст и адресно указывает, что перечитать/проверить. Диагноз
+сохраняется неизменно до ремонта; новый worker не создаёт третий раунд.
+Два критика и отдельный приёмщик остаются обязательными.
+
+## Реальные команды и передача проекта
+
+`verify [--task T01] [--purpose install|run|check|test] -- <argv>` и
+`clean-verify [--purpose …] -- <argv>` по умолчанию используют `check`.
+После фактического выполнения, в том числе неуспешного, движок сохраняет
+историю `commands`. `commands --kind project|task|cleanrun --purpose …
+--limit N` возвращает ограниченные сводки и точный `ref:{id,sha256}` без
+сырых логов и локальных путей. `commands --receipt <sha256>` читает одну
+точную запись: настоящий argv, назначение, область, attempt, code/candidate,
+время, exit code и SHA вывода. Это личный receipt текущего прогона, не
+публичный документ и не текущий PASS. Неуспешный receipt нельзя использовать
+для проверенной команды знаний или handoff.
+
+Обычные документы проекта создавай внутри задач, чтобы критики и приёмщик
+проверили их. После задач и волны сохрани их вместе с кодом в Git, выполни
+свежую `verify --purpose check` на текущем коде и только тогда вызови
+`handoff --file <JSON>`. Он принимает
+существующий документ, не создаёт и не редактирует его. Пример малой работы
+для POSIX с реально доступным `python3`; на Windows используй проверенный
+`python` или `py -3`, если они ведут к тому же интерпретатору:
+
+```json
+{
+  "schema": 1,
+  "profile": "small",
+  "documents": [{"path": "README.md", "sha256": "<SHA файла>", "sources": [{"path": "src/app.py", "sha256": "<SHA исходника>"}], "covers": {"quickstart": "Запуск", "architecture": "Устройство", "decisions": "Решения", "glossary": "Термины"}}],
+  "notApplicable": {},
+  "decisionDetails": {"choice": "<дословная фраза в разделе Решения>", "alternatives": "<дословная фраза>", "consequences": "<дословная фраза>"},
+  "commands": {
+    "install": {"notApplicable": "<та же конкретная причина в разделе Запуск>"},
+    "run": {"receipt": {"sha256": "<успешный SHA из commands>"}, "document": "README.md", "heading": "Запуск", "display": "python3 -m app", "runner": "python3"},
+    "check": {"receipt": {"sha256": "<успешный текущий project check>"}, "document": "README.md", "heading": "Запуск", "display": "python3 -m unittest", "runner": "python3"},
+    "singleTest": {"receipt": {"sha256": "<успешный purpose=test>"}, "document": "README.md", "heading": "Запуск", "display": "python3 -m unittest tests.test_one", "runner": "python3"}
+  },
+  "obligations": []
+}
+```
+
+Заполнители выше не являются действительным отчётом: `display` должен точно
+совпасть с переносимым отображением фактического argv, а текст должен буквально
+находиться в объявленном Markdown-разделе. Для Python runner допустимы
+`python3`, `python` и `py -3`, только когда выбранный alias доступен в текущей
+среде и разрешается в тот же интерпретатор, что первый argv receipt. На
+Windows display строится с PowerShell literal quoting; неподдерживаемый
+аргумент команды вызывает отказ вместо непроверенной строки. Это не
+доказательство, что alias доступен на другой ОС. `runner: null` использует платформенное
+отображение argv без личного домашнего пути; абсолютный путь интерпретатора
+без переносимого проверенного alias не проходит. Проверка receipt
+связывает purpose: `singleTest` ↔ `test`, остальные по имени. `check`
+обязателен и должен быть успешной **текущей** общей project-проверкой.
+`install`, `run`, `singleTest` могут иметь `{notApplicable: "<причина>"}` с
+причиной в quickstart. Категории `architecture`, `decisions`, `glossary` можно
+обоснованно исключить только при `profile: small`, записав `notApplicable`
+в том же документе. При наличии decisions три `decisionDetails` должны
+буквально находиться в соответствующем разделе. Каждый документ имеет
+1–12 настоящих tracked source-файлов либо evidence-ссылок, в том числе хотя
+бы один проектный файл; один лишь сам документ не является источником.
+Каждый blocked task должен быть в `obligations` и в названном разделе.
+
+Валидация проверяет путь, tracked status, SHA, разделы, структуру, секретные
+шаблоны и подлинные receipts; она **не удостоверяет смысл, полноту инженерного
+объяснения или отсутствие всех приватных сведений**. Ответственность за
+содержимое у автора и проверяющего. Handoff связан с текущим code SHA: после
+изменения файлов обнови документы, receipt и manifest. Частная knowledge
+curation проходит только после успешной итоговой приёмки и не подменяет
+обычные документы передачи.

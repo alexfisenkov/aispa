@@ -15,7 +15,7 @@ from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
-from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge
+from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -47,6 +47,12 @@ def parser():
     plan = sub.add_parser("plan"); plan.add_argument("--file", required=True); plan.add_argument("--review")
     sub.add_parser("plan-check").add_argument("--file", required=True)
     idea = sub.add_parser("idea"); idea.add_argument("--file"); idea.add_argument("--full", action="store_true")
+    commands = sub.add_parser("commands")
+    commands.add_argument("--purpose", choices=executions.PURPOSES)
+    commands.add_argument("--kind", choices=executions.KINDS)
+    commands.add_argument("--limit", type=int, default=8)
+    commands.add_argument("--receipt", help="SHA-256 одной записи: прочитать точное исполнение")
+    sub.add_parser("handoff").add_argument("--file", required=True)
     know = sub.add_parser("knowledge")
     know.add_argument("--path", action="append"); know.add_argument("--kind", action="append", choices=("command", "trap", "decision", "glossary"))
     know.add_argument("--limit", type=int, default=8)
@@ -87,6 +93,7 @@ def parser():
     sub.add_parser("blind").add_argument("--file", required=True)
     clean = sub.add_parser("clean-verify")
     clean.add_argument("--timeout", type=int, default=600)
+    clean.add_argument("--purpose", choices=executions.PURPOSES, default="check")
     clean.add_argument("command", nargs=argparse.REMAINDER)
     sub.add_parser("usage").add_argument("--file")
     adapter = sub.add_parser("project-context")
@@ -100,6 +107,8 @@ def parser():
     assignment.add_argument("--model", help="Фактический ID выбранной модели из среды, если она его сообщает")
     for name in ("submit", "repair"):
         action = sub.add_parser(name); action.add_argument("id"); action.add_argument("--file", required=True)
+    repair_plan = sub.add_parser("repair-plan")
+    repair_plan.add_argument("id"); repair_plan.add_argument("--file")
     critic = sub.add_parser("critic"); critic.add_argument("id"); critic.add_argument("--round", type=int, required=True, choices=(1, 2))
     critic.add_argument("--file", required=True)
     attempt = sub.add_parser("new-attempt"); attempt.add_argument("id")
@@ -115,6 +124,7 @@ def parser():
     verify = sub.add_parser("verify")
     verify.add_argument("--timeout", type=int, default=180)
     verify.add_argument("--task")
+    verify.add_argument("--purpose", choices=executions.PURPOSES, default="check")
     verify.add_argument("command", nargs=argparse.REMAINDER)
     close = sub.add_parser("close")
     close.add_argument("status", choices=("paused", "blocked", "cancelled")); close.add_argument("--note", required=True)
@@ -180,7 +190,8 @@ def execute(args):
             learned = knowledge.capture(store, previous_state) if previous_state else None
             def initialize_run(state):
                 state["policy"] = {"discovery": True, "cleanClone": True, "ideaReview": True,
-                                   "planReview": True, "projectKnowledge": True}
+                                   "planReview": True, "projectKnowledge": True, "productChallenge": True,
+                                   "deliveryPlan": True, "repairDiagnosis": True, "deliveryDocs": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["runtime"] = args.runtime
                 state["runtimeDigest"] = runtime_digest()
@@ -200,8 +211,9 @@ def execute(args):
             print(json.dumps(publish(store, state), ensure_ascii=False, indent=2))
             return 0
         state = store.load()
-        read_only = (args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge")
-                     or (args.action == "idea" and not args.file) or (args.action == "documents" and not args.refresh))
+        read_only = (args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
+                     or (args.action in ("idea", "repair-plan") and not args.file)
+                     or (args.action == "documents" and not args.refresh))
         if not read_only and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
         flow = Workflow(store, state)
@@ -226,6 +238,16 @@ def execute(args):
             else:
                 print(json.dumps(ideas.view(store, state, compact=not args.full), ensure_ascii=False, indent=2))
                 return 0
+        elif action == "commands":
+            value = executions.resolve(store, state, {"sha256": args.receipt}) if args.receipt else executions.view(
+                store, state, kind=args.kind, purpose=args.purpose, limit=args.limit)
+            print(json.dumps(value, ensure_ascii=False, indent=2))
+            return 0
+        elif action == "handoff":
+            flow.build_ready()
+            receipt = handoff.record(store, state, json.loads(flow.read_input(args.file)),
+                                     command_receipt=lambda ref: executions.resolve(store, state, ref))
+            flow.save("project-handoff-recorded")
         elif action == "knowledge":
             print(json.dumps(knowledge.query(store, state, paths=args.path, kinds=args.kind, limit=args.limit,
                                             include_archive=args.archive, archive_depth=args.archive_depth), ensure_ascii=False, indent=2))
@@ -294,6 +316,7 @@ def execute(args):
             flow.save("inherited-obligation-" + args.carry_action)
         elif action == "clean-prepare":
             flow.running()
+            flow.handoff_ready()
             state["cleanroom"] = cleanroom.prepare(store, state)
             state.pop("cleanrun", None)
             receipt = state["cleanroom"]
@@ -305,6 +328,7 @@ def execute(args):
         elif action == "clean-verify":
             flow.running()
             command = args.command[1:] if args.command[:1] == ["--"] else args.command
+            executions.validate_command(command)
             state.pop("cleanrun", None)
             state["activity"] = {"kind": "clean-verification", "startedAt": timestamp()}
             flow.save("clean-verification-started")
@@ -315,6 +339,8 @@ def execute(args):
                 state.pop("activity", None)
                 flow.save("clean-verification-recorded")
             ok = cleanroom.valid(store, state)
+            receipt = {**receipt, "execution": executions.record(store, state, kind="cleanrun", purpose=args.purpose)}
+            flow.save("execution-recorded")
         elif action == "usage":
             if args.file:
                 receipt = packets.record_usage(store, state, json.loads(flow.read_input(args.file)))
@@ -337,6 +363,14 @@ def execute(args):
         elif action == "repair":
             result = flow.pipeline.repair(args.id, args.file)
             receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase")}
+        elif action == "repair-plan":
+            if args.file:
+                flow.build_ready()
+                receipt = repairs.record(store, state, args.id, json.loads(flow.read_input(args.file)))
+                flow.save("repair-diagnosed:" + args.id)
+            else:
+                print(json.dumps(repairs.view(store, state, args.id), ensure_ascii=False, indent=2))
+                return 0
         elif action == "critic":
             ok = flow.pipeline.review(args.id, args.round, args.file)
         elif action == "new-attempt":
@@ -356,6 +390,9 @@ def execute(args):
             if args.timeout < 1:
                 raise Invalid("Таймаут должен быть положительным")
             ok = flow.verify(command, args.timeout, args.task)
+            receipt = executions.record(store, state, kind="task" if args.task else "project",
+                                        purpose=args.purpose, task_id=args.task)
+            flow.save("execution-recorded")
         elif action == "close":
             flow.close(args.status, args.note)
         elif action == "decision":

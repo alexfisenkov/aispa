@@ -13,6 +13,7 @@ import urllib.error
 
 PACKAGE = Path(__file__).resolve().parents[1] / "skills/aispa"
 CLI = PACKAGE / "tools/aispa.py"
+sys.path.insert(0, str(PACKAGE / "tools"))
 
 
 class CliTests(unittest.TestCase):
@@ -69,11 +70,13 @@ class CliTests(unittest.TestCase):
         self.call("idea", "--file", self.input(synthetic_report(store, state)))
 
     def plan_with_review(self, tasks):
+        from tests.test_product_delivery_repairs import delivery_report
         draft = self.input(tasks, "draft.json")
         check = self.call("plan-check", "--file", draft)
         review = {"basis": check["basis"], "draft": tasks,
                   "groups": [{"task": t["id"], "from": [t["id"]], "reason": "Synthetic fixture: one coherent scenario"} for t in tasks],
-                  "separate": [{"suggestion": s["id"], "reason": "Synthetic fixture preserves this boundary"} for s in check["suggestions"]]}
+                  "separate": [{"suggestion": s["id"], "reason": "Synthetic fixture preserves this boundary"} for s in check["suggestions"]],
+                  "delivery": delivery_report(tasks)}
         self.call("plan", "--file", draft, "--review", self.input(review, "size-review.json"))
 
     @contextmanager
@@ -165,6 +168,17 @@ class CliTests(unittest.TestCase):
 
     def test_full_cli_scenario(self):
         self.init()
+        runner = "python" if os.name == "nt" else "python3"
+        from aispa_core.store import file_hash
+        (self.root / "README.md").write_text(
+            "# CLI fixture\n\n## Quickstart\nPython 3.11+; run `python3 app.py` on macOS or `python app.py` on Windows.\n"
+            "The program prints ready. Python standard library only.\n"
+            "The whole one-statement program is the check.\n"
+            "One print statement has no separate architecture.\n"
+            "No material technical alternative in this synthetic fixture.\n"
+            "No domain terminology beyond standard output.\n", encoding="utf-8", newline="\n")
+        self.git("add", "README.md")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "document synthetic CLI")
         self.call("brief", "--file", self.input("Команда выводит ready"))
         self.call("requirements", "--file", self.input([{"id": "R01", "text": "Команда",
             "brief": "B001", "quote": "Команда выводит ready", "core": True, "acceptance": ["Выводит ready"]}]))
@@ -173,10 +187,15 @@ class CliTests(unittest.TestCase):
         self.call("seal")
         self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."), expected=2)
         self.discover()
-        self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."))
+        challenge = self.call("idea", "--full")["report"]["challenge"]
+        spec = "Команда выводит ready через стандартный вывод.\n" + "\n".join(
+            row["decision"] + "\n" + row["validation"] for row in challenge)
+        self.call("spec", "--file", self.input(spec))
         ctx = self.context("coverage")
         self.call("coverage", "--file", self.input({"basis": ctx["basis"], "reviewer": "synthetic",
-            "independent": True, "unmapped": [], "checks": [{"requirement": "R01", "status": "covered", "specQuote": "Команда выводит ready"}]}))
+            "independent": True, "unmapped": [], "checks": [{"requirement": "R01", "status": "covered", "specQuote": "Команда выводит ready"}],
+            "ideaChecks": [{"probe": row["probe"], "status": "covered", "specQuote": row["decision"] + "\n" + row["validation"],
+                           "note": "Synthetic correspondence; this test is not semantic review."} for row in challenge]}))
         tasks = [{"id": "T01", "title": "Команда", "requirements": ["R01"],
                   "dependsOn": [], "zones": ["app.py"], "criteria": ["Выводит ready"]}]
         self.call("plan", "--file", self.input(tasks), expected=2)
@@ -212,10 +231,29 @@ class CliTests(unittest.TestCase):
         self.call("critic", "T01", "--round", "1", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic1"))))
         self.call("critic", "T01", "--round", "2", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic2"))))
         self.call("complete", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "acceptor"))))
-        self.call("verify", "--", sys.executable, "app.py")
+        run = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
+        check = self.call("verify", "--purpose", "check", "--", sys.executable, "app.py")["receipt"]
+        commands = self.call("commands")
+        self.assertEqual(commands["count"], 3)
+        self.assertEqual(self.call("commands", "--receipt", run["sha256"])["purpose"], "run")
         self.call("wave", "1", "--file", self.input(proof("wave", "R01")))
         self.call("context", "--kind", "acceptance", expected=2)
         self.call("acceptance", "--file", self.input({}), expected=2)
+        self.call("clean-prepare", expected=2)
+        self.call("handoff", "--file", self.input({"schema": 1, "profile": "small",
+            "documents": [{"path": "README.md", "sha256": file_hash(self.root / "README.md"),
+                           "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
+                           "covers": {"quickstart": "Quickstart"}}],
+            "notApplicable": {"architecture": "One print statement has no separate architecture.",
+                              "decisions": "No material technical alternative in this synthetic fixture.",
+                              "glossary": "No domain terminology beyond standard output."},
+            "commands": {"check": {"receipt": check, "document": "README.md", "heading": "Quickstart",
+                                  "display": runner + " app.py", "runner": runner},
+                         "run": {"receipt": run, "document": "README.md", "heading": "Quickstart",
+                                 "display": runner + " app.py", "runner": runner},
+                         "install": {"notApplicable": "Python standard library only."},
+                         "singleTest": {"notApplicable": "The whole one-statement program is the check."}},
+            "obligations": []}))
         self.call("clean-prepare")
         blind = self.context("blind")
         self.assertNotIn("requirements", blind)
@@ -234,12 +272,11 @@ class CliTests(unittest.TestCase):
                            "--session", "fresh-knowledge-session")["receipt"]["actor"]
         learned = self.context("knowledge")
         self.assertNotIn("spec", learned); self.assertNotIn("briefs", learned); self.assertNotIn("tasks", learned)
-        from aispa_core.store import file_hash
         self.call("knowledge-record", "--file", self.input({"writer": writer["id"], "basis": learned["basis"],
             "entries": [{"key": "cli.ready", "kind": "command", "text": "Synthetic: stdout check of this CLI.",
                          "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
-                         "command": learned["verification"]["command"],
-                         "verification": {"kind": "project", "sha256": learned["verificationDigest"]}}],
+                         "command": [sys.executable, "app.py"],
+                         "verification": {"kind": "execution", "sha256": run["sha256"]}}],
             "uncertainties": {k: "Synthetic fixture did not establish additional knowledge in this category." for k in ("trap", "decision", "glossary")}}))
         self.assertEqual(len(self.call("knowledge", "--path", "app.py")["entries"]), 1)
         state = self.call("finish")

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
-from aispa_core import discovery, ideas
+from aispa_core import discovery, ideas, product
 from aispa_core.store import Invalid, Journal
 
 
@@ -36,6 +36,12 @@ def synthetic_report(store, state, *, depth="compact"):
                          "validation": "Try the smallest example with missing and present durations.",
                          "consequence": "If absent, preserve input validation and report the missing data."}],
         "additions": [], "sourceObservations": [],
+        **({"challenge": [{"probe": probe, "status": "assumption",
+             "finding": "Synthetic test assumption for " + probe + "; no market evidence.",
+             "decision": "Preserve requested local behavior; do not add services based on this assumption.",
+             "validation": "Review actual usage with the owner before drawing product conclusions.",
+             "requirements": [req["id"] for req in state["requirements"] if req.get("scope", "active") == "active"]}
+            for probe in product.QUESTIONS]} if state.get("policy", {}).get("productChallenge") else {}),
     }
 
 

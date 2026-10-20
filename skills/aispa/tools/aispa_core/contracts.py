@@ -43,7 +43,9 @@ def task_closure(state, task_id):
 def task_contract(state, task_id):
     return digest({"scope": scope_basis(state), "spec": state["spec"],
                    "closure": [{k: v for k, v in definition(t).items() if k != "wave"}
-                               for t in task_closure(state, task_id)]})
+                               for t in task_closure(state, task_id)],
+                   **({"delivery": state.get("planReview", {}).get("deliveryDigest")}
+                      if state.get("policy", {}).get("deliveryPlan") else {})})
 
 
 def task_basis(store, state, task_id):
@@ -58,13 +60,18 @@ def task_basis(store, state, task_id):
 
 
 def scope_basis(state):
-    return digest({"briefs": state["briefs"], "requirements": state["requirements"],
-                   "core": state.get("core", []), "sealed": state.get("sealed", False)})
+    value = {"briefs": state["briefs"], "requirements": state["requirements"],
+             "core": state.get("core", []), "sealed": state.get("sealed", False)}
+    if state.get("policy", {}).get("productChallenge"):
+        value["ideaReview"] = state.get("ideaReview")
+    return digest(value)
 
 
 def plan_basis(state):
     return digest({"scope": scope_basis(state), "spec": state["spec"],
-                   "tasks": [definition(t) for t in state["tasks"]]})
+                   "tasks": [definition(t) for t in state["tasks"]],
+                   **({"delivery": state.get("planReview", {}).get("deliveryDigest")}
+                      if state.get("policy", {}).get("deliveryPlan") else {})})
 
 
 def basis(store, state, kind, task_id=None):
@@ -83,6 +90,8 @@ def basis(store, state, kind, task_id=None):
     if kind == "acceptance":
         body.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                     carryover=state.get("carryover"), blindReview=state.get("blindReview"))
+        if state.get("policy", {}).get("deliveryDocs"):
+            body["handoff"] = state.get("handoff")
     return digest(body)
 
 
@@ -102,6 +111,10 @@ def gate_valid(store, state, name):
         from .cleanroom import valid
         from .blind import valid as blind_valid
         if not valid(store, state) or not blind_valid(store, state):
+            return False
+    if name == "acceptance" and state.get("policy", {}).get("deliveryDocs"):
+        from . import handoff, executions
+        if not handoff.valid(store, state, command_receipt=lambda ref: executions.resolve(store, state, ref)):
             return False
     return bool(gate and gate["passed"] and gate["basis"] == basis(store, state, name)
                 and artifact_valid(store, gate["report"])

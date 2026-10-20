@@ -8,7 +8,7 @@ import copy
 import json
 import uuid
 
-from . import timing
+from . import timing, repairs
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -174,6 +174,9 @@ def _historical_one(store, state, tid):
                 or repair.get("previousReport") != first["report"]["sha256"]
                 or second.get("repairReceipt") != repair["report"]["sha256"] or second["basis"] != repair["basis"]):
             return None
+        if state.get("policy", {}).get("repairDiagnosis"):
+            if repair.get("diagnosis") != repairs.worker_guard(store, state, tid, repair["actor"]):
+                return None
     if (accepted.get("actor") != attempt["actors"]["acceptor"] or accepted["basis"] != second["basis"]
             or accepted.get("previousReport") != second["report"]["sha256"]):
         return None
@@ -385,6 +388,8 @@ class TaskPipeline:
             if role == "worker":
                 require(not attempt["rounds"] or len(attempt["rounds"]) == 1 and not attempt["rounds"][0]["passed"],
                         "Заменить исполнителя можно до критики или при исправлении первого раунда")
+                if attempt["rounds"] and self.s.get("policy", {}).get("repairDiagnosis"):
+                    repairs.assignment_guard(self.store, self.s, tid, fresh=fresh, model=model)
             elif role.startswith("critic"):
                 require(len(attempt["rounds"]) < int(role[-1]), "Критика после его отчёта нельзя заменить")
             else:
@@ -516,6 +521,9 @@ class TaskPipeline:
                 require(report["basis"] == first["basis"], "После PASS первого критика изменён кандидат")
             else:
                 require(repair and _record_valid(self.store, repair), "После замечаний нужен receipt исправления")
+                if self.s.get("policy", {}).get("repairDiagnosis"):
+                    require(repair.get("diagnosis") == repairs.worker_guard(self.store, self.s, tid, repair["actor"]),
+                            "Исправление не связано с действительной диагностикой")
                 require(report.get("repairReceipt") == repair["report"]["sha256"] and report["basis"] == repair["basis"],
                         "Второй раунд не связан с исправленным кандидатом")
             found, unresolved = self._resolutions(report, first)
@@ -541,6 +549,7 @@ class TaskPipeline:
                 "Исправление допускается между первым и вторым критиком")
         first = attempt["rounds"][0]
         require(_record_valid(self.store, first), "Повреждён отчёт первого критика")
+        diagnosis = repairs.worker_guard(self.store, self.s, tid) if self.s.get("policy", {}).get("repairDiagnosis") else None
         text, report, artifacts, failures = self._read(tid, "worker", path)
         require(report.get("previousReport") == first["report"]["sha256"], "Исправление не связано с первым отчётом")
         expected = {f["id"] for f in first["findings"] if f["severity"] == "blocking"}
@@ -552,7 +561,8 @@ class TaskPipeline:
         if attempt["repair"]:
             attempt["repairHistory"].append(attempt["repair"])
         attempt["repair"] = self._record(tid, "worker", text, report, artifacts, passed=True,
-                                         previousReport=first["report"]["sha256"], addresses=addressed)
+                                         previousReport=first["report"]["sha256"], addresses=addressed,
+                                         **({"diagnosis": diagnosis} if diagnosis else {}))
         task["status"], task["phase"] = "running", "critic_2"
         timing.start(task, timestamp())
         self.host.save("task-repaired:" + tid)

@@ -474,6 +474,8 @@ def execute(store, state, command, timeout=600):
     System interpreters may still have ambient packages. This is not a sandbox
     or a guarantee of full package isolation; detectable source paths are refused.
     """
+    from .executions import validate_command
+    validate_command(command)
     _require(isinstance(command, list) and command and all(isinstance(v, str) and "\0" not in v for v in command)
              and command[0].strip(), "Нужна явная команда clean-run после --")
     _require(isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and math.isfinite(timeout)

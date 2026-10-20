@@ -5,6 +5,7 @@ from collections import Counter
 from .contracts import (active, artifact_valid, basis, definition, nonempty, overlap,
                         require, validate_plan)
 from .store import digest
+from . import delivery
 
 MAX_TASKS = 96
 MAX_REPORT_CHARS = 131072
@@ -47,8 +48,9 @@ def analyze(store, state, raw):
 
 
 def review(store, state, final, report):
-    require(isinstance(report, dict) and set(report) == {"basis", "draft", "groups", "separate"},
-            "Разбор плана требует basis, draft, groups, separate")
+    require(isinstance(report, dict) and {"basis", "draft", "groups", "separate"} <= set(report)
+            <= {"basis", "draft", "groups", "separate", "delivery"},
+            "Разбор плана требует basis, draft, groups, separate и delivery для новых прогонов")
     require(len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_CHARS, "Слишком большой разбор плана")
     advice = analyze(store, state, report["draft"])
     require(report["basis"] == advice["basis"], "Разбор размера плана устарел")
@@ -103,16 +105,27 @@ def review(store, state, final, report):
                 and len(row["reason"]) <= 2000, "Объясните каждую сохранённую тонкую границу один раз")
         seen.add(key)
     require(seen == needed, "Остались мелкие связанные задачи без объяснения границ")
+    if state.get("policy", {}).get("deliveryPlan") or "delivery" in report:
+        delivery.validate(list(final.values()), report.get("delivery"))
     record = store.artifact("plan-reviews", (json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
     return {"report": record, "scopeBasis": basis(store, state, "coverage"),
             "planDigest": digest([definition(t) for t in final.values()]),
             "tasksBefore": len(draft), "tasksAfter": len(final),
             "taskRoleStartsBefore": 4 * len(draft), "taskRoleStartsAfter": 4 * len(final),
-            "criticRoundsPerTask": 2, "measuredTokenSavings": None}
+            "criticRoundsPerTask": 2, "measuredTokenSavings": None,
+            **({"deliveryDigest": digest(report["delivery"])} if "delivery" in report else {})}
 
 
 def valid(store, state):
     receipt = state.get("planReview")
+    if state.get("policy", {}).get("deliveryPlan"):
+        try:
+            report = json.loads(store.text(receipt["report"]))
+            delivery.validate(state["tasks"], report["delivery"])
+            if receipt.get("deliveryDigest") != digest(report["delivery"]):
+                return False
+        except (OSError, ValueError, TypeError, KeyError):
+            return False
     return bool(isinstance(receipt, dict) and artifact_valid(store, receipt.get("report", {}))
                 and receipt.get("scopeBasis") == basis(store, state, "coverage")
                 and receipt.get("planDigest") == digest([definition(t) for t in state["tasks"]]))

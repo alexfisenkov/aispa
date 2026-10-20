@@ -271,6 +271,8 @@ def _next(state):
         return [str(t.get("id")) + ": " + str(t.get("phase", t.get("status"))) for t in pending]
     if any(t.get("status") == "blocked" for t in state["tasks"]):
         return ["Сохранить блокеры; продолжать доступные независимые задачи."]
+    if state.get("policy", {}).get("deliveryDocs") and not state.get("handoff"):
+        return ["Подготовить отслеживаемые документы передачи проекта, проверить команды и записать handoff до чистого клона."]
     return ["Провести актуальные сверки волн и итоговую приёмку; готовность определяет движок."]
 
 
@@ -344,7 +346,12 @@ def refresh(store, state):
     knowledge_text = ("# Практические знания проекта\n\n" + lead +
         "Читать адресно: `knowledge --path <путь>` или `knowledge --kind command|trap|decision|glossary`.\n"
         "Команда проверяет свежесть источников. Историческая проверка команды не означает текущий PASS.\n"
+        "Фактические исполнения: `commands --purpose install|run|check|test --limit 8`; "
+        "точный argv и доказательство — `commands --receipt <sha256>`. Не загружайте весь журнал.\n"
         "Для нового автора: `context --kind knowledge --write`; читать фактический код, а не план.\n\n")
+    if state.get("handoff"):
+        link, _ = _source(store, state["handoff"]["artifact"], sources, "project-handoff")
+        knowledge_text += "Передача обычных Git-документов проверена записью: " + link + "\n"
     if learned.get("inherited"):
         link, _ = _source(store, learned["inherited"], sources, "knowledge-handoff")
         knowledge_text += "Переданные знания с историей: " + link + "\n"

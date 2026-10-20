@@ -1,4 +1,9 @@
-# Выполнение AISpa · 0.1.0-alpha.8
+# Выполнение AISpa · 0.1.0-alpha.9
+
+Новые `init` alpha.9 закрепляют политику `productChallenge`, `deliveryPlan`,
+`repairDiagnosis`, `deliveryDocs` для этого прогона. Старый активный прогон
+продолжают его закреплённым runtime и контрактом; обновление пакета не
+вкладывает новые обязательные поля в прежний Journal задним числом.
 
 Команды ниже вызываются как `python3 "<skillDir>/tools/aispa.py" --root "<repo>" …`.
 `<skillDir>` — именно открытая папка навыка, `<repo>` — физический корень Git.
@@ -81,6 +86,13 @@ drop/defer требуют нового источника владельца. Н
 
 ## 3. Бриф, ядро и спецификация
 
+Новые прогоны alpha.9 требуют в `idea --file` пять `challenge`: adoption,
+value_cost, operations, lifecycle, actors. В `auto` аналитик самостоятельно
+помечает факты и гипотезы; `important`/`interview` задают существенные
+вопросы только до `seal`. После `seal` самостоятельное решение записывается,
+но обязательное ядро не уменьшается. Независимый `coverage` добавляет
+`ideaChecks` с цитатами решений/неопределённостей из текущего spec.
+
 `brief --file .aispa/inbox/brief.md` сохраняет полный источник. ID B001 и
 последующие бери из журнала/контекста. Уточнения добавляй отдельными источниками.
 Входные файлы держи в `.aispa/inbox/`, чтобы не менять проверяемый код.
@@ -120,6 +132,13 @@ scope R02 drop --brief B002 --quote "Экспорт больше не нужен
 (unmapped). `coverage --file …` записывает его отчёт; код 2 означает отказ.
 
 ## 4. План и карточки команды
+
+Отчёт `plan --review` новых прогонов включает `delivery`: завершённые
+проверяемые пользовательские срезы и, где нужна миграция, последовательность
+expand → migrate всех известных потребителей → contract с зависимостями,
+совместимостью и откатом. Объясни пустой список миграций предметно.
+Схема — [contracts](contracts.md); проверка структуры не находит потребителей
+сама, их надо установить по проекту.
 
 Сначала проверь размер задач, затем запиши итог с явным разбором границ:
 
@@ -172,7 +191,7 @@ assign T01 --role worker --runtime codex --native-id <реальный-ID> --ses
 После реализации выполни подходящую **адресную** проверку:
 
 ```text
-verify --task T01 -- python3 -m unittest discover -s tests -p 'test_feature.py' -v
+verify --task T01 --purpose test -- python3 -m unittest discover -s tests -p 'test_feature.py' -v
 context --kind task --task T01 --role worker --write
 submit T01 --file .aispa/inbox/T01-worker.json
 ```
@@ -188,8 +207,14 @@ submit T01 --file .aispa/inbox/T01-worker.json
 critic T01 --round 1 --file .aispa/inbox/T01-critic1.json
 ```
 
-После FAIL исполнитель исправляет подтверждённые замечания. Снова выполни
-`verify --task T01`, получи свежий пакет worker, затем `repair T01 --file …`.
+После FAIL прочитай `repair-plan T01` без `--file`: он выдаёт актуальный basis,
+task, attempt, firstReport и blockingFindings. Затем сохрани диагноз
+`repair-plan T01 --file …` с этим basis,
+причиной, всеми blocking ID и маршрутом. `implementation_gap` исправляет
+исходный worker; при `missing_context` или `wrong_approach` назначь нового
+свежего сильного worker и передай адресный контекст. `external_blocker`
+остаётся blocked до снятия препятствия. Затем повтори `verify --task T01`,
+получи свежий пакет worker и сохрани `repair T01 --file …`.
 Repair связан с SHA первого отчёта и всеми blocking finding IDs. Если первый
 раунд PASS, repair не нужен и кандидат до второго критика не меняется.
 
@@ -227,12 +252,28 @@ wave 1 --file .aispa/inbox/wave-1.json
 явной зависимости, сохранённых inheritedProofs и повторной проверке всех
 критериев предка. Соседняя задача такого права не даёт.
 
-Сохрани код и документы в Git. Проведи актуальную общую проверку и сверку
-последней волны. Затем:
+Обычные проектные документы готовь в задачах: README/архитектуру/решения/
+словарь по размеру проекта. Тогда оба критика и приёмщик проверят их вместе
+с кодом. Покажи реальные команды установки, запуска, общей проверки и
+отдельного теста либо объясни применимое N/A. Исходный бриф не экспортируй
+в публичные документы.
+
+После каждого выполненного `verify`/`clean-verify`, включая FAIL, движок
+добавляет подлинную запись истории. `commands --purpose test --kind task
+--limit 8` даёт короткую выборку с точными refs; `commands --receipt <SHA>` —
+один подробный receipt. Это исторический факт, не свежий PASS; список не
+подменяет `verified` и не входит целиком в публичную передачу.
+
+После проверок задач и волны сохрани код и документы в Git. Проведи свежую
+общую `verify --purpose check` на текущем коде, затем
+`handoff --file .aispa/inbox/handoff.json` с подлинными успешными receipts.
+Handoff проверяет tracked status, SHA, разделы и связь с командой, но не
+удостоверяет смысл и приватность прозы. При изменившемся basis повтори сверку
+последней волны. Только затем:
 
 ```text
 clean-prepare
-clean-verify --timeout 600 -- <реальная команда установки/сборки/проверки>
+clean-verify --purpose check --timeout 600 -- <реальная команда установки/сборки/проверки>
 context --kind blind --write
 blind --file .aispa/inbox/blind-observations.json
 context --kind acceptance --write

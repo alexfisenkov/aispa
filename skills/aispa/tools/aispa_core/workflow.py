@@ -12,7 +12,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing
 from .team import TaskPipeline, task_proof_valid
-from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge
+from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -126,6 +126,10 @@ class Workflow:
             else:
                 passed = False
         require(seen == expected, "Не все требования проверены против спецификации")
+        if self.s.get("policy", {}).get("productChallenge"):
+            require(ideas.valid(self.store, self.s), "Разбор идеи устарел или повреждён")
+            passed = product.coverage(self.s, report, spec,
+                                      ideas._saved_report(self.store, self.s)["challenge"]) and passed
         self.s["gates"]["coverage"] = {"passed": passed, "basis": report["basis"],
                                          "report": self.store.artifact("reviews", text.encode(), ".json")}
         self.save("coverage-reviewed")
@@ -247,6 +251,7 @@ class Workflow:
 
     def verify(self, command, timeout, task_id=None):
         self.running()
+        executions.validate_command(command)
         require(command and all(isinstance(x, str) for x in command), "Нужна команда проверки после --")
         require(isinstance(timeout, (int, float)) and not isinstance(timeout, bool)
                 and math.isfinite(timeout) and 0 < timeout <= 86400, "Нужен положительный конечный timeout")
@@ -316,8 +321,14 @@ class Workflow:
         self.save("wave-reviewed:" + str(number))
         return passed
 
+    def handoff_ready(self):
+        if self.s.get("policy", {}).get("deliveryDocs"):
+            require(handoff.valid(self.store, self.s, command_receipt=lambda ref: executions.resolve(self.store, self.s, ref)),
+                    "До чистого клона и приёмки подготовьте и проверьте отслеживаемые документы проекта: handoff --file")
+
     def acceptance(self, path):
         self.build_ready()
+        self.handoff_ready()
         if self.s.get("policy", {}).get("cleanClone"):
             require(cleanroom.valid(self.store, self.s), "Для итоговой приёмки нужен актуальный успешный запуск из чистого клона")
             require(blind.valid(self.store, self.s), "Сначала нужны независимые наблюдения из чистого клона")
@@ -357,6 +368,7 @@ class Workflow:
 
     def finish(self):
         self.build_ready()
+        self.handoff_ready()
         require(gate_valid(self.store, self.s, "acceptance"), "Обязательное ядро не принято или доказательства устарели")
         require(verified(self.store, self.s), "Проверка текущего кода устарела")
         require(self.store.clean(), "Сначала сохраните изменения проекта в Git")
