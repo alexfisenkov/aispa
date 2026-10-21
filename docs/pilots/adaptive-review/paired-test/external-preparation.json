@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "stateAtRegistration": "NOT_RUN",
+  "candidateCommit": "7b39b9e33e9cf6d09af808f510dd5d6b4d2facec",
+  "files": {
+    "postfreeze.py": "b16f891fe1729d06d9121d187dd2b736dd076580fe65daecb2011050b1f3aac0",
+    "config.json": "6063904a63b57ef9df567aa2520a4e8963a9611de7c9ec82dd3c82ece0c667fe",
+    "README.md": "78556ee0b2b97fcc603d20b7d6b50fbccf75e111fe33d810b8dea6ca334f59ba",
+    "test_postfreeze.py": "15932ade8bc4e57637661762268ea2f36b727d3f7f1abd3f585325f7f2c43eb5"
+  },
+  "syntheticChecks": {
+    "total": 22,
+    "result": "PASS",
+    "seconds": 1.522
+  },
+  "notes": [
+    "Fixed two review-round findings before model runs; final fixes were reproduced by controller tests.",
+    "Six products, oracle and native judges have not run.",
+    "Operator adjudication and actual native judge independence require separate evidence."
+  ]
+}
