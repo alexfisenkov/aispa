@@ -43,7 +43,7 @@
   "evaluatorSHA256": "f0cb785384d5b66a0ffc4d3dfc7c76d78b7d670edf7033408bac19b420792a9c",
   "manualChecklistSHA256": "ccbe72f8e37d2020c7783e2e102ecc1b759b080e5ae01935e99d7a196680a15c",
   "helperHashes": {
-    "protocol.py": "c1d0472b74f6584a076e9b444899e946bd5fbe26e4072596d3c0d13e7184b1b4",
+    "protocol.py": "e4a53d960741873e989c9cacd0621793f54c87d013e3d5d3c7ab54bb1a294d7a",
     "create_fixture.py": "9747dfa4898b64fddbf28ad2856eedfb87949110899c039fab8ef70074862b40",
     "run_tools.py": "3f00d8d1ba56aae0bd5a31c7ec31e07d3f561a540e52a67d5ffe063e7b414fb2",
     "capture_final.py": "1ff68b1ba6996d80029b0444a53606786a5c471598a35286ea4c63569768c8da",
@@ -51,7 +51,7 @@
     "host_ids.py": "217f176abc3c7891f613e5522076273cb2a3fe0b10e20a0b1d94d3143ec56dd5",
     "recovery_inspect.py": "5db5b40f11d22aeee057f1b4cdf33fc60dc9e0b84df2102261c18767d0414eca",
     "RECOVERY.md": "0b9879f3747a9b4d37f35ab2e1dc15b63cb1f0342d3da29834349856b0a1595b",
-    "PROTOCOL.md": "ab3ed1175506cdc229d294b6bb4a8a4a702e438ac0e3d05cef696366415f04e6"
+    "PROTOCOL.md": "5615e6ed44e3877912335955eff8222852162178b77c98057d7f318abd1cd5d6"
   },
   "projects": {
     "pulsefold": {
@@ -86,7 +86,7 @@
       ],
       "packageTreeHashes": {
         "aispa": "6fc59d8371ef4a3ac65901807b43d9b42b682f0f2744fb178419aba8e91627c6",
-        "reference": "cf9b4caa1cf2e3ce1cfff92e0deeb4a98f3b226451403d65722f2668d2159506"
+        "reference": "9f878749ec331ac0fb033be0b9f5c3185cfac538ab91bda460aa8f22fa5c2a6d"
       }
     },
     "queuelet": {
@@ -121,7 +121,7 @@
       ],
       "packageTreeHashes": {
         "aispa": "6fc59d8371ef4a3ac65901807b43d9b42b682f0f2744fb178419aba8e91627c6",
-        "reference": "cf9b4caa1cf2e3ce1cfff92e0deeb4a98f3b226451403d65722f2668d2159506"
+        "reference": "9f878749ec331ac0fb033be0b9f5c3185cfac538ab91bda460aa8f22fa5c2a6d"
       }
     },
     "weavecfg": {
@@ -166,7 +166,7 @@
       ],
       "packageTreeHashes": {
         "aispa": "6fc59d8371ef4a3ac65901807b43d9b42b682f0f2744fb178419aba8e91627c6",
-        "reference": "cf9b4caa1cf2e3ce1cfff92e0deeb4a98f3b226451403d65722f2668d2159506"
+        "reference": "9f878749ec331ac0fb033be0b9f5c3185cfac538ab91bda460aa8f22fa5c2a6d"
       }
     }
   },
@@ -178,5 +178,18 @@
     "Unknown usage is not zero. Include failed, partial and out-of-window usage; no billing inference.",
     "Two independent blinded judgments per pair in opposite order; retain product hints and disclose limited blinding.",
     "No universal or statistically established productivity claim from three single-attempt pairs."
+  ],
+  "preDispatchAmendments": [
+    {
+      "at": "2026-10-21T05:46:47.702643+00:00",
+      "previousPublicProtocolSHA256": "7ad0ad5987e541532165df6975f1b8b29bf6ae4acd992d01b34e96fe34c86c0c",
+      "nativeDispatches": 0,
+      "modelAttemptsRetried": 0,
+      "reason": "Exclude generated __pycache__, *.pyc and .DS_Store consistently from Git extraction and source integrity checks for both treatments. Reference Git includes one compiled cache file. Original unused setup and folders were preserved.",
+      "excludedReferenceFiles": [
+        "tools/__pycache__/sync.cpython-314.pyc"
+      ],
+      "briefsStartersAndOraclesChanged": false
+    }
   ]
 }

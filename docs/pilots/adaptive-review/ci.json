@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "run": 39548762214,
+  "url": "https://github.com/alexfisenkov/aispa/actions/runs/39548762214",
+  "sourceCommit": "7b39b9e33e9cf6d09af808f510dd5d6b4d2facec",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "python (macos-latest, 3.11)",
+      "conclusion": "success",
+      "tests": 629,
+      "passed": 609,
+      "skipped": 20,
+      "examplePassed": 15,
+      "dashboardPassed": null
+    },
+    {
+      "name": "python (ubuntu-latest, 3.13)",
+      "conclusion": "success",
+      "tests": 629,
+      "passed": 609,
+      "skipped": 20,
+      "examplePassed": 15,
+      "dashboardPassed": 37
+    },
+    {
+      "name": "python (macos-latest, 3.13)",
+      "conclusion": "success",
+      "tests": 629,
+      "passed": 609,
+      "skipped": 20,
+      "examplePassed": 15,
+      "dashboardPassed": 37
+    },
+    {
+      "name": "python (windows-latest, 3.13)",
+      "conclusion": "success",
+      "tests": 629,
+      "passed": 628,
+      "skipped": 1,
+      "examplePassed": 15,
+      "dashboardPassed": 37
+    },
+    {
+      "name": "python (ubuntu-latest, 3.11)",
+      "conclusion": "success",
+      "tests": 629,
+      "passed": 609,
+      "skipped": 20,
+      "examplePassed": 15,
+      "dashboardPassed": null
+    },
+    {
+      "name": "python (windows-latest, 3.11)",
+      "conclusion": "success",
+      "tests": 629,
+      "passed": 628,
+      "skipped": 1,
+      "examplePassed": 15,
+      "dashboardPassed": null
+    }
+  ]
+}
