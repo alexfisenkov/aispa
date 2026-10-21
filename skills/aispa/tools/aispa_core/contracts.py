@@ -67,6 +67,9 @@ def scope_basis(state):
         value["ideaReview"] = state.get("ideaReview")
     if state.get("policy", {}).get("sourceAccounting"):
         value["briefMap"] = state.get("briefMap")
+    if state.get("policy", {}).get("executionObligations"):
+        value["executionObligations"] = state.get("executionObligations", [])
+        value["executionSeal"] = state.get("executionSeal")
     return digest(value)
 
 
@@ -119,6 +122,14 @@ def gate_valid(store, state, name):
     gate = state["gates"].get(name)
     if not gate or not gate.get("passed"):
         return False
+    from . import phase_receipts, execution_obligations
+    if execution_obligations.enabled(state):
+        try:
+            execution_obligations.obligations(store, state, sealed=True)
+        except (Invalid, OSError, ValueError, TypeError, KeyError):
+            return False
+    if not phase_receipts.valid(store, state, {"plan": "planner"}.get(name, name)):
+        return False
     if state.get("policy", {}).get("sourceAccounting"):
         from . import briefmap, participants
         if not briefmap.valid(store, state, lambda s, a, r: participants.actor_check(store, s, a, r)):
@@ -141,6 +152,10 @@ def gate_valid(store, state, name):
     if name == "acceptance" and state.get("policy", {}).get("deliveryDocs"):
         from . import handoff, executions
         if not handoff.valid(store, state, command_receipt=lambda ref: executions.resolve(store, state, ref)):
+            return False
+    if name == "acceptance" and state.get("policy", {}).get("finalWaveReuse"):
+        from . import blind
+        if not blind.derived_waves_valid(store, state):
             return False
     return bool(gate and gate["passed"] and gate["basis"] == basis(store, state, name)
                 and artifact_valid(store, gate["report"])

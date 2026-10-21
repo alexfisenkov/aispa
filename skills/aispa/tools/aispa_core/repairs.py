@@ -3,6 +3,7 @@ import json
 
 from .contracts import artifact_valid, nonempty, require
 from .store import digest
+from .review_policy import required_ids
 
 
 def _attempt(state, tid):
@@ -35,10 +36,10 @@ def _validate(state, tid, report):
         require(report["cause"] == "implementation_gap", "Тот же исполнитель подходит для локального дефекта реализации")
     if report["cause"] == "external_blocker":
         require(report["route"] == "blocked", "Внешнее препятствие надо сохранить; ремонт не заменяет недостающий доступ")
-    expected = {f["id"] for f in attempt["rounds"][0]["findings"] if f["severity"] == "blocking"}
+    expected = required_ids(attempt["rounds"][0])
     rows = report["addresses"]
     require(isinstance(rows, list) and all(isinstance(i, str) for i in rows)
-            and len(set(rows)) == len(rows) and set(rows) == expected, "Диагноз должен учитывать все блокирующие замечания")
+            and len(set(rows)) == len(rows) and set(rows) == expected, "Диагноз должен учитывать все обязательные замечания")
     context = report["context"]
     require(isinstance(context, list) and len(context) <= 32
             and all(nonempty(s) and len(s) <= 1200 for s in context), "Контекст ремонта — до 32 адресных указаний")
@@ -102,5 +103,7 @@ def view(store, state, tid):
     return {"basis": basis(state, tid), "task": tid, "attempt": attempt["id"],
             "firstReport": attempt["rounds"][0]["report"],
             "blockingFindings": [f for f in attempt["rounds"][0]["findings"] if f["severity"] == "blocking"],
+            "requiredFindingIds": sorted(required_ids(attempt["rounds"][0])),
+            "requiredFindings": [f for f in attempt["rounds"][0]["findings"] if f["id"] in required_ids(attempt["rounds"][0])],
             "recorded": attempt.get("repairPlan"),
             "rule": "implementation_gap: same or fresh; missing_context/wrong_approach: fresh strong worker; external_blocker: blocked. No extra critic round."}

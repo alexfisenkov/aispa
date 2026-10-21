@@ -10,7 +10,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
                         evidence_rows, gate_valid, plan_basis, report_header, require,
                         validate_plan, verified, task_basis, task_verified, task_closure)
 from .store import Invalid, timestamp
-from . import timing
+from . import timing, phase_receipts, execution_obligations
 from .team import TaskPipeline, task_proof_valid
 from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
 
@@ -94,9 +94,13 @@ class Workflow:
             require(briefmap.valid(self.store, self.s, actor_check=lambda s, a, r: participants.actor_check(self.store, s, a, r)),
                     "Каждая часть исходного брифа должна пройти независимый разбор и сопоставление: brief-map")
         if self.s.get("policy", {}).get("ideaReview"):
-            require(ideas.valid(self.store, self.s), "До фиксации брифа нужен актуальный разбор идеи: idea --file")
+            require(ideas.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "idea"),
+                    "До фиксации брифа нужен актуальный разбор идеи с автором: idea --file")
         core = set(self.s.get("core", [])) | {r["id"] for r in active(self.s) if r["core"]}
         require(core & {r["id"] for r in active(self.s)}, "До разработки определите обязательное ядро")
+        execution_seal = execution_obligations.seal(self.store, self.s)
+        if execution_seal:
+            self.s["executionSeal"] = execution_seal
         self.s["core"] = sorted(core)
         self.s["sealed"] = True
         self.s["stage"] = "spec"
@@ -106,17 +110,20 @@ class Workflow:
         self.running()
         require(self.s.get("sealed"), "Сначала зафиксируйте бриф и обязательное ядро")
         if self.s.get("policy", {}).get("ideaReview"):
-            require(ideas.valid(self.store, self.s), "Разбор идеи отсутствует или устарел; обновите idea --file")
+            require(ideas.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "idea"),
+                    "Разбор идеи отсутствует, не атрибутирован или устарел; обновите idea --file")
         if self.s.get("policy", {}).get("discovery"):
-            require(discovery.valid(self.store, self.s), "Сначала изучите проект: discover и проверенный отчёт discover --file")
+            require(discovery.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "discovery"),
+                    "Сначала изучите проект: discover и проверенный отчёт discover --file с автором")
         self.s["spec"] = self.store.artifact("specs", read_input(path).encode(), ".md")
         self.save("spec-recorded")
 
-    def coverage(self, path):
+    def coverage(self, path, actor=None):
         self.running()
         require(self.s["spec"] and self.s.get("sealed"), "Нет спецификации для действующего брифа")
         text = read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "coverage")
+        author = phase_receipts.report_actor(self.store, self.s, "coverage", report, actor)
         rows = report.get("checks")
         require(isinstance(rows, list), "Нет checks")
         expected = {r["id"] for r in active(self.s)}
@@ -140,15 +147,19 @@ class Workflow:
                                       ideas._saved_report(self.store, self.s)["challenge"]) and passed
         self.s["gates"]["coverage"] = {"passed": passed, "basis": report["basis"],
                                          "report": self.store.artifact("reviews", text.encode(), ".json")}
+        phase_receipts.record(self.store, self.s, "coverage", self.s["gates"]["coverage"]["report"],
+                              actor=author, basis=report["basis"])
         self.save("coverage-reviewed")
         return passed
 
-    def plan(self, path, review_path=None):
+    def plan(self, path, review_path=None, actor=None):
         self.running()
         if self.s.get("policy", {}).get("discovery"):
-            require(discovery.valid(self.store, self.s), "Исследование проекта отсутствует или устарело; обновите discover")
+            require(discovery.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "discovery"),
+                    "Исследование проекта отсутствует, не атрибутировано или устарело; обновите discover")
         carryover.guard_current(self.store, self.s)
         require(gate_valid(self.store, self.s, "coverage"), "Покрытие брифа не подтверждено или устарело")
+        author = phase_receipts.authorize(self.store, self.s, "planner", actor)
         text = read_input(path)
         tasks = validate_plan(self.s, json.loads(text))
         if self.s.get("policy", {}).get("designContract"):
@@ -186,6 +197,7 @@ class Workflow:
         self.pipeline.prepare()
         self.s["gates"]["plan"] = {"passed": True, "basis": basis(self.store, self.s, "plan"),
                                      "report": self.store.artifact("plans", text.encode(), ".json")}
+        phase_receipts.record(self.store, self.s, "planner", self.s["gates"]["plan"]["report"], actor=author)
         self.s["stage"] = "build"
         self.save("plan-validated")
 
@@ -197,6 +209,8 @@ class Workflow:
     def build_ready(self):
         self.running()
         require(self.s.get("sealed"), "Бриф изменён; нужна повторная фиксация")
+        if execution_obligations.enabled(self.s):
+            execution_obligations.obligations(self.store, self.s, sealed=True)
         if self.s.get("policy", {}).get("sourceAccounting"):
             require(briefmap.valid(self.store, self.s, actor_check=lambda s, a, r: participants.actor_check(self.store, s, a, r)),
                     "Исходный разбор брифа отсутствует, повреждён или устарел")
@@ -396,7 +410,7 @@ class Workflow:
     def handoff_ready(self):
         if self.s.get("policy", {}).get("integrationReview"):
             require(integration.proof_valid(self.store, self.s),
-                    "До сдачи нужны два общих code/security-ревью в финальной задаче и её приёмка")
+                    "До сдачи нужны актуальное полное ревью финальной задачи по её политике и отдельная приёмка")
         if self.s.get("policy", {}).get("deliveryDocs"):
             require(handoff.valid(self.store, self.s, command_receipt=lambda ref: executions.resolve(self.store, self.s, ref)),
                     "До чистого клона и приёмки подготовьте и проверьте отслеживаемые документы проекта: handoff --file")
@@ -411,32 +425,62 @@ class Workflow:
         require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"]), "Есть незавершённые задачи без результата или блокера")
         require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
                 "Не все завершённые задачи имеют действительную цепочку приёмки")
-        for number in {t["wave"] for t in self.s["tasks"]}:
-            checkpoint = self.s.get("waves", {}).get(str(number))
-            require(checkpoint and checkpoint["passed"] and checkpoint["plan"] == plan_basis(self.s)
-                    and artifact_valid(self.store, checkpoint["report"])
-                    and all(artifact_valid(self.store, a) for a in checkpoint.get("artifacts", [])),
-                    "Не все волны прошли сверку с полным брифом")
-        last_wave = max(t["wave"] for t in self.s["tasks"])
-        require(self.s["waves"][str(last_wave)]["basis"] == basis(self.store, self.s, "wave"),
-                "Итоговая сверка последней волны устарела")
         text = read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "acceptance")
+        author = phase_receipts.report_actor(self.store, self.s, "acceptance", report)
         if self.s.get("policy", {}).get("cleanClone"):
             require(report.get("cleanrun") == self.s["cleanrun"]["artifact"]["sha256"], "Приёмщик должен сослаться на точную проверку чистого клона")
         expected = {(r["id"], c) for r in active(self.s) for c in r["acceptance"]}
         artifacts, failures = evidence_rows(self.store, report, expected)
         if self.s.get("policy", {}).get("cleanClone"):
             failures.extend(blind.mapping(self.store, self.s, report))
+        execution_findings = [f for f in failures if f.get("kind") == "execution"]
+        failures = [f for f in failures if f.get("kind") != "execution"]
         missing = {f["requirement"] for f in failures}
         core = set(self.s["core"]) & {r["id"] for r in active(self.s)}
         passed = not report["unmapped"] and None not in missing and not core & missing
         core_tasks = [t for t in self.s["tasks"] if set(t["requirements"]) & core]
         passed = passed and all(t["status"] == "completed" for t in core_tasks)
+        # Reuse only a fully successful independent source-first final review of
+        # one completed task. Intermediate waves retain their original checks.
+        numbers = {t["wave"] for t in self.s["tasks"]}
+        last_wave = max(numbers)
+        reusable = bool(self.s.get("policy", {}).get("finalWaveReuse") and
+                        len(self.s["tasks"]) == 1 and len(numbers) == 1 and
+                        self.s["tasks"][0]["status"] == "completed" and passed and
+                        not failures and not report["unmapped"] and
+                        self.s.get("policy", {}).get("cleanClone") and blind.valid(self.store, self.s))
+        missing_wave = reusable and any("derivedFrom" in self.s.get("waves", {}).get(str(n), {}) for n in numbers)
+        for number in numbers:
+            checkpoint = self.s.get("waves", {}).get(str(number))
+            okay = bool(checkpoint and checkpoint["passed"] and checkpoint["plan"] == plan_basis(self.s)
+                        and artifact_valid(self.store, checkpoint["report"])
+                        and all(artifact_valid(self.store, a) for a in checkpoint.get("artifacts", [])))
+            if number == last_wave:
+                okay = okay and checkpoint["basis"] == basis(self.store, self.s, "wave")
+            if not okay:
+                require(reusable and number == last_wave, "Не все волны прошли актуальную сверку с полным брифом")
+                missing_wave = True
+        report_artifact = self.store.artifact("reviews", text.encode(), ".json")
+        if missing_wave:
+            wave_basis = basis(self.store, self.s, "wave")
+            derived = {"kind": "derived-final-wave", "run": self.s["run"], "wave": last_wave,
+                       "basis": wave_basis, "plan": plan_basis(self.s),
+                       "derivedFrom": report_artifact["sha256"],
+                       "blindReport": self.s["blindReview"]["report"]["sha256"],
+                       "checks": report["checks"], "unmapped": [], "actor": author,
+                       "predicate": "full-scope-delivered-requirements-passed"}
+            ref = self.store.artifact("derived-wave-checkpoints", (json.dumps(derived, sort_keys=True) + "\n").encode(), ".json")
+            self.s.setdefault("waves", {})[str(last_wave)] = {
+                "passed": True, "plan": plan_basis(self.s), "basis": wave_basis,
+                "report": ref, "artifacts": artifacts, "derivedFrom": report_artifact["sha256"],
+                "blindReport": self.s["blindReview"]["report"]["sha256"]}
         self.s["gates"]["acceptance"] = {
             "passed": passed, "basis": report["basis"], "failures": failures,
             "unmapped": report["unmapped"], "artifacts": artifacts,
-            "report": self.store.artifact("reviews", text.encode(), ".json")}
+            "executionFindings": execution_findings,
+            "report": report_artifact}
+        phase_receipts.record(self.store, self.s, "acceptance", report_artifact, actor=author, basis=report["basis"])
         self.s["stage"] = "acceptance"
         self.save("acceptance-reviewed")
         return passed
@@ -460,11 +504,23 @@ class Workflow:
         excluded = [r["id"] for r in self.s["requirements"] if r["scope"] != "active"]
         blocked = [t["id"] for t in self.s["tasks"] if t["status"] == "blocked"]
         inherited = carryover.unresolved(self.store, self.s)
-        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited else "accepted"
+        inherited_execution = carryover.unresolved_execution(self.store, self.s)
+        at = timestamp()
+        execution_results = execution_obligations.evaluate(self.store, self.s, at)
+        execution_remaining = [row for row in execution_results if row["status"] != "passed"]
+        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited or execution_remaining or inherited_execution else "accepted"
         self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked,
                                "inherited": [{"id": item["id"], "status": item["status"], "text": item.get("requirement", {}).get("text", "")} for item in inherited]}
-        timing.stop(self.s, timestamp(), completed=True)
-        self.save("delivery-recorded")
+        if execution_obligations.enabled(self.s):
+            self.s["executionResults"] = execution_results
+            self.s["remaining"]["execution"] = execution_remaining
+            receipt = {"run": self.s["run"], "event": "engine-finish", "at": at, "results": execution_results}
+            ref = self.store.artifact("execution-results", (json.dumps(receipt, sort_keys=True) + "\n").encode(), ".json")
+            self.s.setdefault("executionResultHistory", []).append(ref)
+        if inherited_execution:
+            self.s["remaining"]["inheritedExecution"] = inherited_execution
+        timing.stop(self.s, at, completed=True)
+        self.save("delivery-recorded", at)
 
     def close(self, status, note):
         require(status in ("paused", "blocked", "cancelled"), "Неизвестная причина остановки")

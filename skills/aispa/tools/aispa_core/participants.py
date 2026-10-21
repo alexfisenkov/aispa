@@ -97,7 +97,9 @@ def resolve(store, state, actor):
 
 def actor_check(store, state, actor, role):
     resolved = resolve(store, state, actor)
-    return bool(resolved and resolved.get("role") == role)
+    return bool(resolved and (resolved.get("role") == role or
+                state.get("policy", {}).get("phaseReceipts") and resolved.get("role") == "coordinator"
+                and role in {"idea", "brief-analyst", "discovery", "planner"}))
 
 
 def list_participants(store, state):

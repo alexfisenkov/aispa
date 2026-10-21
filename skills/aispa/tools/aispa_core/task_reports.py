@@ -8,10 +8,10 @@ import json
 import os
 import uuid
 
-from . import integration, test_intent
+from . import integration, test_intent, review_policy
 from .contracts import require, task_basis
 from .store import Invalid, confined
-from .team import ROLES, _actor_valid
+from .team import ROLES, _actor_valid, acceptance_chain
 
 
 def template(pipeline, tid, role):
@@ -31,18 +31,20 @@ def template(pipeline, tid, role):
                    for rid, criterion in sorted(pipeline.expected_checks(tid, role))],
         "testSourceChanges": test_intent.source_changes(store, state, tid),
     }
+    if role != "worker" and review_policy.adaptive(attempt):
+        report["verdict"] = None
     if role == "worker":
         require(not rounds or len(rounds) == 1 and not rounds[0]["passed"],
                 "Шаблон worker доступен до критики или для исправления первого FAIL")
         if rounds:
             report.update(previousReport=rounds[0]["report"]["sha256"],
-                          addresses=sorted(f["id"] for f in rounds[0]["findings"]
-                                           if f["severity"] == "blocking"))
+                          addresses=sorted(review_policy.required_ids(rounds[0])))
     elif role == "critic1":
         require(not rounds and attempt["submitted"], "Для critic1 нужна сдача исполнителя до первого раунда")
         require(candidate == attempt["submitted"]["basis"], "Код после сдачи изменён; сначала сдайте исполнение заново")
     elif role == "critic2":
         require(len(rounds) == 1, "Для critic2 нужен ровно один завершённый раунд критики")
+        require(review_policy.second_allowed(attempt), "После первого PASS второй критик не требуется")
         first, repair = rounds[0], attempt.get("repair")
         if first["passed"]:
             require(repair is None, "После первого PASS исправление не ожидается")
@@ -53,12 +55,12 @@ def template(pipeline, tid, role):
         require(candidate == linked["basis"], "Кандидат изменился после первого раунда или исправления")
         report.update(previousReport=first["report"]["sha256"],
                       repairReceipt=repair["report"]["sha256"] if repair else None,
-                      resolutions=[{"id": f["id"], "status": "not_tested", "note": "", "artifact": ""}
-                                   for f in first["findings"] if f["severity"] == "blocking"])
+                      resolutions=[{"id": fid, "status": "not_tested", "note": "", "artifact": ""}
+                                   for fid in sorted(review_policy.required_ids(first))])
     else:
-        require(len(rounds) == 2 and rounds[1]["passed"], "Для acceptor нужны два критика и PASS второго")
-        require(candidate == rounds[1]["basis"], "После второго критика изменён результат")
-        report.update(previousReport=rounds[1]["report"]["sha256"],
+        final = acceptance_chain(store, state, tid, attempt)
+        require(candidate == final["basis"], "После последнего критика изменён результат")
+        report.update(previousReport=final["report"]["sha256"],
                       inheritedProofs=pipeline.inherited_proofs(tid),
                       trace=[{"requirement": req["id"], "brief": req["brief"], "quote": req["quote"],
                               "result": "not_tested", "note": "", "artifact": ""}

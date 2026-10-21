@@ -7,7 +7,7 @@ task team and binds the same final reviewer to both stages.
 import copy
 import json
 
-from . import carryover, cleanroom
+from . import carryover, cleanroom, phase_receipts, execution_obligations
 from .contracts import active, artifact_valid, nonempty, require
 from .store import Invalid, confined, digest, file_hash, timestamp
 
@@ -81,6 +81,7 @@ def _validate_report(store, state, report):
     require(isinstance(report, dict), "Blind-отчёт должен быть объектом JSON")
     require(report.get("basis") == basis(store, state), "Blind-отчёт устарел или относится к другому исходнику")
     _reviewer(state, report.get("reviewer"))
+    phase_receipts.report_actor(store, state, "blind", report)
     require(report.get("independent") is True, "Нужен независимый blind-приёмщик")
     return _observations(store, _sources(store, state), report)
 
@@ -177,6 +178,8 @@ def record(store, state, report):
     result["record"] = store.artifact("blind-records", _json(result), ".json")
     state["blindHistory"] = copy.deepcopy(history)
     state["blindReview"] = result
+    actor = phase_receipts.report_actor(store, state, "blind", report)
+    phase_receipts.record(store, state, "blind", source, actor=actor, basis=report["basis"])
     return copy.deepcopy(result)
 
 
@@ -187,7 +190,8 @@ def valid(store, state):
             return False
         _history(store, state)
         report = json.loads(store.text(saved["report"]))
-        return _validate_report(store, state, report) == saved.get("artifacts")
+        return (_validate_report(store, state, report) == saved.get("artifacts")
+                and phase_receipts.valid(store, state, "blind"))
     except (Invalid, OSError, ValueError, KeyError, TypeError, AttributeError):
         return False
 
@@ -254,6 +258,20 @@ def mapping(store, state, final_report):
         observation = observations[index]
         require("requirement" in row, "blindMapping должен явно назвать requirement или null")
         rid = row["requirement"]
+        if "executionObligation" in row:
+            require(execution_obligations.enabled(state) and rid is None and "scopeDecision" not in row,
+                    "Обязательство исполнения не заменяет продуктовое требование")
+            obligations = {item["id"]: item for item in execution_obligations.obligations(store, state, sealed=True)}
+            obligation = obligations.get(row["executionObligation"])
+            require(obligation is not None and row.get("executionRecord") == obligation["record"]["sha256"],
+                    "Нужна точная ссылка на заранее зафиксированное обязательство исполнения")
+            require(observation["brief"] == obligation["brief"] and observation["quote"] == obligation["quote"],
+                    "Наблюдение должно точно соответствовать отдельной исходной цитате обязательства")
+            failures.append({"kind": "execution", "executionObligation": obligation["id"],
+                             "executionRecord": obligation["record"]["sha256"], "requirement": None,
+                             "criterion": "blind:%d" % index, "status": observation["status"],
+                             "note": observation["note"], "observation": index})
+            continue
         if rid is None:
             require(bool(unmapped), "Потерянную просьбу необходимо явно оставить в unmapped")
             failures.append({"requirement": None, "criterion": "blind:%d" % index, "status": "blocked",
@@ -292,3 +310,39 @@ def mapping(store, state, final_report):
                                  "status": observation["status"], "note": observation["note"], "observation": index})
     require(seen == set(range(len(observations))), "Потеряно исходное blind-наблюдение")
     return failures
+
+
+def derived_waves_valid(store, state):
+    """Derived final checkpoints bind the exact final report and original predicate."""
+    from .contracts import basis as gate_basis, plan_basis, evidence_rows
+    try:
+        for number, wave in state.get("waves", {}).items():
+            if "derivedFrom" not in wave:
+                continue
+            require(state.get("policy", {}).get("finalWaveReuse") and
+                    state.get("policy", {}).get("cleanClone") and len(state["tasks"]) == 1 and
+                    state["tasks"][0]["status"] == "completed" and str(state["tasks"][0]["wave"]) == number,
+                    "Производная сверка разрешена только для одной финальной задачи")
+            gate = state["gates"].get("acceptance", {})
+            require(gate.get("passed") and artifact_valid(store, gate.get("report", {})) and
+                    gate["report"]["sha256"] == wave["derivedFrom"] and
+                    wave["basis"] == gate_basis(store, state, "wave") and
+                    wave["plan"] == plan_basis(state) and artifact_valid(store, wave["report"]),
+                    "Производная сверка волны устарела")
+            saved = json.loads(store.text(wave["report"]))
+            final = json.loads(store.text(gate["report"]))
+            require(saved.get("kind") == "derived-final-wave" and saved.get("run") == state["run"] and
+                    saved.get("wave") == int(number) and saved.get("basis") == wave["basis"] and
+                    saved.get("plan") == wave["plan"] and saved.get("derivedFrom") == wave["derivedFrom"] and
+                    saved.get("blindReport") == wave["blindReport"] == state["blindReview"]["report"]["sha256"] and
+                    saved.get("checks") == final.get("checks") and saved.get("unmapped") == final.get("unmapped") == [] and
+                    saved.get("predicate") == "full-scope-delivered-requirements-passed",
+                    "Производная сверка не соответствует исходной приёмке")
+            expected = {(r["id"], c) for r in active(state) for c in r["acceptance"]}
+            artifacts, failures = evidence_rows(store, final, expected)
+            require(not failures and artifacts == wave.get("artifacts") and
+                    not any(row.get("kind") != "execution" for row in mapping(store, state, final)),
+                    "Производная сверка потеряла критерии или исходное наблюдение")
+        return True
+    except (Invalid, OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False

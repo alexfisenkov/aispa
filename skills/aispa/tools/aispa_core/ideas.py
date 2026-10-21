@@ -56,8 +56,11 @@ def _size(value):
 
 def basis(state):
     """Sealing updates derived core/sealed fields, not the examined owner input."""
-    return digest({"run": state["run"], "briefs": state["briefs"],
-                   "requirements": state["requirements"]})
+    value = {"run": state["run"], "briefs": state["briefs"],
+             "requirements": state["requirements"]}
+    if state.get("policy", {}).get("executionObligations"):
+        value["executionObligations"] = state.get("executionObligations", [])
+    return digest(value)
 
 
 def _briefs(store, state):
@@ -222,7 +225,8 @@ def record(store, state, report):
 def valid(store, state, *, check_sources=True):
     try:
         _saved_report(store, state, check_sources=check_sources)
-        return True
+        from . import phase_receipts
+        return phase_receipts.valid(store, state, "idea")
     except (OSError, ValueError, TypeError, KeyError, RecursionError):
         return False
 
@@ -233,7 +237,8 @@ def view(store, state, *, compact=True):
         report = _saved_report(store, state)
     except (OSError, ValueError, TypeError, KeyError, RecursionError):
         report = None
-    fresh = report is not None
+    from . import phase_receipts
+    fresh = report is not None and phase_receipts.valid(store, state, "idea")
     result = {"basis": basis(state), "recorded": bool(state.get("ideaReview")), "fresh": fresh,
               "assessment": "structure-and-source-checks-only", "requiredAreas": list(AREAS)}
     if state.get("policy", {}).get("productChallenge"):

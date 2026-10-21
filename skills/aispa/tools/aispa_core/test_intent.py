@@ -146,8 +146,9 @@ def _report(store, state, task, attempt, report):
             and report.get("basis") == task_basis(store, state, task["id"]),
             "Test intent: отчёт относится к другой попытке или снимку")
     expected = _criteria(task, report)
+    extra = {"failureChecks"} if state.get("policy", {}).get("errorBoundaryChecks") else set()
     if report["mode"] == "behavior_change":
-        require(set(report) == {"mode", "attempt", "basis", "criteria", "redExecution", "newTestFiles"},
+        require(set(report) == {"mode", "attempt", "basis", "criteria", "redExecution", "newTestFiles"} | extra,
                 "Test intent: неверная схема RED")
         tests = report["newTestFiles"]
         require(isinstance(tests, list) and 0 < len(tests) <= MAX_TESTS,
@@ -168,8 +169,8 @@ def _report(store, state, task, attempt, report):
         require(covered == expected, "Test intent: часть критериев не покрыта новыми тестами")
         require(isinstance(report["redExecution"], dict), "Test intent: нужна ссылка на реальный RED")
     else:
-        require({"mode", "attempt", "basis", "criteria", "notApplicable"} <= set(report)
-                <= {"mode", "attempt", "basis", "criteria", "notApplicable", "prechangeExecution"},
+        require({"mode", "attempt", "basis", "criteria", "notApplicable"} | extra <= set(report)
+                <= {"mode", "attempt", "basis", "criteria", "notApplicable", "prechangeExecution"} | extra,
                 "Test intent: неверная схема исключения")
         reasons = report["notApplicable"]
         require(isinstance(reasons, list) and len(reasons) == len(expected),
@@ -185,6 +186,9 @@ def _report(store, state, task, attempt, report):
             _file(store, row["source"])
             seen.add(row["criterion"])
         _na_guard(store, state, task, attempt, report)
+    if extra:
+        from . import failure_checks
+        failure_checks.validate(task, report, lambda source: _file(store, source))
 
 
 def _red(store, state, task_id, attempt_id, report):
@@ -321,10 +325,15 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
             and latest.get("report", {}).get("criteria") == task.get("criteria"),
             "Test intent: контракт задачи изменился")
     report = latest["report"]
+    if state.get("policy", {}).get("errorBoundaryChecks"):
+        from . import failure_checks
+        failure_checks.validate(task, report)
     if latest["mode"] == "not_applicable" and not historical:
         _na_guard(store, state, task, attempt, report)
     sources = (report["newTestFiles"] if latest["mode"] == "behavior_change" else
                [row["source"] for row in report["notApplicable"]])
+    if state.get("policy", {}).get("errorBoundaryChecks"):
+        sources = [*sources, *failure_checks.sources(report["failureChecks"])]
     if not allow_source_changes:
         for source in sources:
             _file(store, {key: source[key] for key in ("path", "sha256")})
@@ -371,6 +380,9 @@ def source_changes(store, state, task_id):
     report = value["report"]
     sources = (report["newTestFiles"] if value["mode"] == "behavior_change"
                else [row["source"] for row in report["notApplicable"]])
+    if state.get("policy", {}).get("errorBoundaryChecks"):
+        from . import failure_checks
+        sources = [*sources, *failure_checks.sources(report["failureChecks"])]
     changes = {}
     for source in sources:
         path = confined(store.root, relative_name(source["path"]))
@@ -394,6 +406,7 @@ def view(store, state, task_id):
                    contract["report"].get("notApplicable", []))
         return {"present": True, "valid": valid(store, state, task_id), "mode": mode,
                 "attempt": attempt["id"], "revision": contract["revision"],
-                "sourceBasis": contract["sourceBasis"], "sourceCount": len(sources)}
+                "sourceBasis": contract["sourceBasis"], "sourceCount": len(sources),
+                "failureCaseCount": len(contract["report"].get("failureChecks", {}).get("cases", []))}
     except (Invalid, OSError, ValueError, TypeError, KeyError):
         return {"present": True, "valid": False, "mode": None, "attempt": attempt["id"]}

@@ -14,6 +14,7 @@ from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
 from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 from aispa_core.cli_output import emit
+from aispa_core import phase_receipts
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -45,10 +46,15 @@ def parser():
     init.add_argument("--depth", choices=("strict", "balanced", "deep"), default="balanced")
     controls.parsers(sub)
     for name in ("brief", "requirements", "spec", "coverage", "acceptance"):
-        sub.add_parser(name).add_argument("--file", required=True)
+        action = sub.add_parser(name)
+        action.add_argument("--file", required=True)
+        if name == "coverage":
+            action.add_argument("--actor")
     plan = sub.add_parser("plan"); plan.add_argument("--file", required=True); plan.add_argument("--review")
+    plan.add_argument("--actor")
     sub.add_parser("plan-check").add_argument("--file", required=True)
     idea = sub.add_parser("idea"); idea.add_argument("--file"); idea.add_argument("--full", action="store_true")
+    idea.add_argument("--actor")
     commands = sub.add_parser("commands")
     commands.add_argument("--purpose", choices=executions.PURPOSES)
     commands.add_argument("--kind", choices=executions.KINDS)
@@ -76,6 +82,7 @@ def parser():
     ctx.add_argument("--write", action="store_true", help="Сохранить пакет контекста, вернуть только путь и basis")
     discover = sub.add_parser("discover")
     discover.add_argument("--file")
+    discover.add_argument("--actor")
     discover.add_argument("--include", action="append", help="Дополнительный безопасный исходник; можно повторять")
     sub.add_parser("discovery")
     sub.add_parser("memory")
@@ -186,7 +193,10 @@ def execute(args):
                                    "planReview": True, "projectKnowledge": True, "productChallenge": True,
                                    "deliveryPlan": True, "repairDiagnosis": True, "deliveryDocs": True,
                                    "sourceAccounting": True, "designContract": True, "allRoleUsage": True,
-                                   "integrationReview": True, "testIntent": True}
+                                   "integrationReview": True, "testIntent": True,
+                                   "adaptiveCritique": True, "phaseReceipts": True,
+                                   "executionObligations": True, "finalWaveReuse": True,
+                                   "errorBoundaryChecks": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
                 state["runtime"] = args.runtime
@@ -236,11 +246,12 @@ def execute(args):
             from aispa_core.dashboard_export import archive
             receipt = archive(store, state)
         elif action in ("brief", "requirements", "spec", "coverage", "acceptance"):
-            result = getattr(flow, action)(args.file)
+            result = (flow.coverage(args.file, actor=args.actor) if action == "coverage"
+                      else getattr(flow, action)(args.file))
             if isinstance(result, bool):
                 ok = result
         elif action == "plan":
-            flow.plan(args.file, review_path=args.review)
+            flow.plan(args.file, review_path=args.review, actor=args.actor)
             receipt = state.get("planReview")
         elif action == "plan-check":
             print(json.dumps(planning.analyze(store, state, json.loads(flow.read_input(args.file))), ensure_ascii=False, indent=2))
@@ -248,7 +259,9 @@ def execute(args):
         elif action == "idea":
             if args.file:
                 flow.running()
+                author = phase_receipts.authorize(store, state, "idea", args.actor)
                 receipt = ideas.record(store, state, json.loads(flow.read_input(args.file)))
+                phase_receipts.record(store, state, "idea", receipt, actor=author)
                 flow.save("idea-reviewed")
             else:
                 print(json.dumps(ideas.view(store, state, compact=not args.full), ensure_ascii=False, indent=2))
@@ -295,7 +308,9 @@ def execute(args):
         elif action == "discover":
             flow.running()
             if args.file:
+                author = phase_receipts.authorize(store, state, "discovery", args.actor)
                 receipt = discovery.record(store, state, json.loads(flow.read_input(args.file)))
+                phase_receipts.record(store, state, "discovery", receipt, actor=author)
                 flow.save("project-discovery-recorded")
             else:
                 metadata_receipt = {}

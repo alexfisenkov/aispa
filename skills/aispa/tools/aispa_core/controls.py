@@ -3,10 +3,10 @@ import argparse
 from . import participants, preparation, briefmap, design_contract, telemetry, task_reports
 from .contracts import require
 
-READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context"}
+READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context", "execution-obligations"}
 WRITES = {"brief-extract", "brief-review", "brief-map", "scenarios", "interfaces",
           "reference", "participant", "usage-import", "wait", "answered",
-          "journal-verify", "journal-reconcile", "test-intent"}
+          "journal-verify", "journal-reconcile", "test-intent", "execution-obligation"}
 
 
 def parsers(sub):
@@ -14,14 +14,14 @@ def parsers(sub):
         sub.add_parser(name)
     t = sub.add_parser("template")
     t.add_argument("kind", choices=("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces",
-                                   *task_reports.ROLES))
+                                   "failure-checks", *task_reports.ROLES))
     t.add_argument("--actor")
     t.add_argument("--task")
     t.add_argument("--write", action="store_true")
     test = sub.add_parser("test-intent")
     test.add_argument("--task", required=True)
     test.add_argument("--file")
-    for name in ("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces", "reference", "journal-reconcile"):
+    for name in ("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces", "reference", "journal-reconcile", "execution-obligation"):
         sub.add_parser(name).add_argument("--file", required=True)
     p = sub.add_parser("participant")
     p.add_argument("--role", required=True, choices=sorted(participants.ROLES - participants.TASK_ROLES - {"knowledge-writer"}))
@@ -49,6 +49,14 @@ def execute(store, state, flow, args):
     import json
     action = args.action
     actor_check = preparation.actor_check(store)
+    if action in ("execution-obligation", "execution-obligations"):
+        from . import execution_obligations
+        if action == "execution-obligations":
+            return execution_obligations.view(store, state)
+        flow.running()
+        result = execution_obligations.record(store, state, json.loads(flow.read_input(args.file)))
+        flow.save("execution-obligation-recorded:" + result["id"])
+        return result
     if action == "test-intent":
         from . import test_intent
         if not args.file:
@@ -64,6 +72,11 @@ def execute(store, state, flow, args):
     if action == "preparation":
         return {"brief": briefmap.view(store, state, actor_check), "design": design_contract.view(store, state)}
     if action == "template":
+        if args.kind == "failure-checks":
+            require(args.task is None and args.actor is None and not args.write,
+                    "Шаблон failure-checks выводится без --task, --actor и --write")
+            from . import failure_checks
+            return failure_checks.template()
         if args.kind in task_reports.ROLES:
             require(args.task, "Для шаблона роли нужен --task")
             require(args.actor is None, "Actor шаблона задачи берётся из назначенной роли; --actor не нужен")

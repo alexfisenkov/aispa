@@ -4,7 +4,7 @@ from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
 from .team import _record_valid, task_proof_valid
-from . import carryover
+from . import carryover, review_policy, execution_obligations, phase_receipts
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи"}
@@ -64,6 +64,8 @@ def _phase_steps(store, state, task, proof_current):
                 result[name] = ("done" if record.get("passed") else "blocked") if _record_intact(store, record) else "stale"
         if first and first.get("passed") and _record_intact(store, first) and not repair:
             result["repair"] = "skipped"
+            if review_policy.adaptive(attempt) and not second:
+                result["critic_2"] = "skipped"
         latest = acceptance or second or repair or first or submitted
         # A newer repair legitimately has a different basis from critic 1.
         # Compare only the latest candidate with today's code.
@@ -121,6 +123,13 @@ def project(store, state):
         "inherited": [{"id": item["id"], "status": item["status"], "text": item["requirement"]["text"]}
                       for item in carryover.unresolved(store, state)],
     }
+    execution = execution_obligations.view(store, state)
+    results = execution["results"] if state.get("finishedAt") else [
+        {"id": row["id"], "event": row["event"], "deadline": row["deadline"],
+         "status": "pending", "note": "Execution event has not been attested"}
+        for row in execution["obligations"]]
+    remaining["execution"] = [row for row in results if row["status"] != "passed"]
+    remaining["inheritedExecution"] = carryover.unresolved_execution(store, state)
     tasks = []
     for task in state["tasks"]:
         steps = _phase_steps(store, state, task, current.get(task["id"], False))
@@ -130,6 +139,8 @@ def project(store, state):
                           phaseTiming=None if phase_stale else phase_view(task, observed),
                           phaseSteps=steps, phaseStale=phase_stale,
                           proofCurrent=current.get(task["id"], False),
+                          maximumCriticRounds=2,
+                          reviewPolicy=review_policy.mode((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]),
                           criticRounds=len((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1].get("rounds", []))))
     estimate_tasks = [dict(t, status="pending") if t["status"] == "completed" and not current.get(t["id"]) else t
                       for t in state["tasks"]]
@@ -139,6 +150,8 @@ def project(store, state):
             "updatedAt": state["updatedAt"], "observedAt": observed, "gates": gates,
             "verified": verified(store, state), "requirements": rows, "tasks": tasks,
             "remaining": remaining, "remainingAssessed": current_assessment, "decisions": state["notes"],
+            "executionPolicy": execution_obligations.enabled(state),
+            "phaseAuthorship": phase_receipts.summary(store, state),
             "elapsedSeconds": elapsed(state, observed), "finishedAt": state.get("finishedAt"),
             "estimate": estimate(estimate_tasks, status, observed), "activity": state.get("activity"),
             "waiting": state.get("waiting"), "events": _events(store),

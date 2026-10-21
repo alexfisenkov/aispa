@@ -90,8 +90,9 @@ def _source_rows(store, state, report, role, actor_check):
                 for start, end, chunk in _units(text)}
     seen = {}
     for row in rows:
-        _need(isinstance(row, dict) and set(row) ==
-              {"brief", "start", "end", "text", "kind", "summary", "reason"},
+        fields = {"brief", "start", "end", "text", "kind", "summary", "reason"}
+        _need(isinstance(row, dict) and (set(row) == fields or
+              state.get("policy", {}).get("executionObligations") and set(row) == fields | {"execution"}),
               "нужны точный диапазон, текст, вид, смысл и причина")
         key = (row["brief"], row["start"], row["end"])
         _need(isinstance(row["brief"], str) and type(row["start"]) is int and type(row["end"]) is int and
@@ -102,6 +103,10 @@ def _source_rows(store, state, report, role, actor_check):
         _need(isinstance(row["reason"], str) and len(row["reason"]) <= 1200
               and (row["kind"] != "context" or nonempty(row["reason"])),
               "контекст требует отдельного объяснения")
+        if "execution" in row:
+            from . import execution_obligations
+            _need(row["kind"] == "intent", "Срок исполнения должен оставаться исходным намерением")
+            execution_obligations.annotation(row["execution"], row["text"])
         seen[key] = row
     _need(set(seen) == set(expected), "потеряны слова исходного брифа; учтите каждый фрагмент")
     _need(len(json.dumps(report, ensure_ascii=False, allow_nan=False)) <= MAX_REPORT_CHARS,
@@ -136,6 +141,9 @@ def _save(store, state, report, key, history, group):
                "basis": report["basis"]}
     state[key] = receipt
     state[history] = [*old, dict(receipt)]
+    from . import phase_receipts
+    phase = {"briefExtraction": "brief-analyst", "briefReview": "brief-reviewer", "briefMap": "brief-map"}[key]
+    phase_receipts.record(store, state, phase, receipt, actor=report["actor"], basis=report["basis"])
     return receipt
 
 
@@ -155,7 +163,9 @@ def record_review(store, state, report, actor_check):
 def reconciliation_basis(state):
     return digest({"source": source_basis(state),
                    "extraction": state.get("briefExtraction"), "review": state.get("briefReview"),
-                   "requirements": state["requirements"]})
+                   "requirements": state["requirements"],
+                   **({"executionObligations": state.get("executionObligations", [])}
+                      if state.get("policy", {}).get("executionObligations") else {})})
 
 
 def _reconciliation(store, state, report, actor_check):
@@ -173,13 +183,21 @@ def _reconciliation(store, state, report, actor_check):
     # still has to remain accounted for, rather than disappear from this map.
     reqs = {r["id"]: r for r in state["requirements"]
             if r.get("kind", "requested") != "addition"}
+    from . import execution_obligations
+    obligations = {row["id"]: row for row in execution_obligations.obligations(store, state)}
+    mapped_execution = set()
     rows = report["rows"]
     _need(isinstance(rows, list) and len(rows) == len(left), "сверка должна сохранить все исходные фрагменты")
     seen, mapped, unresolved = set(), set(), False
     for row in rows:
-        _need(isinstance(row, dict) and set(row) ==
+        _need(isinstance(row, dict) and set(row) in (
               {"brief", "start", "end", "disposition", "requirements", "reason"},
+              {"brief", "start", "end", "disposition", "requirements", "reason", "executionObligations"}),
               "строка сверки неполна")
+        execution_ids = row.get("executionObligations", [])
+        _need(isinstance(execution_ids, list) and all(isinstance(eid, str) and eid in obligations for eid in execution_ids)
+              and len(execution_ids) == len(set(execution_ids)), "Неизвестное обязательство исполнения")
+        _need(not execution_ids or row["disposition"] == "execution", "Обязательство нельзя скрыть в другом виде строки")
         _need(isinstance(row["brief"], str) and type(row["start"]) is int
               and type(row["end"]) is int, "некорректный диапазон сверки")
         key = (row["brief"], row["start"], row["end"])
@@ -196,6 +214,14 @@ def _reconciliation(store, state, report, actor_check):
         elif kinds == {"context"}:
             _need(disposition == "context" and row["requirements"] == [],
                   "контекст нельзя выдать за дополнение или требование")
+        elif disposition == "execution":
+            _need(execution_ids and row["requirements"] == [], "Исполнение требует явного списка executionObligations")
+            for eid in execution_ids:
+                obligation = obligations[eid]
+                _need(obligation["brief"] == key[0] and left[key]["text"] == obligation["quote"],
+                      "Обязательство должно точно цитировать отдельный исходный фрагмент")
+                execution_obligations.bind_timing(obligation, left[key].get("execution"), right[key].get("execution"))
+                mapped_execution.add(eid)
         else:
             ids = row["requirements"]
             _need(disposition == "requirement" and isinstance(ids, list) and ids
@@ -213,7 +239,7 @@ def _reconciliation(store, state, report, actor_check):
     _need(seen == set(left), "часть исходного текста не сверена")
     _need(len(json.dumps(report, ensure_ascii=False, allow_nan=False)) <= MAX_REPORT_CHARS,
           "слишком большой отчёт сверки")
-    return not unresolved and mapped == set(reqs)
+    return not unresolved and mapped == set(reqs) and mapped_execution == set(obligations)
 
 
 def record_reconciliation(store, state, report, actor_check):
@@ -224,7 +250,10 @@ def record_reconciliation(store, state, report, actor_check):
 def valid(store, state, actor_check):
     try:
         report = _saved(store, state, "briefMap", "briefMapHistory", "brief-maps")
-        return _reconciliation(store, state, report, actor_check)
+        from . import phase_receipts
+        return (_reconciliation(store, state, report, actor_check) and
+                all(phase_receipts.valid(store, state, phase) for phase in
+                    ("brief-analyst", "brief-reviewer", "brief-map")))
     except (Invalid, OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
         return False
 

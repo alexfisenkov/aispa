@@ -191,7 +191,7 @@ def check(store, state, tid, role, report):
     if tid != selected:
         _need("branchReview" not in report, "branchReview допустим только для итоговой задачи")
         return [], []
-    _need(role in ("critic1", "critic2"), "общее ревью делают два штатных критика")
+    _need(role in ("critic1", "critic2"), "общее ревью делает штатный критик выполняемого раунда")
     _need(choose_task(store, state, state["tasks"]) == tid, "итоговая задача больше не охватывает план")
     view = context(store, state, tid)
     branch = report.get("branchReview")
@@ -261,17 +261,14 @@ def proof_valid(store, state):
     try:
         tid = state["integrationTask"]
         _need(choose_task(store, state, state["tasks"]) == tid, "итоговая задача изменена")
-        from .team import direct_proof_current
+        from .team import direct_proof_current, acceptance_chain
         _need(direct_proof_current(store, state, tid), "нет текущего доказательства итоговой задачи")
         attempt = state["taskHistory"][tid][-1]
-        rounds = attempt["rounds"]
-        _need(len(rounds) == 2 and all(record_valid(store, state, tid, "critic" + str(i + 1), record)
-                                       for i, record in enumerate(rounds)),
-              "нет двух действительных общих ревью")
+        final = acceptance_chain(store, state, tid, attempt)
         view = context(store, state, tid)
-        second = json.loads(store.text(rounds[1]["report"]))["branchReview"]
-        _need(second["code"] == view["code"] and second["basis"] == view["basis"],
-              "после второго общего ревью полный код изменён")
+        branch = json.loads(store.text(final["report"]))["branchReview"]
+        _need(branch["code"] == view["code"] and branch["basis"] == view["basis"],
+              "после последнего обязательного общего ревью полный код изменён")
         return True
     except (Invalid, OSError, ValueError, KeyError, TypeError, RecursionError):
         return False

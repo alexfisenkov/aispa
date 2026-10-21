@@ -1,4 +1,4 @@
-"""Recorded native team, two critic rounds and source-bound task acceptance.
+"""Recorded native team, bounded criticism and source-bound task acceptance.
 
 This module records declared native identities; it does not authenticate a
 model or spawn agents. Role cards and decisions are immutable local artifacts.
@@ -8,7 +8,7 @@ import copy
 import json
 import uuid
 
-from . import timing, repairs, participants, integration, test_intent
+from . import timing, repairs, participants, integration, test_intent, review_policy
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -62,6 +62,7 @@ def _role_data(store, attempt, role):
             and card.get("contract") == attempt.get("contract")
             and card.get("checks") == record.get("checks")
             and card.get("specialization") == record.get("specialization")
+            and card.get("reviewPolicy", review_policy.LEGACY) == review_policy.mode(attempt)
             and all(artifact_valid(store, item) for item in card.get("briefs", []))
             and artifact_valid(store, card.get("spec", {})),
             "Карточка роли не соответствует попытке")
@@ -141,6 +142,79 @@ def _proof_ref(state, tid):
     return {"task": tid, "attempt": attempt["id"], "report": acceptance.get("report", {}).get("sha256")}
 
 
+def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
+    """Validate the executed critic chain once for live and historical consumers.
+
+    This does not assert current code or dependency acceptance; those checks
+    belong to the caller. It returns the actual final critic, never a proxy.
+    """
+    rounds = attempt.get("rounds", [])
+    require(1 <= len(rounds) <= 2 and [r.get("number") for r in rounds] == list(range(1, len(rounds) + 1)),
+            "Нет последовательной цепочки критиков")
+    first, final = rounds[0], rounds[-1]
+    adaptive = review_policy.adaptive(attempt)
+    expected_count = 1 if adaptive and first.get("passed") else 2
+    require(len(rounds) == expected_count and final.get("passed") is True,
+            "До приёмки нужен PASS последнего обязательного критика")
+    roles = ["worker", "critic1"] + (["critic2"] if len(rounds) == 2 else [])
+    if require_acceptor:
+        roles.append("acceptor")
+    for role in ROLES:
+        _role_data(store, attempt, role)
+    require(all(_actor_valid(store, state, attempt, role) for role in roles),
+            "Повреждена независимая команда задачи")
+    if adaptive and len(rounds) == 1:
+        require(not attempt.get("actors", {}).get("critic2"), "После первого PASS второй critic actor не требуется")
+    actor_ids = [attempt["actors"][role] for role in roles]
+    reviewers = {attempt["actors"][role] for role in roles if role != "worker"}
+    require(len(set(actor_ids)) == len(actor_ids) and not set(attempt.get("writers", [])) & reviewers,
+            "Критики и приёмщик должны быть независимы от исполнителей")
+    submitted, repair = attempt.get("submitted"), attempt.get("repair")
+    records = [submitted, *rounds, *([repair] if repair else [])]
+    require(all(_record_valid(store, record) for record in records), "Повреждена цепочка исполнителя или критиков")
+    require(_writer_valid(store, state, attempt, submitted.get("actor"))
+            and first["basis"] == submitted["basis"], "Первый критик потерял исходную сдачу")
+    for number, record in enumerate(rounds, 1):
+        require(record["actor"] == attempt["actors"]["critic" + str(number)], "Отчёт критика подписан другим actor")
+        if adaptive:
+            report = _json(store.text(record["report"]))
+            failures = [row for row in report.get("checks", []) if row.get("status") != "passed"]
+            failures += [row for row in report.get("branchReview", {}).get("axes", []) if row.get("status") != "passed"]
+            clean = not failures and not report.get("unmapped") and not review_policy.required_ids(report)
+            clean = clean and not any(row.get("status") == "unresolved" for row in report.get("resolutions", []))
+            value = review_policy.verdict(report, clean=clean, critic=True)
+            require(record.get("verdict") == value and record["passed"] == (value == "PASS")
+                    and record.get("findings") == report.get("findings"), "Сохранённый verdict критика расходится с отчётом")
+        if state.get("policy", {}).get("integrationReview"):
+            require(integration.record_valid(store, state, tid, "critic" + str(number), record),
+                    "Повреждено общее ревью выполненного раунда")
+    if first["passed"]:
+        require(repair is None, "Неожиданное исправление после PASS")
+        if len(rounds) == 2:
+            require(final.get("repairReceipt") is None and final["basis"] == first["basis"],
+                    "После PASS первого критика изменён кандидат")
+    else:
+        require(repair and _writer_valid(store, state, attempt, repair.get("actor"))
+                and repair.get("previousReport") == first["report"]["sha256"]
+                and final.get("repairReceipt") == repair["report"]["sha256"] and final["basis"] == repair["basis"],
+                "Второй критик не связан с исправлением первого отчёта")
+        required = review_policy.required_ids(first)
+        require(set(repair.get("addresses", [])) == required, "Исправление потеряло обязательные замечания")
+        if state.get("policy", {}).get("repairDiagnosis"):
+            require(repair.get("diagnosis") == repairs.worker_guard(store, state, tid, repair["actor"]),
+                    "Исправление потеряло диагностику")
+    if len(rounds) == 2:
+        require(final.get("previousReport") == first["report"]["sha256"], "Второй раунд не связан с первым")
+        resolutions = _json(store.text(final["report"])).get("resolutions", [])
+        require({row["id"] for row in resolutions} == review_policy.required_ids(first)
+                and all(row["status"] in ("resolved", "rejected") for row in resolutions),
+                "Второй критик не закрыл обязательные замечания")
+    if state.get("policy", {}).get("testIntent"):
+        require(attempt.get("testIntent") and all(record.get("testIntent") == attempt["testIntent"] for record in records)
+                and test_intent.history_valid(store, state, tid), "Повреждена история тестового контракта")
+    return final
+
+
 def _historical_one(store, state, tid):
     task = next((t for t in state["tasks"] if t["id"] == tid), None)
     if not task or task.get("status") != "completed":
@@ -152,46 +226,19 @@ def _historical_one(store, state, tid):
     if attempt.get("terminal") or not accepted or not accepted.get("passed"):
         return None
     cards = {role: _role_data(store, attempt, role) for role in ROLES}
-    if not all(_actor_valid(store, state, attempt, role) for role in ROLES):
+    final = acceptance_chain(store, state, tid, attempt)
+    if (not _record_valid(store, accepted) or accepted.get("actor") != attempt["actors"]["acceptor"]
+            or accepted["basis"] != final["basis"] or accepted.get("previousReport") != final["report"]["sha256"]):
         return None
-    if (len(set(attempt["actors"].values())) != len(ROLES)
-            or set(attempt.get("writers", [])) & {attempt["actors"][r] for r in ROLES if r != "worker"}):
+    if state.get("policy", {}).get("testIntent") and accepted.get("testIntent") != attempt.get("testIntent"):
         return None
-    submitted, repair, rounds = attempt.get("submitted"), attempt.get("repair"), attempt.get("rounds", [])
-    if len(rounds) != 2 or [r.get("number") for r in rounds] != [1, 2]:
-        return None
-    first, second = rounds
-    if not submitted or not all(_record_valid(store, r) for r in (submitted, first, second, accepted)):
-        return None
-    if state.get("policy", {}).get("testIntent") and (
-            not attempt.get("testIntent") or any(r.get("testIntent") != attempt["testIntent"]
-                                                for r in (submitted, first, second, accepted))
-            or not test_intent.history_valid(store, state, tid)):
-        return None
-    if state.get("policy", {}).get("integrationReview") and not all(
-            integration.record_valid(store, state, tid, "critic" + str(n), record)
-            for n, record in enumerate(rounds, 1)):
-        return None
-    if not second.get("passed") or not _writer_valid(store, state, attempt, submitted.get("actor")):
-        return None
-    if first.get("actor") != attempt["actors"]["critic1"] or second.get("actor") != attempt["actors"]["critic2"]:
-        return None
-    if first["basis"] != submitted["basis"] or second.get("previousReport") != first["report"]["sha256"]:
-        return None
-    if first.get("passed"):
-        if repair is not None or second.get("repairReceipt") is not None or second["basis"] != first["basis"]:
+    if review_policy.adaptive(attempt):
+        report = _json(store.text(accepted["report"]))
+        clean = (not report.get("unmapped") and not review_policy.required_ids(report)
+                 and all(r.get("status") == "passed" for r in report.get("checks", []))
+                 and all(r.get("result") == "aligned" for r in report.get("trace", [])))
+        if review_policy.verdict(report, clean=clean) != "PASS" or accepted.get("verdict") != "PASS":
             return None
-    else:
-        if (not repair or not _record_valid(store, repair) or not _writer_valid(store, state, attempt, repair.get("actor"))
-                or repair.get("previousReport") != first["report"]["sha256"]
-                or second.get("repairReceipt") != repair["report"]["sha256"] or second["basis"] != repair["basis"]):
-            return None
-        if state.get("policy", {}).get("repairDiagnosis"):
-            if repair.get("diagnosis") != repairs.worker_guard(store, state, tid, repair["actor"]):
-                return None
-    if (accepted.get("actor") != attempt["actors"]["acceptor"] or accepted["basis"] != second["basis"]
-            or accepted.get("previousReport") != second["report"]["sha256"]):
-        return None
     proof = task.get("proof", {})
     if proof != {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}:
         return None
@@ -243,6 +290,13 @@ def direct_proof_current(store, state, tid):
         if not historical_proof_valid(store, state, tid):
             return False
         attempt = _latest(state, tid)
+        if state.get("policy", {}).get("testIntent"):
+            repaired = bool(attempt.get("rounds") and not attempt["rounds"][0]["passed"] and attempt.get("repair"))
+            if not test_intent.valid(store, state, tid, allow_source_changes=repaired):
+                return False
+            accepted = _json(store.text(attempt["acceptance"]["report"]))
+            if accepted.get("testSourceChanges", []) != test_intent.source_changes(store, state, tid):
+                return False
         return (attempt["contract"] == task_contract(state, tid)
                 and attempt["acceptance"]["basis"] == task_basis(store, state, tid)
                 and task_verified(store, state, tid))
@@ -291,6 +345,7 @@ class TaskPipeline:
 
     def _new(self, tid, authorization=None):
         return {"id": uuid.uuid4().hex, "briefCount": len(self.s["briefs"]), "contract": None,
+                "reviewPolicy": review_policy.selected(self.s),
                 "roles": {}, "actors": {}, "writers": [], "actorHistory": [], "rounds": [], "submitted": None, "repair": None,
                 "acceptance": None, "terminal": False, "authorization": authorization,
                 "createdAt": timestamp(), "cardHistory": [], "submissionHistory": [], "repairHistory": []}
@@ -330,6 +385,7 @@ class TaskPipeline:
                        roles={}, actors={}, writers=[], submitted=None, repair=None,
                        acceptance=None, verification=None)
         context = {"schema": 1, "project": self.s["title"], "run": self.s["run"], "task": tid,
+                   "reviewPolicy": review_policy.mode(attempt),
                    "attempt": attempt["id"], "contract": attempt["contract"], "title": task["title"],
                    "zones": task["zones"], "readZones": task.get("readZones", []),
                    "closure": [definition(t) for t in task_closure(self.s, tid)],
@@ -346,6 +402,8 @@ class TaskPipeline:
             all_checks = list(dict.fromkeys(task["criteria"] + LENSES[role] + checks))
             if self.s.get("policy", {}).get("testIntent") and role.startswith("critic"):
                 all_checks.append("Тестовый контракт и изменения тестов действительно проверяют критерии задачи")
+            if self.s.get("policy", {}).get("errorBoundaryChecks") and role != "worker":
+                all_checks.append("Проверены применимые отказные границы failureChecks, сохранность данных и реальные отрицательные сценарии")
             if self.s.get("policy", {}).get("integrationReview") and tid == self.s.get("integrationTask") and role.startswith("critic"):
                 all_checks += ["Вся ветка: " + axis for axis in integration.AXES]
             card = {**context, "role": role, "specialization": specialization, "checks": all_checks,
@@ -396,6 +454,27 @@ class TaskPipeline:
         require(type(fresh) is bool and (role == "worker" or fresh), "Проверяющему нужен новый независимый контекст")
         attempt = self._attempt(tid)
         require(not attempt["terminal"] and not attempt["acceptance"], "Попытка уже завершена")
+        if role == "critic2" and review_policy.adaptive(attempt):
+            require(review_policy.second_allowed(attempt), "Второй критик назначается только после первого WARN/BLOCK/FAIL")
+            first, repair = attempt["rounds"][0], attempt.get("repair")
+            require(repair and _record_valid(self.store, repair) and repair.get("passed") is True
+                    and _writer_valid(self.store, self.s, attempt, repair.get("actor")),
+                    "До назначения critic2 нужен действительный receipt исправления")
+            repaired_report = _json(self.store.text(repair["report"]))
+            required = review_policy.required_ids(first)
+            addressed = repair.get("addresses")
+            require(repair.get("previousReport") == first["report"]["sha256"]
+                    and repaired_report.get("previousReport") == first["report"]["sha256"]
+                    and isinstance(addressed, list) and all(nonempty(fid) for fid in addressed)
+                    and len(addressed) == len(set(addressed)) and set(addressed) == required
+                    and repaired_report.get("addresses") == addressed,
+                    "Receipt исправления не связан со всеми замечаниями первого критика")
+            require(repair["basis"] == task_basis(self.store, self.s, tid)
+                    and task_verified(self.store, self.s, tid),
+                    "До назначения critic2 исправленный кандидат должен оставаться актуальным и проверенным")
+            if self.s.get("policy", {}).get("repairDiagnosis"):
+                require(repair.get("diagnosis") == repairs.worker_guard(self.store, self.s, tid, repair["actor"]),
+                        "Receipt исправления не связан с действительной диагностикой")
         require(attempt["contract"] == task_contract(self.s, tid), "Контракт роли устарел; подготовьте команду")
         _role_data(self.store, attempt, role)
         aid = digest([runtime, native_id, session])
@@ -512,12 +591,12 @@ class TaskPipeline:
             require(isinstance(finding, dict) and nonempty(finding.get("id")) and finding["id"] not in seen,
                     "Нужны уникальные ID замечаний")
             seen.add(finding["id"])
-            require(finding.get("severity") in ("blocking", "note") and nonempty(finding.get("text"))
+            require(finding.get("severity") in ("blocking", "warning", "note") and nonempty(finding.get("text"))
                     and nonempty(finding.get("criterion")) and finding["criterion"] in {c for _r, c in expected}, "Некорректное замечание критика")
         return findings
 
     def _resolutions(self, report, first):
-        expected = {f["id"] for f in first["findings"] if f["severity"] == "blocking"}
+        expected = review_policy.required_ids(first)
         rows = report.get("resolutions")
         require(isinstance(rows, list), "Второму критику нужен список resolutions")
         seen, artifacts, unresolved = set(), [], False
@@ -533,13 +612,15 @@ class TaskPipeline:
                 found, _ = evidence_rows(self.store, {"checks": [{"requirement": "finding", "criterion": row["id"],
                     "status": "passed", "note": row["note"], "artifact": row.get("artifact")}]}, {("finding", row["id"])})
                 artifacts.extend(found)
-        require(seen == expected, "Второй критик не разобрал все блокирующие замечания")
+        require(seen == expected, "Второй критик не разобрал все обязательные замечания")
         return artifacts, unresolved
 
     def review(self, tid, number, path):
         task, attempt = self._live(tid)
         require(type(number) is int and number in (1, 2) and number == len(attempt["rounds"]) + 1,
-                "Критика идёт ровно в два последовательных раунда")
+                "Критика ограничена двумя последовательными раундами")
+        if number == 2:
+            require(review_policy.second_allowed(attempt), "После первого PASS второй критик не требуется")
         submitted = attempt["submitted"]
         require(submitted and _record_valid(self.store, submitted), "Нет целой сдачи исполнителя")
         role = "critic" + str(number)
@@ -567,10 +648,19 @@ class TaskPipeline:
             found, unresolved = self._resolutions(report, first)
             artifacts.extend(found)
             extra.update(previousReport=first["report"]["sha256"], repairReceipt=repair["report"]["sha256"] if repair else None)
-        passed = not failures and not report["unmapped"] and not unresolved and not any(f["severity"] == "blocking" for f in findings)
+        passed = not failures and not report["unmapped"] and not unresolved and not review_policy.required_ids(report)
+        if review_policy.adaptive(attempt):
+            required_findings = [f for f in findings if f["severity"] in ("blocking", "warning")]
+            require(all(any(f["criterion"] == row.get("criterion", "Вся ветка: " + row.get("axis", ""))
+                            for f in required_findings) for row in failures),
+                    "Каждая проваленная проверка требует обязательного замечания с ID")
+            # An unresolved ID from round 1 is already a recorded obligation;
+            # critic2 need not invent a duplicate new finding to block it.
+            extra["verdict"] = review_policy.verdict(report, clean=passed, critic=not unresolved)
+            passed = extra["verdict"] == "PASS"
         attempt["rounds"].append(self._record(tid, role, text, report, artifacts, passed=passed, **extra))
         if number == 1:
-            task["phase"] = "critic_2" if passed else "repair"
+            task["phase"] = ("task_acceptance" if review_policy.adaptive(attempt) else "critic_2") if passed else "repair"
             self.host.save("task-critic-1:" + tid)
         elif passed:
             task["phase"] = "task_acceptance"
@@ -590,11 +680,11 @@ class TaskPipeline:
         diagnosis = repairs.worker_guard(self.store, self.s, tid) if self.s.get("policy", {}).get("repairDiagnosis") else None
         text, report, artifacts, failures = self._read(tid, "worker", path)
         require(report.get("previousReport") == first["report"]["sha256"], "Исправление не связано с первым отчётом")
-        expected = {f["id"] for f in first["findings"] if f["severity"] == "blocking"}
+        expected = review_policy.required_ids(first)
         addressed = report.get("addresses")
         require(isinstance(addressed, list) and all(nonempty(f) for f in addressed)
                 and len(addressed) == len(set(addressed)) and set(addressed) == expected,
-                "Исправление должно разобрать все блокирующие замечания")
+                "Исправление должно разобрать все обязательные замечания")
         require(not failures and not report["unmapped"], "Исправление не прошло проверки исполнителя")
         if attempt["repair"]:
             attempt["repairHistory"].append(attempt["repair"])
@@ -631,15 +721,10 @@ class TaskPipeline:
 
     def accept(self, tid, path):
         task, attempt = self._live(tid)
-        require(len(attempt["rounds"]) == 2 and attempt["rounds"][1]["passed"], "До приёмки обязательны два критика")
-        second = attempt["rounds"][1]
-        require(all(_record_valid(self.store, record) for record in [attempt["submitted"], *attempt["rounds"],
-                    *([attempt["repair"]] if attempt["repair"] else [])]), "Повреждена цепочка исполнителя или критиков")
-        require(all(_actor_valid(self.store, self.s, attempt, role) for role in ROLES)
-                and len(set(attempt["actors"].values())) == len(ROLES), "Повреждена независимая команда задачи")
+        final = acceptance_chain(self.store, self.s, tid, attempt)
         text, report, artifacts, failures = self._read(tid, "acceptor", path)
-        require(report["basis"] == second["basis"], "После второго критика изменён результат; автоматический третий раунд запрещён")
-        require(report.get("previousReport") == second["report"]["sha256"], "Приёмка не связана со вторым критиком")
+        require(report["basis"] == final["basis"], "После последнего критика изменён результат; автоматический дополнительный раунд запрещён")
+        require(report.get("previousReport") == final["report"]["sha256"], "Приёмка не связана с последним обязательным критиком")
         inherited = self.inherited_proofs(tid)
         reported = report.get("inheritedProofs")
         require(isinstance(reported, list) and all(isinstance(row, dict) for row in reported) and sorted(reported, key=lambda r: r.get("task", "")) == sorted(inherited, key=lambda r: r["task"]),
@@ -648,8 +733,15 @@ class TaskPipeline:
         found, aligned = self._trace(tid, report)
         artifacts.extend(found)
         passed = not failures and not report["unmapped"] and aligned
+        extra = {}
+        if review_policy.adaptive(attempt):
+            if "findings" in report:
+                self._findings(report, self.expected_checks(tid, "acceptor"))
+                passed = passed and not review_policy.required_ids(report)
+            extra["verdict"] = review_policy.verdict(report, clean=passed)
+            passed = extra["verdict"] == "PASS"
         accepted = self._record(tid, "acceptor", text, report, artifacts, passed=passed,
-            attempt=attempt["id"], previousReport=second["report"]["sha256"], inheritedProofs=inherited,
+            attempt=attempt["id"], previousReport=final["report"]["sha256"], inheritedProofs=inherited, **extra,
             coverage=[{"requirement": rid, "criterion": c} for rid, c in sorted(self.expected_checks(tid, "acceptor"))])
         attempt["acceptance"] = accepted
         task["phase"] = "task_acceptance"

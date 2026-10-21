@@ -297,7 +297,7 @@ var HINT={running:'Агент выполняет задачи. Промежут�
  blocked:'Есть препятствие. Требования и доступный результат сохранены.',
  cancelled:'Прогон отменён. История работы сохранена.',
  accepted:'Независимая приёмка подтвердила все действующие требования. Остатков нет.',
- delivered_with_remaining:'Ядро работает и принято. Второстепенные остатки перечислены ниже и остаются обязательствами.',
+ delivered_with_remaining:'Основная часть принята. Неподтверждённые условия и остатки перечислены ниже.',
  stale:'Ранее принятый результат изменился. Требуется новая проверка.',
  unavailable:'Ниже последний подтверждённый снимок. Текущая готовность неизвестна; показания времени зафиксированы.'};
 var DOT={running:['#FFFFFF','0'],paused:['transparent','2px solid #C7C9CC'],blocked:['#8A8D92','0'],
@@ -309,11 +309,12 @@ var IMPL={implemented:'Реализовано по задачам',unfinished:'�
 var SCOPE={dropped:'Снято по решению владельца',deferred:'Отложено по решению владельца'};
 var TASK={completed:'Реализовано',running:'В работе',pending:'Ожидает',blocked:'Препятствие'};
 var PHASE_STATUS={pending:['○','ожидает'],current:['●','в работе'],done:['✓','завершено'],
- skipped:['–','не потребовалась'],blocked:['!','заблокирована'],stale:['?','нужна повторная проверка']};
+ skipped:['–','не требуется'],blocked:['!','заблокирована'],stale:['?','нужна повторная проверка']};
 var PHASE_LABEL={implementation:'Реализация',critic_1:'Первый критик',repair:'Правка',critic_2:'Второй критик',task_acceptance:'Приёмка задачи'};
 var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
  ['acceptance','Приёмка','Независимая проверка ядра']];
 var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],['inherited','Остатки прошлых прогонов'],
+ ['execution','Сроки исполнения'],['inheritedExecution','Сроки прошлых прогонов'],
  ['unmapped','Не попало в требования']];
 var UNKNOWN='Состояние не определено';
 var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['Обновить','Refresh'],workshopLink:[' — Telegram-канал, новая вкладка',' — Telegram channel, new tab'],updated:['Последняя запись агента','Last agent entry'],
@@ -330,6 +331,9 @@ var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['
  gateNote:['Изменение брифа, плана или кода делает связанные проверки устаревшими.','Changing the brief, plan or code makes related checks stale.'],
  activityAria:['Текущая работа и время','Current work and time'],wavesAria:['Задачи по волнам','Tasks by wave']};
 var EN={
+ 'Сроки исполнения':'Execution deadlines','Сроки прошлых прогонов':'Earlier execution deadlines',
+ 'Финальная передача':'Final handoff','Завершение прогона':'Run completion',
+ 'Срок не соблюдён':'Deadline missed','Ожидает подтверждения':'Awaiting confirmation',
  'В работе':'In progress','Приостановлено':'Paused','Есть препятствие':'Blocked','Отменено':'Cancelled',
  'Все действующие требования приняты':'All active requirements accepted','Основная часть готова, есть остатки':'Core accepted, remaining work listed',
  'Проект изменён; приёмка устарела':'Project changed; acceptance is stale','Состояние не подтверждено':'State not confirmed',
@@ -340,7 +344,7 @@ var EN={
  'Есть препятствие. Требования и доступный результат сохранены.':'Work is blocked. Requirements and existing results are preserved.',
  'Прогон отменён. История работы сохранена.':'The run was cancelled. Its history is preserved.',
  'Независимая приёмка подтвердила все действующие требования. Остатков нет.':'Independent acceptance confirmed all active requirements. No remaining work.',
- 'Ядро работает и принято. Второстепенные остатки перечислены ниже и остаются обязательствами.':'The core is accepted. Remaining work is listed below and remains an obligation.',
+ 'Основная часть принята. Неподтверждённые условия и остатки перечислены ниже.':'The core is accepted. Unconfirmed conditions and remaining work are listed below.',
  'Ранее принятый результат изменился. Требуется новая проверка.':'Previously accepted work changed and needs another check.',
  'Ниже последний подтверждённый снимок. Текущая готовность неизвестна; показания времени зафиксированы.':'The last confirmed snapshot is shown. Current readiness is unknown; clocks are frozen.',
  'Бриф':'Brief','Требования и ядро':'Requirements and core','Спецификация':'Specification','Сверка покрытия':'Coverage review',
@@ -378,7 +382,7 @@ var EN={
  'Запустите локальный сервер AISpa командой serve. Отсутствие данных не означает готовность.':'Start the AISpa local server with serve. Missing data does not mean complete.',
  'Оценка появится после начала работы.':'An estimate appears once work begins.',
  'Этапы задачи':'Task phases','ожидает':'pending','в работе':'in progress','завершено':'done',
- 'не потребовалась':'not needed','заблокирована':'blocked','нужна повторная проверка':'needs another check',
+ 'не требуется':'not needed','заблокирована':'blocked','нужна повторная проверка':'needs another check',
  'Демонстрационный пример · не реальный прогон':'Demo example · not a real run',
  'Состояние обновляется каждые 5 с · таймеры каждую секунду':'State refreshes every 5 s · clocks tick each second',
  'Архивный снимок · без обновления':'Archived snapshot · no refresh'};
@@ -578,6 +582,9 @@ function remainingItem(value,key,reqs,tasks){
    tr(SCOPE[req.scope]||'Исключено')+': '+req.text+(req.decision?' · «'+req.decision.quote+'»':''):tr('Исключено по решению владельца')};}
   return {id:'',text:value};
  }
+ if(key==='execution'||key==='inheritedExecution')return {id:value.id||'',text:
+  tr(value.event==='host-final-handoff'?'Финальная передача':'Завершение прогона')+' · '+
+  tr(value.status==='failed'?'Срок не соблюдён':'Ожидает подтверждения')+' · '+fmt(value.deadline)};
  return {id:value.id||value.requirement||value.task||'',text:[value.criterion,value.text||value.note||value.reason||tr('Описание не указано')].filter(Boolean).join(' — ')};
 }
 function render(d){
@@ -673,6 +680,11 @@ function validArchive(d){
       ['active','deferred','dropped'].includes(r.scope)&&typeof r.implementation==='string'})||
     !d.tasks.every(function(t){return typeof t.proofCurrent==='boolean'&&
       ['pending','running','blocked','completed'].includes(t.status)}))return false;
+ if(d.executionPolicy!==undefined&&typeof d.executionPolicy!=='boolean')return false;
+ if(d.executionPolicy&&!['execution','inheritedExecution'].every(function(k){return Array.isArray(d.remaining[k])}))return false;
+ if(['execution','inheritedExecution'].some(function(k){return d.remaining[k]!==undefined&&
+   (!Array.isArray(d.remaining[k])||!d.remaining[k].every(function(r){return r&&typeof r.id==='string'&&
+     ['engine-finish','host-final-handoff'].includes(r.event)&&['pending','failed'].includes(r.status)&&archiveDate(r.deadline)!==null}))}))return false;
  var archived=archiveDate(d.archivedAt),observed=archiveDate(d.observedAt),updated=archiveDate(d.updatedAt);
  if(archived===null||observed===null||updated===null||updated>observed||observed>archived)return false;
  if(!finalStatus(d.status))return true;
@@ -685,7 +697,7 @@ function validArchive(d){
  if(d.status==='accepted'&&(
     d.tasks.some(function(t){return t.status!=='completed'})||
     d.requirements.some(function(r){return r.scope==='active'&&r.implementation!=='implemented'})||
-    ['checks','blockedTasks','excluded','unmapped','inherited'].some(function(k){return d.remaining[k].length})))return false;
+    ['checks','blockedTasks','excluded','unmapped','inherited','execution','inheritedExecution'].some(function(k){return (d.remaining[k]||[]).length})))return false;
  return true;
 }
 async function refresh(){
@@ -721,7 +733,7 @@ function makeDemo(requested){
   tasks:[{id:'T01',title:'Модель данных и журнал записей',requirements:['R01','R03','R04'],wave:1,status:'completed',elapsedSeconds:960,
     phaseTiming:{phase:'task_acceptance',startedAt:now,elapsedSeconds:70},phaseSteps:demoSteps(['done','done','done','done','done'])},
    {id:'T02',title:'Экран выбора услуги и времени',requirements:['R01'],wave:2,status:'completed',elapsedSeconds:1200,
-    phaseTiming:{phase:'task_acceptance',startedAt:now,elapsedSeconds:65},phaseSteps:demoSteps(['done','done','skipped','done','done'])},
+    phaseTiming:{phase:'task_acceptance',startedAt:now,elapsedSeconds:65},phaseSteps:demoSteps(['done','done','skipped','skipped','done'])},
    {id:'T03',title:'Письмо-подтверждение',requirements:['R02'],wave:2,status:'running',elapsedSeconds:420,activeSince:now,
     phaseTiming:{phase:'repair',startedAt:now,activeSince:now,elapsedSeconds:90},phaseSteps:demoSteps(['done','done','current','pending','pending'])},
    {id:'T04',title:'Недельное расписание администратора',requirements:['R03'],wave:2,status:'running',elapsedSeconds:300,activeSince:now,
@@ -738,7 +750,8 @@ function makeDemo(requested){
  d.tasks.forEach(function(t){t.dependsOn=[];if(terminal){t.status='completed';t.elapsedSeconds=t.elapsedSeconds||900;delete t.activeSince;
   t.proofCurrent=true;
   t.phaseTiming={phase:'task_acceptance',startedAt:now,elapsedSeconds:45};
-  t.phaseSteps=demoSteps(['done','done',t.id==='T02'||t.id==='T06'||t.id==='T07'?'skipped':'done','done','done']);}});
+  var repaired=!(t.id==='T02'||t.id==='T06'||t.id==='T07');
+  t.phaseSteps=demoSteps(['done','done',repaired?'done':'skipped',repaired?'done':'skipped','done']);}});
  if(terminal){
   d.requirements.forEach(function(r){r.implementation='implemented'});
   d.estimate={reason:status==='stale'?'stale':'finished'};

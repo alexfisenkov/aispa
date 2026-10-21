@@ -384,6 +384,9 @@ def valid(store, state, *, check_sources=True):
         saved = _collection(store, collection_state)
         _require(report.get("collection") == ref["collection"] and report.get("basis") == ref.get("basis"), "связь отчёта нарушена")
         _report(saved, report)
+        from . import phase_receipts
+        if not phase_receipts.valid(store, state, "discovery"):
+            return False
         if check_sources:
             scan = _scan(store, saved.get("includedPaths", []))
             return saved["scanDigest"] == scan["scanDigest"] and saved["limits"] == scan["limits"]

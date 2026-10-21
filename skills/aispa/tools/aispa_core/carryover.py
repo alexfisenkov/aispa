@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 
 from .contracts import nonempty, require
+from . import execution_history
 from .store import Invalid, digest, timestamp
 from .portable import is_link, relative_name
 from .team import historical_proof_valid, task_proof_valid
@@ -22,6 +23,7 @@ OUTSTANDING = {"outstanding", "mapped", "deferred"}
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_HANDOFF_BYTES = 16 * 1024 * 1024
 MAX_REASON_CHARS = 1200
+MAX_EXECUTION_VIEW = 20
 SECRET = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"sk-[A-Za-z0-9_-]{20,}|\b\d{8,12}:[A-Za-z0-9_-]{30,}|"
@@ -150,6 +152,7 @@ def _merge_sources(target, sources):
         target[source["id"]] = copy.deepcopy(source)
 
 
+
 def _payload_valid(payload):
     require(isinstance(payload, dict) and payload.get("schema") == SCHEMA
             and payload.get("digest") == digest({k: v for k, v in payload.items() if k != "digest"}),
@@ -170,6 +173,8 @@ def _payload_valid(payload):
         require(source is None or source.get("source") in sources
                 and source.get("quote") in sources[source["source"]]["text"],
                 "Carryover: потеряна исходная цитата")
+    if "executionRemainders" in payload:
+        execution_history.validate(payload["executionRemainders"], sources)
     return payload
 
 
@@ -197,11 +202,19 @@ def _ledger(store, state, *, effective=True):
     require(carry.get("schema") == SCHEMA, "Carryover: неподдерживаемая схема")
     base = _payload_valid(_load(store, carry["handoff"]))
     items = {i["id"]: copy.deepcopy(i) for i in base["items"]}
+    execution_items = {i["id"]: copy.deepcopy(i) for i in base.get("executionRemainders", [])}
     sources = {}
     _merge_sources(sources, base["sources"])
     for artifact in carry.get("decisions", []):
         receipt = _load(store, artifact)
         ident = receipt.get("item")
+        if isinstance(ident, str) and ident in execution_items:
+            require(receipt.get("schema") == SCHEMA and receipt.get("run") == state["run"]
+                    and receipt.get("before") == digest(execution_items[ident]),
+                    "Carryover: повреждена или переставлена цепочка решений об исполнении")
+            _merge_sources(sources, receipt.get("sources", []))
+            execution_items[ident] = execution_history.apply_disposition(execution_items[ident], receipt, state["run"], sources)
+            continue
         require(receipt.get("schema") == SCHEMA and receipt.get("run") == state["run"]
                 and ident in items and receipt.get("before") == digest(items[ident]),
                 "Carryover: повреждена или переставлена цепочка решений")
@@ -212,6 +225,8 @@ def _ledger(store, state, *, effective=True):
         _merge_sources(sources, receipt.get("sources", []))
         items[ident] = after
     result = {**base, "items": list(items.values()), "sources": list(sources.values())}
+    if execution_items:
+        result["executionRemainders"] = list(execution_items.values())
     if effective:
         for item in result["items"]:
             if item["status"] == "resolved" and not _resolution_current(store, state, item):
@@ -388,6 +403,10 @@ def capture(previous_store, previous_state):
                "runs": _unique(inherited.get("runs", []) + [checkpoint]),
                "sources": list(sources.values()), "items": items, "decisions": _unique(decisions),
                "capturedArtifacts": artifacts, "evidencePolicy": "Historical only; new run needs fresh local native roles and reviews."}
+    execution = execution_history.capture(previous_store, previous_state, inherited, sources, briefs)
+    if execution:
+        payload["executionRemainders"] = execution
+        payload["sources"] = list(sources.values())
     payload["digest"] = digest(payload)
     return _payload_valid(payload)
 
@@ -411,6 +430,19 @@ def attach(store, state, payload):
     require(journal["last"]["hash"] == payload["previous"]["eventDigest"], "Carryover: после capture предыдущий прогон изменился")
     for artifact in payload["capturedArtifacts"]:
         _read(previous, artifact)
+    # Exact recomputation prevents a supplied payload from omitting or inventing
+    # execution remainders while retaining a valid previous journal checkpoint.
+    inherited = _ledger(previous, old_state)
+    original_sources = {}
+    _merge_sources(original_sources, inherited["sources"])
+    original_briefs = {}
+    for brief in old_state["briefs"]:
+        source = _source(previous, old_state, brief, "owner_brief")
+        _merge_sources(original_sources, [source])
+        original_briefs[brief["id"]] = source["id"]
+    expected_execution = execution_history.capture(previous, old_state, inherited, original_sources, original_briefs)
+    require(payload.get("executionRemainders", []) == expected_execution,
+            "Carryover: остатки исполнения отличаются от сохранённого исходного прогона")
     _safe(_run(store), "carryover")
     handoff = store.artifact("carryover", _json(payload), ".json")
     state["carryover"] = {"schema": SCHEMA, "handoff": handoff, "decisions": []}
@@ -422,7 +454,15 @@ def view(store, state):
     ledger = _ledger(store, state)
     items = ledger["items"]
     return {"schema": SCHEMA, "handoff": copy.deepcopy(state.get("carryover", {}).get("handoff")),
-            "summary": {"runs": len(ledger["runs"]), "items": len(items),
+            **({"executionRemainders": execution_view(store, state)["items"],
+                "executionOmitted": max(0, len(ledger["executionRemainders"]) - MAX_EXECUTION_VIEW)}
+               if ledger.get("executionRemainders") else {}),
+            "summary": {**({"executionOutstanding": sum(execution_history.disposition(row) != "dropped"
+                                                       for row in ledger["executionRemainders"]),
+                            "executionOwnerDropped": sum(execution_history.disposition(row) == "dropped"
+                                                       for row in ledger["executionRemainders"])}
+                            if ledger.get("executionRemainders") else {}),
+                        "runs": len(ledger["runs"]), "items": len(items),
                         "outstanding": sum(i["status"] in OUTSTANDING for i in items),
                         "historicallyAccepted": sum(i["status"] in ("accepted_historical", "resolved") for i in items),
                         "currentProofInherited": False},
@@ -434,6 +474,23 @@ def unresolved(store, state):
     """Deferred obligations remain visible; dropped/resolved obligations do not."""
     return [copy.deepcopy(item) for item in _ledger(store, state)["items"] if item["status"] in OUTSTANDING]
 
+
+
+def unresolved_execution(store, state):
+    """Separate historical execution debts; no product scope or inherited PASS."""
+    return execution_history.compact(_ledger(store, state), unresolved_only=True)
+
+
+def execution_view(store, state, limit=MAX_EXECUTION_VIEW):
+    """Bounded summary; the hash-bound full handoff remains the complete archive."""
+    require(type(limit) is int and 0 <= limit <= 100, "Carryover: execution view limit должен быть 0..100")
+    rows = execution_history.compact(_ledger(store, state))
+    return {"items": rows[:limit], "total": len(rows), "omitted": max(0, len(rows) - limit),
+            "outstanding": sum(row.get("disposition") != "dropped" for row in rows),
+            "ownerDropped": sum(row.get("disposition") == "dropped" for row in rows),
+            "archive": copy.deepcopy(state.get("carryover", {}).get("handoff")),
+            "decisionReceipts": copy.deepcopy(state.get("carryover", {}).get("decisions", [])),
+            "historicalOnly": True, "externalReceiptSupported": False}
 
 def _source_relations(ledger, state):
     relations = []
@@ -511,6 +568,39 @@ def _compatible(item, requirement):
             "Carryover: новое требование ослабляет исходный текст, вид, ядро или критерии")
 
 
+
+def _decide_execution(store, state, ledger, item, action, current_requirement, brief, quote):
+    require(action in ("keep", "drop", "defer") and current_requirement is None,
+            "Carryover: исполнение поддерживает только keep/drop/defer, без map/resolve и product requirement")
+    require(execution_history.disposition(item) != "dropped", "Carryover: владелец уже снял этот остаток исполнения")
+    event = {"run": state["run"], "action": action, "at": timestamp(), "binding": copy.deepcopy(item["origin"])}
+    sources = []
+    if action in ("drop", "defer"):
+        source = _authorization(store, state, ledger, {"history": item.get("dispositions", [])}, brief, quote)
+        prior_sources = {event["source"] for event in item.get("dispositions", []) if event.get("source")}
+        prior_sources.add(item["source"]["source"])
+        require(source["origin"]["sha256"] not in {
+            prior["origin"]["sha256"] for prior in ledger["sources"] if prior["id"] in prior_sources},
+            "Carryover: новое решение по этому исполнению требует новых слов владельца")
+        sources.append(source)
+        event.update(brief=brief, quote=quote, source=source["id"])
+    else:
+        require(brief is None and quote is None, "Carryover: keep не принимает неподтверждённую авторизацию")
+    after = copy.deepcopy(item)
+    after["dispositions"] = [*after.get("dispositions", []), event]
+    receipt = {"schema": SCHEMA, "run": state["run"], "item": item["id"], "action": action,
+               "before": digest(item), "after": after, "sources": sources}
+    merged = {source["id"]: source for source in ledger["sources"]}
+    _merge_sources(merged, sources)
+    execution_history.apply_disposition(item, receipt, state["run"], merged)
+    require(not SECRET.search(_json(receipt).decode()), "Carryover: возможный секрет в решении")
+    _safe(_run(store), "carryover-decisions")
+    artifact = store.artifact("carryover-decisions", _json(receipt), ".json")
+    state["carryover"]["decisions"].append(artifact)
+    return {"item": item["id"], "action": action, "status": after["status"],
+            "disposition": execution_history.disposition(after), "timingOutcomeUnchanged": True,
+            "receipt": artifact}
+
 def decide(store, state, item_id, action, current_requirement=None, brief=None, quote=None):
     """Record keep/map/resolve/drop/defer; caller appends state after success.
 
@@ -521,6 +611,9 @@ def decide(store, state, item_id, action, current_requirement=None, brief=None, 
     require(state["status"] == "running", "Carryover: решения доступны только в работающем прогоне")
     require(action in ("keep", "map", "resolve", "drop", "defer"), "Carryover: неизвестное решение")
     ledger = _ledger(store, state, effective=False)
+    execution = next((i for i in ledger.get("executionRemainders", []) if i["id"] == item_id), None)
+    if execution is not None:
+        return _decide_execution(store, state, ledger, execution, action, current_requirement, brief, quote)
     item = next((i for i in ledger["items"] if i["id"] == item_id), None)
     require(item is not None and (item["status"] in OUTSTANDING
             or item["status"] == "resolved" and not _resolution_current(store, state, item)),

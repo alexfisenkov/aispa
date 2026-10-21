@@ -117,6 +117,8 @@ def _expected_roles(state):
               ("coverageReview", "coverage"), ("planReview", "planner"),
               ("blindReview", "blind"), ("knowledge", "knowledge-writer"))
     needed = {role for key, role in stages if state.get(key)}
+    if state.get("gates", {}).get("coverage"):
+        needed.add("coverage")
     if state.get("briefs"):
         needed.add("coordinator")
     if state.get("briefExtraction") or state.get("briefMap"):
@@ -169,7 +171,11 @@ def summary(store, state):
     imports = list(latest_sources.values())
     missing_participants = sorted(set(known) - measured_ids)
     roles = {p["role"] for p in known.values()}
-    missing_roles = sorted(_expected_roles(state) - roles)
+    from . import phase_receipts
+    phases = phase_receipts.summary(store, state) if phase_receipts.enabled(state) else {"authors": {}, "missingPhases": []}
+    phase_roles = {phase_receipts.ROLES[phase] for phase in phases["authors"]}
+    missing_roles = sorted(_expected_roles(state) - roles - phase_roles)
+    unattributed_phases = sorted(phase for phase, actor in phases["authors"].items() if actor not in measured_ids)
     uncovered = sum(i["unmappedCalls"] + i["incompleteCalls"] + i["unsupportedCalls"] for i in imports)
     terminal = state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")
     final_sources = bool(imports) and all(i["final"] for i in imports)
@@ -179,6 +185,7 @@ def summary(store, state):
                         for call_id in i.get("callIds", [])}
     complete = bool(terminal and final_sources and final_coordinator and rows
                     and not missing_participants and not missing_roles and not invalid_ids and not uncovered
+                    and not phases["missingPhases"] and not unattributed_phases
                     and set(known) <= checkpoint_participants
                     and all(row["actor"] in known and (row["actor"], row["callId"]) in checkpoint_calls
                             for row in rows))
@@ -187,6 +194,8 @@ def summary(store, state):
             **totals, **grouped,
             "coverage": {"registeredParticipants": len(known), "measuredParticipants": len(measured_ids & set(known)),
                          "missingParticipants": missing_participants, "missingRoles": missing_roles,
+                         "missingPhases": phases["missingPhases"], "unattributedPhases": unattributed_phases,
+                         "phaseAuthors": phases["authors"],
                          "invalidParticipantRecords": invalid_ids,
                          "unverifiedActors": sorted(measured_ids - set(known)),
                          "unmappedCalls": sum(i["unmappedCalls"] for i in imports),

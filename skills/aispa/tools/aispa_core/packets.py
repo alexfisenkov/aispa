@@ -5,7 +5,7 @@ import json
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
 from .store import common_input, confined, Invalid
 from .portable import match_name, relative_name
-from . import docmeta, telemetry
+from . import docmeta, telemetry, review_policy
 
 MAX_PACKET_BYTES = 16000
 
@@ -48,11 +48,19 @@ def routing(state, task, role, attempt=None, store=None):
     strong = (role != "worker" or task.get("risk", "normal") != "low" or foundation
               or bool((attempt or {}).get("authorization")) or inherited_retry
               or bool((attempt or {}).get("repairPlan")))
+    policy = review_policy.mode(attempt) if attempt is not None else review_policy.selected(state)
     return {"tier": "strong" if strong else "standard", "advisory": True,
             "reason": "Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation",
             "selection": "Use only models exposed by the host and permitted by project rules; otherwise keep the current model",
             "report": "Save the full structured report to a file; return its path and at most 25 lines of conclusions",
-            "criticRounds": 2}
+            "reviewPolicy": policy,
+            "criticRounds": None if policy == review_policy.ADAPTIVE else 2,
+            "minimumCriticRounds": 1 if policy == review_policy.ADAPTIVE else 2,
+            "maximumCriticRounds": 2,
+            "actualCriticRounds": len(attempt.get("rounds", [])) if attempt is not None else None,
+            "taskRoleSlots": {"minimum": 3, "maximum": 4} if policy == review_policy.ADAPTIVE else {"minimum": 4, "maximum": 4},
+            "roleSlotNote": "Base role slots for one attempt, not a native-start cap. Excludes preparation, actor replacements and newly authorized attempts; actual cost requires native usage.",
+            "reviewRule": "First PASS goes to a separate acceptor; WARN/BLOCK/FAIL requires repair and one fresh critic2. No third round." if policy == review_policy.ADAPTIVE else "Two independent critics, then a separate acceptor."}
 
 
 def _brief_packet(store, state):
@@ -174,12 +182,14 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         from . import test_intent
         task = next(t for t in selected if t["id"] == task_id)
         packet.update(verification=current.get("verification"), attempt=current["id"],
+                      reviewPolicy=review_policy.mode(current),
+                      maximumCriticRounds=2, actualCriticRounds=len(current["rounds"]),
                       testIntent=current.get("testIntent"),
                       testSourceChanges=test_intent.source_changes(store, state, task_id),
                       repairPlan=current.get("repairPlan"),
                       roles={key: value for key, value in current["roles"].items() if role is None or key == role},
                       actors=current["actors"],
-                      rounds=[{k: r[k] for k in ("number", "passed", "report") if k in r} for r in current["rounds"]],
+                      rounds=[{k: r[k] for k in ("number", "passed", "verdict", "report") if k in r} for r in current["rounds"]],
                       repair={k: current["repair"][k] for k in ("report", "previousReport", "addresses") if k in current["repair"]} if current.get("repair") else None,
                       traceRequirements=pipeline.trace_requirements(task_id),
                       inheritedProofs=pipeline.inherited_proofs(task_id),
@@ -192,6 +202,10 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
     if kind == "acceptance":
         packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                       blindReview=state.get("blindReview"), handoff=state.get("handoff"))
+        if state.get("policy", {}).get("executionObligations"):
+            from . import execution_obligations
+            packet["executionObligations"] = execution_obligations.view(store, state)
+            packet["executionRule"] = "Map only exact presealed execution quotes/record SHA. Do not rewrite blind status or move product requirements. Future host handoff stays pending, never a product PASS."
     if kind == "task" and task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview"):
         from . import integration
         packet["branchReview"] = integration.context(store, state, task_id)

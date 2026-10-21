@@ -219,7 +219,19 @@ class CliTests(unittest.TestCase):
             "One print statement has no separate architecture.\n"
             "No material technical alternative in this synthetic fixture.\n"
             "No domain terminology beyond standard output.\n", encoding="utf-8", newline="\n")
-        self.git("add", "README.md")
+        (self.root / "tests").mkdir(exist_ok=True)
+        (self.root / "tests/check_output.py").write_text(
+            "import os, subprocess, sys\n"
+            "assert subprocess.check_output([sys.executable, 'app.py'], text=True).strip() == 'ready'\n"
+            "read_fd, write_fd = os.pipe()\n"
+            "os.close(read_fd)\n"
+            "try:\n"
+            "    result = subprocess.run([sys.executable, 'app.py'], stdout=write_fd, stderr=subprocess.PIPE)\n"
+            "    assert result.returncode != 0, 'closed stdout must not silently succeed'\n"
+            "finally:\n"
+            "    os.close(write_fd)\n"
+            "print('ready and closed-output checks passed')\n", encoding="utf-8", newline="\n")
+        self.git("add", "README.md", "tests/check_output.py")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "document synthetic CLI")
         self.call("brief", "--file", self.input(owner_brief))
         self.call("requirements", "--file", self.input([{"id": "R01", "text": "Команда",
@@ -237,11 +249,10 @@ class CliTests(unittest.TestCase):
         mapping = self.call("brief-map-context")
         self.call("brief-map", "--file", self.input(fixtures.source_map_report(mapping, reviewer), "source-map.json"))
         self.assertTrue(self.call("preparation")["brief"]["valid"])
-        participant("idea")
+        # The single coordinator genuinely authors these phases; no phantom actors.
         self.idea()
         self.call("seal")
         self.call("spec", "--file", self.input("Команда выводит ready через стандартный вывод."), expected=2)
-        participant("discovery")
         self.discover()
         challenge = self.call("idea", "--full")["report"]["challenge"]
         spec = "Команда выводит ready через стандартный вывод. README.md служит образцом команды.\n" + "\n".join(
@@ -260,14 +271,13 @@ class CliTests(unittest.TestCase):
         self.call("interfaces", "--file", self.input(fixtures.interfaces(design_state), "interfaces.json"))
         self.assertTrue(self.call("preparation")["design"]["scenariosValid"])
         self.assertTrue(self.call("preparation")["design"]["interfacesValid"])
-        participant("planner")
         tasks = [{"id": "T01", "title": "Команда", "requirements": ["R01"],
                   "dependsOn": [], "zones": ["app.py"], "readZones": ["."], "criteria": ["Выводит ready"]}]
         self.call("plan", "--file", self.input(tasks), expected=2)
         self.plan_with_review(tasks)
         ctx = self.context("task", "--task", "T01")
         self.call("start", "T01", "--context", ctx["basis"])
-        for role in ("worker", "critic1", "critic2", "acceptor"):
+        for role in ("worker", "critic1", "acceptor"):
             self.call("assign", "T01", "--role", role, "--runtime", "codex", "--native-id", "synthetic-" + role, "--session", "test-session")
         task_context = self.context("task", "--task", "T01")
         self.call("usage", "--file", self.input({"actor": task_context["actors"]["worker"],
@@ -275,6 +285,14 @@ class CliTests(unittest.TestCase):
             "inputTokens": 30, "outputTokens": 8, "cachedInputTokens": 5}, "usage-worker.json"))
         self.assertEqual(self.call("usage")["byRole"]["worker"]["measuredCalls"], 1)
         intent = fixtures.existing_behavior_intent(task_context, self.root)
+        intent["failureChecks"] = {
+            "cases": [{"id": "E01", "boundary": "output", "scenario": "Closed stdout has no readers",
+                       "expected": "Actual child process must report failure rather than silently succeed",
+                       "criterion": "Выводит ready", "test": {"path": "tests/check_output.py",
+                       "sha256": file_hash(self.root / "tests/check_output.py")}}],
+            "notApplicable": [{"boundaries": ["input", "storage", "protocol", "dependency"],
+                               "reason": "The declared one-statement fixture has no inputs, persistence, protocol or external dependencies.",
+                               "source": {"path": "README.md", "sha256": file_hash(self.root / "README.md")}}]}
         self.call("test-intent", "--task", "T01", "--file",
                   self.input(intent, "test-intent-v1.json"))
         revised_intent = copy.deepcopy(intent)
@@ -282,8 +300,7 @@ class CliTests(unittest.TestCase):
         self.call("test-intent", "--task", "T01", "--file",
                   self.input(revised_intent, "test-intent-v2.json"))
         self.assertEqual(self.call("test-intent", "--task", "T01")["revision"], 2)
-        self.call("verify", "--task", "T01", "--", sys.executable, "-c",
-                  "import subprocess,sys; assert subprocess.check_output([sys.executable,'app.py'],text=True).strip()=='ready'; print('checked')")
+        self.call("verify", "--task", "T01", "--", sys.executable, "tests/check_output.py")
 
         def proof(kind, rid, extra=()):
             ctx = self.context(kind, *extra)
@@ -294,13 +311,14 @@ class CliTests(unittest.TestCase):
                       "unmapped": [], "checks": [dict(c, status="passed", artifact=ctx["verification"]["output"]["file"], note="Проверено тестовой командой") for c in checks]}
             if role and role != "worker":
                 report["testSourceChanges"] = []
+                report["verdict"] = "PASS"
             if role in ("critic1", "critic2"):
                 report["findings"] = []
                 report["branchReview"] = fixtures.branch_review(self.root, "T01", ctx["verification"]["output"]["file"])
             if role == "critic2":
                 report.update(previousReport=ctx["rounds"][0]["report"]["sha256"], repairReceipt=None, resolutions=[])
             if role == "acceptor":
-                report.update(previousReport=ctx["rounds"][1]["report"]["sha256"], inheritedProofs=ctx["inheritedProofs"],
+                report.update(previousReport=ctx["rounds"][-1]["report"]["sha256"], inheritedProofs=ctx["inheritedProofs"],
                     trace=[{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
                             "note": "Сопоставлено с брифом", "artifact": ctx["verification"]["output"]["file"]} for r in ctx["traceRequirements"]])
             if kind == "acceptance":
@@ -311,14 +329,15 @@ class CliTests(unittest.TestCase):
 
         self.call("submit", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "worker"))))
         self.call("critic", "T01", "--round", "1", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic1"))))
-        self.call("critic", "T01", "--round", "2", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic2"))))
+        self.call("assign", "T01", "--role", "critic2", "--runtime", "codex",
+                  "--native-id", "must-not-run", "--session", "test-session", expected=2)
         self.call("complete", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "acceptor"))))
         run = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
         check = self.call("verify", "--purpose", "check", "--", sys.executable, "app.py")["receipt"]
         commands = self.call("commands")
         self.assertEqual(commands["count"], 3)
         self.assertEqual(self.call("commands", "--receipt", run["sha256"])["purpose"], "run")
-        self.call("wave", "1", "--file", self.input(proof("wave", "R01")))
+        # The one final wave is derived only from full independent final acceptance.
         self.call("context", "--kind", "acceptance", expected=2)
         self.call("acceptance", "--file", self.input({}), expected=2)
         self.call("clean-prepare", expected=2)
@@ -341,8 +360,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("requirements", blind)
         self.assertNotIn("spec", blind)
         self.assertNotEqual(Path(blind["clone"]["path"]), self.root)
-        clean = self.call("clean-verify", "--", sys.executable, "-B", "-c",
-                  "import subprocess,sys; assert subprocess.check_output([sys.executable,'app.py'],text=True).strip()=='ready'; print('fresh clone checked')")["receipt"]
+        clean = self.call("clean-verify", "--", sys.executable, "-B", "tests/check_output.py")["receipt"]
         self.call("context", "--kind", "acceptance", expected=2)
         blind_actor = participant("blind")
         self.blind_actor = blind_actor
@@ -366,8 +384,16 @@ class CliTests(unittest.TestCase):
         state = self.call("finish")
         self.assertEqual(state["status"], "accepted")
         self.assertTrue(state["gates"]["acceptance"])
-        saved = Journal(self.root).load()
+        saved_store = Journal(self.root)
+        saved = saved_store.load()
         attempt = saved["taskHistory"]["T01"][-1]
+        self.assertEqual(len(attempt["rounds"]), 1)
+        self.assertNotIn("critic2", attempt["actors"])
+        self.assertEqual(len(saved["actors"]), 3)
+        from aispa_core import phase_receipts
+        for phase in ("idea", "discovery", "planner"):
+            self.assertEqual(phase_receipts.current(saved_store, saved, phase)["actor"], coordinator)
+        self.assertFalse(self.call("usage")["coverage"]["missingPhases"])
         self.assertEqual(len(attempt["testIntentHistory"]), 2)
         integrity_refs = {
             "test intent first revision": attempt["testIntentHistory"][0],

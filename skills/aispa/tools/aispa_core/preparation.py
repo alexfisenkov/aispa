@@ -18,7 +18,7 @@ def source_context(store, state):
 def map_context(store, state):
     result = source_context(store, state)
     result.update(basis=briefmap.reconciliation_basis(state),
-                  requirements=state["requirements"])
+                  requirements=state["requirements"], executionObligations=state.get("executionObligations", []))
     for key in ("briefExtraction", "briefReview"):
         ref = state.get(key)
         require(isinstance(ref, dict) and artifact_valid(store, ref), "Сначала два независимых исходных разбора")

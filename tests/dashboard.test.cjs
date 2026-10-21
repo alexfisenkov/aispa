@@ -171,7 +171,7 @@ test('phase row reflects supplied states: repair may be skipped, second review i
   {id:'task_acceptance',label:'Приёмка задачи',status:'done'}];
  const f=await fixture('',d);const row=f.el('waves').children[0].children[1].children[0].children[1].children[2];
  assert.equal(row.attributes.role,'list');assert.equal(row.children.length,5);
- assert.equal(row.children[2].attributes['aria-label'],'Правка — не потребовалась');
+ assert.equal(row.children[2].attributes['aria-label'],'Правка — не требуется');
  assert.equal(row.children[3].attributes['aria-label'],'Второй критик — завершено');
  assert.doesNotMatch(f.text('waves'),/Фаза: Правка/);
 });
@@ -207,12 +207,18 @@ test('demo illustrates repair and second review as examples only',async()=>{
  assert.match(f.text('waves'),/Препятствие/);assert.match(f.text('waves'),/Ожидает/);
  assert.equal(f.text('phase-time-T03'),'1 мин 30 с');
  const t02=f.el('waves').children[1].children[1].children[0].children[1].children[2];
- assert.equal(t02.children[2].attributes['aria-label'],'Правка — не потребовалась');
- assert.equal(t02.children[3].attributes['aria-label'],'Второй критик — завершено');
+ assert.equal(t02.children[2].attributes['aria-label'],'Правка — не требуется');
+ assert.equal(t02.children[3].attributes['aria-label'],'Второй критик — не требуется');
  const accepted=await fixture('?demo&status=accepted');
+ let skipped=0,reviewed=0;
  for(const wave of accepted.el('waves').children)for(const task of wave.children[1].children){
-  const steps=task.children[1].children[2];assert.equal(steps.children[3].attributes['aria-label'],'Второй критик — завершено');
+  const steps=task.children[1].children[2];
+  const repairSkipped=steps.children[2].attributes['aria-label']==='Правка — не требуется';
+  assert.equal(steps.children[3].attributes['aria-label'],repairSkipped?'Второй критик — не требуется':'Второй критик — завершено');
+  assert.equal(steps.children[4].attributes['aria-label'],'Приёмка задачи — завершено');
+  if(repairSkipped)skipped++;else reviewed++;
  }
+ assert.equal(skipped,3);assert.equal(reviewed,4);
 });
 test('approved brand geometry is inline and long titles can wrap on narrow screens',()=>{
  assert.match(html,/<svg[^>]*viewBox="0 0 256 256"[^>]*aria-hidden="true"[^>]*focusable="false"/);
@@ -285,6 +291,26 @@ test('invalid archive does not fall through to live or claim acceptance',async()
  const f=await fixture('?status=accepted',{...sample(),status:'accepted'},{archive:{archive:true,status:'accepted'}});
  assert.equal(f.fetchCount(),0);assert.equal(f.intervalCount(),0);
  assert.equal(f.text('label'),'Состояние недоступно');assert.match(f.text('sourceLabel'),/недоступен/);
+});
+test('execution and inherited deadlines remain visible without a false accepted archive',async()=>{
+ const archive=archivedSample();archive.status='delivered_with_remaining';archive.executionPolicy=true;
+ archive.remaining.execution=[{id:'E01',event:'host-final-handoff',status:'pending',deadline:'2026-10-19T12:30:00Z'}];
+ archive.remaining.inheritedExecution=[{id:'CE-1',event:'engine-finish',status:'failed',deadline:'2026-10-18T12:30:00Z'}];
+ const f=await fixture('',sample(),{archive});
+ assert.match(f.text('remaining'),/Сроки исполнения/);
+ assert.match(f.text('remaining'),/Финальная передача/);
+ assert.match(f.text('remaining'),/Ожидает подтверждения/);
+ assert.match(f.text('remaining'),/Сроки прошлых прогонов/);
+ assert.match(f.text('remaining'),/Срок не соблюдён/);
+ f.el('language').change('en');
+ assert.match(f.text('remaining'),/Awaiting confirmation/);
+ assert.match(f.text('remaining'),/Deadline missed/);
+ const forged={...archive,status:'accepted'};
+ const invalid=await fixture('',sample(),{archive:forged});
+ assert.doesNotMatch(invalid.text('label'),/Все действующие требования приняты/);
+ const absent={...archive,remaining:{...archive.remaining}};delete absent.remaining.execution;
+ const missing=await fixture('',sample(),{archive:absent});
+ assert.match(missing.text('sourceLabel'),/недоступен|некоррект|Невер|Не удалось|не подтвержд/i);
 });
 test('terminal archive rejects empty arrays, missing proof, broken gates and dates',async()=>{
  const bad=[

@@ -5,11 +5,18 @@ from collections import Counter
 from .contracts import (active, artifact_valid, basis, definition, nonempty, overlap,
                         require, validate_plan)
 from .store import digest
-from . import delivery
+from . import delivery, review_policy
 
 MAX_TASKS = 96
 MAX_REPORT_CHARS = 131072
 RISK = {"low": 0, "normal": 1, "high": 2}
+
+
+def _role_estimate(state, count):
+    return {"minimum": count * 3, "maximum": count * 4} if review_policy.selected(state) == review_policy.ADAPTIVE else count * 4
+
+
+ROLE_SLOT_NOTE = "Базовые роли одной попытки; не предел фактических запусков. Подготовка, замена исполнителя и новые разрешённые попытки не включены. Фактические запуски и токены подтверждает native usage."
 
 
 def _tasks(state, raw):
@@ -41,10 +48,12 @@ def analyze(store, state, raw):
     definitions = [definition(t) for t in tasks]
     return {"basis": digest({"run": state["run"], "scope": basis(store, state, "coverage"), "draft": definitions}),
             "draft": definitions, "suggestions": suggestions,
-            "taskCount": len(tasks), "taskRoleStarts": len(tasks) * 4,
-            "criticRoundsPerTask": 2, "estimatedTokens": None,
+            "taskCount": len(tasks), "taskRoleStarts": None if review_policy.selected(state) == review_policy.ADAPTIVE else len(tasks) * 4,
+            "taskRoleSlots": _role_estimate(state, len(tasks)), "roleSlotNote": ROLE_SLOT_NOTE,
+            "criticRoundsPerTask": {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2,
+            "maximumCriticRoundsPerTask": 2, "actualCriticRounds": None, "estimatedTokens": None,
             "duplicateCriteriaRule": "При совпадении текста критериев объединённых задач сохраните каждый как '<исходный ID>: <текст>'.",
-            "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы, два критика и приёмщика."}
+            "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы и отдельного приёмщика; число критиков определяется замороженной политикой попытки. Замена исполнителя ремонта добавляет actor сверх оценки."}
 
 
 def review(store, state, final, report):
@@ -111,8 +120,12 @@ def review(store, state, final, report):
     return {"report": record, "scopeBasis": basis(store, state, "coverage"),
             "planDigest": digest([definition(t) for t in final.values()]),
             "tasksBefore": len(draft), "tasksAfter": len(final),
-            "taskRoleStartsBefore": 4 * len(draft), "taskRoleStartsAfter": 4 * len(final),
-            "criticRoundsPerTask": 2, "measuredTokenSavings": None,
+            "taskRoleStartsBefore": None if review_policy.selected(state) == review_policy.ADAPTIVE else 4 * len(draft),
+            "taskRoleStartsAfter": None if review_policy.selected(state) == review_policy.ADAPTIVE else 4 * len(final),
+            "taskRoleSlotsBefore": _role_estimate(state, len(draft)), "taskRoleSlotsAfter": _role_estimate(state, len(final)),
+            "roleSlotNote": ROLE_SLOT_NOTE,
+            "criticRoundsPerTask": {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2,
+            "maximumCriticRoundsPerTask": 2, "actualCriticRounds": None, "measuredTokenSavings": None,
             **({"deliveryDigest": digest(report["delivery"])} if "delivery" in report else {})}
 
 
