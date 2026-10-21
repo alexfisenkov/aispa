@@ -124,6 +124,10 @@ def parser():
     critic.add_argument("--file", required=True)
     attempt = sub.add_parser("new-attempt"); attempt.add_argument("id")
     attempt.add_argument("--brief", required=True); attempt.add_argument("--quote", required=True)
+    promotion = sub.add_parser("promote-task"); promotion.add_argument("id")
+    promotion.add_argument("--reason", required=True)
+    global_review = sub.add_parser("integration-review")
+    global_review.add_argument("--file"); global_review.add_argument("--actor")
     scope = sub.add_parser("scope")
     scope.add_argument("id"); scope.add_argument("decision", choices=("drop", "defer", "restore"))
     scope.add_argument("--brief", required=True); scope.add_argument("--quote", required=True)
@@ -198,7 +202,7 @@ def execute(args):
                                    "integrationReview": True, "testIntent": True,
                                    "adaptiveCritique": True, "phaseReceipts": True,
                                    "executionObligations": True, "finalWaveReuse": True,
-                                   "errorBoundaryChecks": True}
+                                   "errorBoundaryChecks": True, "taskTiers": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
                 state["runtime"] = args.runtime
@@ -226,7 +230,7 @@ def execute(args):
                      args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
                      or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
-                     or (args.action in ("idea", "repair-plan") and not args.file)
+                     or (args.action in ("idea", "repair-plan", "integration-review") and not args.file)
                      or (args.action == "documents" and not args.refresh))
         if not read_only and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
@@ -400,10 +404,12 @@ def execute(args):
             receipt = {"actor": flow.pipeline.assign(args.id, args.role, args.runtime, args.native_id, args.session, model=args.model)}
         elif action == "submit":
             result = flow.pipeline.submit(args.id, args.file)
-            receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase")}
+            receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase"),
+                       **({"completionKind": result["completionKind"]} if result.get("completionKind") else {})}
         elif action == "repair":
             result = flow.pipeline.repair(args.id, args.file)
-            receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase")}
+            receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase"),
+                       **({"completionKind": result["completionKind"]} if result.get("completionKind") else {})}
         elif action == "repair-plan":
             if args.file:
                 flow.build_ready()
@@ -416,6 +422,17 @@ def execute(args):
             ok = flow.pipeline.review(args.id, args.round, args.file)
         elif action == "new-attempt":
             receipt = {"attempt": flow.pipeline.new_attempt(args.id, args.brief, args.quote)}
+        elif action == "promote-task":
+            receipt = {"attempt": flow.pipeline.promote(args.id, args.reason)}
+        elif action == "integration-review":
+            if args.file:
+                flow.build_ready()
+                receipt = integration.project_review(store, state, json.loads(flow.read_input(args.file)), actor=args.actor)
+                flow.save("project-integration-reviewed")
+                ok = receipt["passed"]
+            else:
+                print(json.dumps(integration.project_context(store, state, actor=args.actor), ensure_ascii=False, indent=2))
+                return 0
         elif action == "start":
             flow.start(args.id, args.context)
         elif action == "complete":

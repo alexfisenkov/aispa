@@ -335,7 +335,9 @@ def refresh(store, state):
     progress_data = {key: state.get(key) for key in ("stage", "status", "waiting", "remaining", "activity")}
     progress_data.update(runtime=runtime, blockers=blockers, nextSteps=_next(state),
                          tasks=state.get("tasks", []), actors=state.get("actors", {}),
-                         taskHistory=state.get("taskHistory", {}))
+                         taskHistory=state.get("taskHistory", {}),
+                         projectIntegrationReview=state.get("projectIntegrationReview"),
+                         projectIntegrationReviewHistory=state.get("projectIntegrationReviewHistory", []))
     progress = "# Прогресс и роли\n\n" + lead + _block(progress_data)
     for tid, attempts in state.get("taskHistory", {}).items():
         for attempt in attempts:

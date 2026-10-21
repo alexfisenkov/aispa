@@ -8,7 +8,7 @@ import json
 import os
 import uuid
 
-from . import integration, test_intent, review_policy
+from . import integration, test_intent, review_policy, task_tiers
 from .contracts import require, task_basis
 from .store import Invalid, confined
 from .team import ROLES, _actor_valid, acceptance_chain
@@ -21,6 +21,7 @@ def template(pipeline, tid, role):
     require(role in ROLES, "Неизвестная роль шаблона")
     store, state = pipeline.store, pipeline.s
     _task, attempt = pipeline._live(tid, allow_blocked=role == "worker")
+    require(role in task_tiers.roles(attempt), "Лёгкой задаче доступен только отчёт исполнителя")
     require(_actor_valid(store, state, attempt, role),
             "Сначала назначьте actor с действующей карточкой для " + role)
     rounds = attempt["rounds"]

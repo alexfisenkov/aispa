@@ -33,11 +33,18 @@ def estimate(tasks, status, at):
     if len(samples) < 2:
         return {"reason": "insufficient_data", "sampleCount": len(samples)}
     typical = median(samples)
+    by_tier = {}
+    for tier in ("light", "heavy"):
+        values = [elapsed(t, at) for t in tasks if t["status"] == "completed" and t.get("tier", "heavy") == tier]
+        values = [value for value in values if value is not None and value > 0]
+        if len(values) >= 2:
+            by_tier[tier] = median(values)
     waves = {}
     for task in outstanding:
         spent = elapsed(task, at) or 0
+        task_typical = by_tier.get(task.get("tier", "heavy"), typical)
         # An overrun is not a claim that only a few seconds remain.
-        remaining = typical if spent >= typical else max(typical * .25, typical - spent)
+        remaining = task_typical if spent >= task_typical else max(task_typical * .25, task_typical - spent)
         waves.setdefault(task["wave"], []).append(remaining)
     parallel = sum(max(times) for times in waves.values())
     serial = sum(sum(times) for times in waves.values())

@@ -12,11 +12,11 @@ from .store import digest, timestamp
 
 ROLES = frozenset({
     "coordinator", "idea", "source-reader", "brief-analyst", "brief-reviewer",
-    "branch-reviewer", "recovery-reviewer", "discovery", "coverage", "planner",
+    "branch-reviewer", "integration-reviewer", "recovery-reviewer", "discovery", "coverage", "planner",
     "worker", "critic1", "critic2", "acceptor", "blind", "knowledge-writer",
 })
 INDEPENDENT_ROLES = frozenset({
-    "brief-reviewer", "branch-reviewer", "recovery-reviewer", "coverage",
+    "brief-reviewer", "branch-reviewer", "integration-reviewer", "recovery-reviewer", "coverage",
     "critic1", "critic2", "acceptor", "blind", "knowledge-writer",
 })
 TASK_ROLES = frozenset({"worker", "critic1", "critic2", "acceptor"})

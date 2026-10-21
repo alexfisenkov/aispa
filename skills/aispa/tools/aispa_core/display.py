@@ -4,16 +4,20 @@ from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
 from .team import _record_valid, task_proof_valid
-from . import carryover, review_policy, execution_obligations, phase_receipts
+from . import carryover, review_policy, execution_obligations, phase_receipts, task_tiers
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
-          "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи"}
+          "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи",
+          "verified_completion": "Выполнение проверено"}
 
 LABELS = {"running": "В работе", "paused": "Приостановлено", "blocked": "Есть препятствие",
           "cancelled": "Отменено", "accepted": "Все действующие требования приняты",
           "delivered_with_remaining": "Основная часть готова, есть остатки"}
 
 EVENT_LABELS = {
+    "task-verified-completed": "Выполнение лёгкой задачи проверено",
+    "task-promoted": "Задача переведена в тяжёлый класс",
+    "project-integration-reviewed": "Сохранено общее ревью проекта",
     "brief-added": "Бриф сохранён", "brief-sealed": "Бриф зафиксирован",
     "plan-validated": "План проверен", "task-started": "Началась задача",
     "task-submitted": "Задача передана критикам", "task-repaired": "Исправления переданы на проверку",
@@ -49,6 +53,14 @@ def _phase_steps(store, state, task, proof_current):
     """Show receipts from this attempt; the order alone never implies PASS."""
     attempt = (state.get("taskHistory", {}).get(task["id"]) or [None])[-1]
     phase = task.get("phase")
+    if attempt and task_tiers.is_light(attempt):
+        completed = attempt.get("verifiedCompletion")
+        status = ("done" if proof_current else "stale") if completed else ("current" if task["status"] == "running" else "pending")
+        if task["status"] == "blocked":
+            status = "blocked"
+        return [{"id": "implementation", "label": PHASES["implementation"], "status": status},
+                {"id": "verified_completion", "label": PHASES["verified_completion"], "status": status if completed else "pending"},
+                *[{"id": name, "label": PHASES[name], "status": "skipped"} for name in TASK_PHASES if name != "implementation"]]
     result = {name: "pending" for name in TASK_PHASES}
     if task["status"] != "pending" and attempt:
         submitted = attempt.get("submitted")
@@ -134,16 +146,22 @@ def project(store, state):
     for task in state["tasks"]:
         steps = _phase_steps(store, state, task, current.get(task["id"], False))
         phase_stale = any(step["status"] == "stale" for step in steps)
-        tasks.append(dict(task, elapsedSeconds=elapsed(task, observed),
+        attempt = (state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]
+        light = task_tiers.is_light(attempt)
+        tasks.append(dict(task, tier=attempt.get("tier", "heavy"), tierReason=attempt.get("tierReason", ""),
+                          plannedTier=task.get("tier", "heavy"),
+                          completionKind="verified_completion" if attempt.get("verifiedCompletion") else ("task_acceptance" if attempt.get("acceptance") else None),
+                          perTaskReview="skipped_light" if light else "required",
+                          elapsedSeconds=elapsed(task, observed),
                           phaseLabel=PHASES.get(task.get("phase"), "Реализация"),
                           phaseTiming=None if phase_stale else phase_view(task, observed),
                           phaseSteps=steps, phaseStale=phase_stale,
                           proofCurrent=current.get(task["id"], False),
-                          maximumCriticRounds=2,
+                          maximumCriticRounds=0 if light else 2,
                           reviewPolicy=review_policy.mode((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]),
                           criticRounds=len((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1].get("rounds", []))))
     estimate_tasks = [dict(t, status="pending") if t["status"] == "completed" and not current.get(t["id"]) else t
-                      for t in state["tasks"]]
+                      for t in tasks]
     return {"version": state["version"], "title": state["title"], "run": state["run"],
             "status": status, "label": LABELS.get(status, "Проект изменён; приёмка устарела"),
             "stage": state["stage"], "displayStage": display_stage(state, gates),

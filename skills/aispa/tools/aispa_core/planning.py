@@ -5,15 +5,29 @@ from collections import Counter
 from .contracts import (active, artifact_valid, basis, definition, nonempty, overlap,
                         require, validate_plan)
 from .store import digest
-from . import delivery, review_policy
+from . import delivery, review_policy, task_tiers
 
 MAX_TASKS = 96
 MAX_REPORT_CHARS = 131072
 RISK = {"low": 0, "normal": 1, "high": 2}
 
 
-def _role_estimate(state, count):
+def _role_estimate(state, tasks):
+    if isinstance(tasks, int):
+        count = tasks
+    else:
+        tasks = list(tasks)
+        count = len(tasks)
+        if task_tiers.enabled(state):
+            light = sum(task_tiers.is_light(t) for t in tasks)
+            return {"minimum": light + (count - light) * (3 if review_policy.selected(state) == review_policy.ADAPTIVE else 4),
+                    "maximum": light + (count - light) * 4}
     return {"minimum": count * 3, "maximum": count * 4} if review_policy.selected(state) == review_policy.ADAPTIVE else count * 4
+
+
+def _role_starts(state, tasks):
+    slots = _role_estimate(state, tasks)
+    return slots if isinstance(slots, int) else slots["minimum"] if slots["minimum"] == slots["maximum"] else None
 
 
 ROLE_SLOT_NOTE = "Базовые роли одной попытки; не предел фактических запусков. Подготовка, замена исполнителя и новые разрешённые попытки не включены. Фактические запуски и токены подтверждает native usage."
@@ -48,12 +62,18 @@ def analyze(store, state, raw):
     definitions = [definition(t) for t in tasks]
     return {"basis": digest({"run": state["run"], "scope": basis(store, state, "coverage"), "draft": definitions}),
             "draft": definitions, "suggestions": suggestions,
-            "taskCount": len(tasks), "taskRoleStarts": None if review_policy.selected(state) == review_policy.ADAPTIVE else len(tasks) * 4,
-            "taskRoleSlots": _role_estimate(state, len(tasks)), "roleSlotNote": ROLE_SLOT_NOTE,
-            "criticRoundsPerTask": {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2,
+            **({"taskTiers": {t["id"]: {"tier": t["tier"], "tierReason": t["tierReason"],
+                 "taskWorkers": 1, "taskCritics": {"minimum": 0 if task_tiers.is_light(t) else 1, "maximum": 0 if task_tiers.is_light(t) else 2},
+                 "taskAcceptors": 0 if task_tiers.is_light(t) else 1} for t in tasks},
+                 "projectReviewSeparate": True,
+                 "projectReviewRole": "integration-reviewer when the final frozen attempt is light"} if task_tiers.enabled(state) else {}),
+            "taskCount": len(tasks), "taskRoleStarts": _role_starts(state, tasks),
+            "taskRoleSlots": _role_estimate(state, tasks), "roleSlotNote": ROLE_SLOT_NOTE,
+            "criticRoundsPerTask": ({"light": 0, "heavy": {"minimum": 1, "maximum": 2}} if task_tiers.enabled(state)
+                                    else {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2),
             "maximumCriticRoundsPerTask": 2, "actualCriticRounds": None, "estimatedTokens": None,
             "duplicateCriteriaRule": "При совпадении текста критериев объединённых задач сохраните каждый как '<исходный ID>: <текст>'.",
-            "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы и отдельного приёмщика; число критиков определяется замороженной политикой попытки. Замена исполнителя ремонта добавляет actor сверх оценки."}
+            "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы: heavy требует критиков и отдельного приёмщика, light — проверенное выполнение без этих ролей. Общее ревью и итоговая приёмка сохраняются. Замена исполнителя ремонта добавляет actor сверх оценки."}
 
 
 def review(store, state, final, report):
@@ -94,6 +114,8 @@ def review(store, state, final, report):
         require(len(expected_checks) == sum(len(t["criteria"]) for t in selected)
                 and set(target["criteria"]) == expected_checks,
                 "Сохраните каждый исходный критерий; совпадающие тексты подпишите исходным ID задачи")
+        if task_tiers.enabled(state) and task_tiers.is_light(target):
+            require(all(task_tiers.is_light(t) for t in selected), "Укрупнение не может понизить heavy до light")
         require(RISK[target["risk"]] >= max(RISK[t["risk"]] for t in selected), "Укрупнение не может понизить риск")
         require(all(not t["riskReason"].strip() or t["riskReason"] in target["riskReason"] for t in selected),
                 "Сохраните исходные объяснения рисков в итоговом riskReason")
@@ -120,11 +142,12 @@ def review(store, state, final, report):
     return {"report": record, "scopeBasis": basis(store, state, "coverage"),
             "planDigest": digest([definition(t) for t in final.values()]),
             "tasksBefore": len(draft), "tasksAfter": len(final),
-            "taskRoleStartsBefore": None if review_policy.selected(state) == review_policy.ADAPTIVE else 4 * len(draft),
-            "taskRoleStartsAfter": None if review_policy.selected(state) == review_policy.ADAPTIVE else 4 * len(final),
-            "taskRoleSlotsBefore": _role_estimate(state, len(draft)), "taskRoleSlotsAfter": _role_estimate(state, len(final)),
+            "taskRoleStartsBefore": _role_starts(state, draft.values()),
+            "taskRoleStartsAfter": _role_starts(state, final.values()),
+            "taskRoleSlotsBefore": _role_estimate(state, draft.values()), "taskRoleSlotsAfter": _role_estimate(state, final.values()),
             "roleSlotNote": ROLE_SLOT_NOTE,
-            "criticRoundsPerTask": {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2,
+            "criticRoundsPerTask": ({"light": 0, "heavy": {"minimum": 1, "maximum": 2}} if task_tiers.enabled(state)
+                                    else {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2),
             "maximumCriticRoundsPerTask": 2, "actualCriticRounds": None, "measuredTokenSavings": None,
             **({"deliveryDigest": digest(report["delivery"])} if "delivery" in report else {})}
 

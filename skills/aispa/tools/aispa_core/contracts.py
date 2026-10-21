@@ -21,7 +21,8 @@ def active(state):
 def definition(task):
     return {**{k: task[k] for k in ("id", "title", "requirements", "dependsOn", "zones", "criteria", "wave")},
             "readZones": task.get("readZones", []), "risk": task.get("risk", "normal"),
-            "riskReason": task.get("riskReason", "")}
+            "riskReason": task.get("riskReason", ""),
+            **{key: task[key] for key in ("tier", "tierReason", "changeKind") if key in task}}
 
 
 def task_closure(state, task_id):
@@ -235,7 +236,9 @@ def validate_plan(state, items):
         risk, reason = raw.get("risk", "normal"), raw.get("riskReason", "")
         require(risk in ("low", "normal", "high") and isinstance(reason, str), "Некорректный уровень риска")
         require(risk != "low" or nonempty(reason), "Для low risk укажите riskReason: почему задача допускает экономную модель")
-        tasks[tid] = {"id": tid, "title": raw["title"], "requirements": reqs,
+        from . import task_tiers
+        classification = task_tiers.validate(state, raw, zones, risk, reason)
+        tasks[tid] = {**classification, "id": tid, "title": raw["title"], "requirements": reqs,
                       "dependsOn": deps, "zones": zones,
                       "readZones": reads,
                       "criteria": criteria, "status": "pending", "risk": risk, "riskReason": reason}

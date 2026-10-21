@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import urllib.parse
 import zipfile
 
 
@@ -31,11 +32,15 @@ class InstallerTests(unittest.TestCase):
         self.cache = self.root / "private cache"
         self.destination = self.root / "my project" / ".agents" / "skills" / "aispa"
         self.commit = "a" * 40
-        self.tag = "v0.1.0-alpha.10"
+        self.configure_release("0.1.0-alpha.10")
+
+    def configure_release(self, version, *, modes=None):
+        self.tag = "v" + version
+        modes = modes or {}
         self.files = {
             "SKILL.md": b"# Synthetic AISpa skill\n",
             "tools/aispa.py": b"print('synthetic')\n",
-            "tools/aispa_core/__init__.py": b'VERSION = "0.1.0-alpha.10"\n',
+            "tools/aispa_core/__init__.py": ('VERSION = "' + version + '"\n').encode(),
             "LICENSE": b"Synthetic license for test fixture.\n",
         }
         buffer = io.BytesIO()
@@ -44,22 +49,24 @@ class InstallerTests(unittest.TestCase):
             for name, data in sorted(self.files.items()):
                 info = zipfile.ZipInfo("aispa/" + name)
                 info.create_system = 3
-                info.external_attr = (stat.S_IFREG | 0o644) << 16
+                info.external_attr = (stat.S_IFREG | modes.get(name, 0o644)) << 16
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, data)
                 entries.append({"path": name, "sha256": hashlib.sha256(data).hexdigest(),
-                                "size": len(data), "mode": 0o644})
+                                "size": len(data), "mode": modes.get(name, 0o644)})
         self.archive = buffer.getvalue()
         self.manifest = {"schema": 1, "repository": install.REPOSITORY,
-                         "version": "0.1.0-alpha.10", "commit": self.commit,
+                         "version": version, "commit": self.commit,
                          "archive": {"name": "aispa.zip", "sha256": hashlib.sha256(self.archive).hexdigest()},
                          "files": entries}
-        prefix = f"https://github.com/{install.REPOSITORY}/releases/download/{self.tag}/"
+        quoted_tag = urllib.parse.quote(self.tag, safe="")
+        prefix = f"https://github.com/{install.REPOSITORY}/releases/download/{quoted_tag}/"
         self.assets = {prefix + "aispa.zip": self.archive,
                        prefix + "aispa-update.json": json.dumps(self.manifest).encode()}
-        self.release = {"draft": False, "prerelease": True, "published_at": "2026-10-20T00:00:00Z",
+        self.release = {"draft": False, "prerelease": not install._semver(version)[3],
+                        "published_at": "2026-10-20T00:00:00Z",
                         "tag_name": self.tag,
-                        "html_url": f"https://github.com/{install.REPOSITORY}/releases/tag/{self.tag}",
+                        "html_url": f"https://github.com/{install.REPOSITORY}/releases/tag/{quoted_tag}",
                         "assets": [{"name": name, "state": "uploaded", "browser_download_url": prefix + name}
                                    for name in ("aispa.zip", "aispa-update.json")]}
 
@@ -133,15 +140,78 @@ class InstallerTests(unittest.TestCase):
             install._select_release([draft, unpublished], self.tag)
         with self.assertRaises(install.InstallError):
             install._select_release([self.release], "v0.1.0-alpha.11")
-        self.assertEqual(install._select_release([draft, self.release])["tag"], self.tag)
+        self.assertEqual(install._select_release([draft, self.release], self.tag)["tag"], self.tag)
         self.assertEqual(install._select_release([self.release], self.tag)["version"], "0.1.0-alpha.10")
+
+    def test_default_selects_stable_despite_higher_prereleases_and_metadata_flags(self):
+        self.configure_release("4.0.0-alpha.1")
+        higher_prerelease = self.release
+        self.configure_release("3.0.0")
+        stable_tag_flagged_prerelease = dict(self.release, prerelease=True)
+        self.configure_release("2.0.0-alpha.1")
+        prerelease_tag_flagged_stable = dict(self.release, prerelease=False)
+        self.configure_release("1.0.0")
+        invalid_flags = [dict(self.release, prerelease=flag) for flag in (None, 0, "false")]
+        self.configure_release("0.1.0+build-with-hyphen")
+        stable = self.release
+        for releases in ([higher_prerelease, stable], [stable, higher_prerelease],
+                         [stable_tag_flagged_prerelease, prerelease_tag_flagged_stable, *invalid_flags, stable]):
+            with self.subTest(tags=[row["tag_name"] for row in releases]):
+                chosen = install._select_release(releases)
+                self.assertEqual(chosen["version"], "0.1.0+build-with-hyphen")
+                self.assertIs(chosen["prerelease"], False)
+
+    def test_default_without_published_stable_fails_clearly_before_staging(self):
+        draft = dict(self.release, draft=True)
+        unpublished = dict(self.release, published_at=None)
+        with self.network([self.release, draft, unpublished]), \
+             patch.object(install, "_source_commit", side_effect=AssertionError("source accessed")):
+            with self.assertRaisesRegex(install.InstallError, "стабильный Release.*не найден"):
+                install.preview(destination=self.destination, cache_dir=self.cache)
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(self.cache.exists())
+
+    def test_explicit_tag_preserves_boolean_github_prerelease_metadata(self):
+        for flag in (False, True):
+            with self.subTest(flag=flag):
+                release = dict(self.release, prerelease=flag)
+                self.assertIs(install._select_release([release], self.tag)["prerelease"], flag)
+                with self.network([release]), patch.object(updates, "_release", wraps=updates._release) as verify:
+                    receipt = install.preview(destination=self.destination, cache_dir=self.cache, tag=self.tag)
+                self.assertIs(verify.call_args.args[0][0]["prerelease"], flag)
+                self.assertIs(receipt["prerelease"], flag)
+        for flag in (None, 0, 1, "false"):
+            with self.subTest(flag=flag), self.assertRaisesRegex(install.InstallError, "prerelease"):
+                install._select_release([dict(self.release, prerelease=flag)], self.tag)
+
+    def test_stable_default_preview_and_apply_preserve_verified_bytes_and_modes(self):
+        self.configure_release("0.1.0", modes={"tools/aispa.py": 0o755})
+        output = io.StringIO()
+        with self.network(), contextlib.redirect_stdout(output):
+            self.assertEqual(install.main(["preview", "--destination", str(self.destination),
+                                           "--cache-dir", str(self.cache)]), 0)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["version"], "0.1.0")
+        self.assertIs(receipt["prerelease"], False)
+        self.assertTrue(receipt["requiresConfirmation"])
+        self.assertFalse(self.destination.exists())
+        staged = self.cache / receipt["candidateId"] / "package"
+        before = {p.relative_to(staged): (p.read_bytes(), stat.S_IMODE(p.stat().st_mode))
+                  for p in staged.rglob("*") if p.is_file()}
+        self.assertEqual({name.as_posix(): value[0] for name, value in before.items()}, self.files)
+        installed = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+        self.assertEqual(installed["status"], "installed")
+        self.assertEqual(updates._version(self.destination), "0.1.0")
+        self.assertEqual({p.relative_to(self.destination): (p.read_bytes(), stat.S_IMODE(p.stat().st_mode))
+                          for p in self.destination.rglob("*") if p.is_file()}, before)
+        self.assertEqual(install._scan_package(self.destination)[1], receipt["candidateDigest"])
 
     def test_source_commit_and_manifest_hash_mismatch_fail_without_install(self):
         self.manifest["commit"] = "b" * 40
         url = f"https://github.com/{install.REPOSITORY}/releases/download/{self.tag}/aispa-update.json"
         self.assets[url] = json.dumps(self.manifest).encode()
         with self.network(), self.assertRaises(install.InstallError):
-            install.preview(destination=self.destination, cache_dir=self.cache)
+            install.preview(destination=self.destination, cache_dir=self.cache, tag=self.tag)
         self.assertFalse(self.destination.exists())
         self.assertEqual(list(self.cache.iterdir()), [])
         # A mismatched checked-out source is rejected before importing it.

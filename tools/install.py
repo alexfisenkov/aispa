@@ -158,6 +158,9 @@ def _select_release(rows, tag=None):
             order = _semver(version)
         except InstallError:
             continue
+        if tag is None and (not order[3] or row.get("prerelease") is not False):
+            continue
+        _need(type(row.get("prerelease")) is bool, "Некорректный признак prerelease у Release")
         expected_url = f"https://github.com/{REPOSITORY}/releases/tag/{urllib.parse.quote(release_tag, safe='')}"
         _need(row.get("html_url") == expected_url, "Некорректный адрес Release")
         assets = row.get("assets")
@@ -172,8 +175,10 @@ def _select_release(rows, tag=None):
             urls[name] = expected
         eligible.append((order, {"tag": release_tag, "version": version,
                                  "url": expected_url, "assets": urls,
+                                 "prerelease": row["prerelease"],
                                  "publishedAt": row["published_at"]}))
-    _need(eligible, "Опубликованный Release с проверяемым пакетом не найден")
+    _need(eligible, "Опубликованный стабильный Release с проверяемым пакетом не найден"
+          if tag is None else "Опубликованный Release с проверяемым пакетом не найден")
     return max(eligible, key=lambda item: item[0])[1]
 
 
@@ -374,7 +379,7 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
         # The already pinned publisher verifier checks exact release asset URLs,
         # manifest schema, ZIP entries, modes, sizes and per-file hashes.
         raw = {"draft": False, "published_at": release["publishedAt"],
-               "prerelease": "-" in release["version"], "tag_name": release["tag"],
+               "prerelease": release["prerelease"], "tag_name": release["tag"],
                "html_url": release["url"], "assets": [
                    {"name": name, "state": "uploaded", "browser_download_url": url}
                    for name, url in release["assets"].items()]}
@@ -403,6 +408,7 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
         receipt = {"schema": 1, "status": "prepared", "candidateId": candidate.name,
                    "repository": REPOSITORY, "destination": str(target),
                    "version": validated["version"], "tag": validated["tag"],
+                   "prerelease": release["prerelease"],
                    "commit": commit, "releaseUrl": validated["url"],
                    "archiveSha256": archive_hash,
                    "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
@@ -537,7 +543,7 @@ def main(argv=None):
     first.add_argument("--scope", choices=("project", "global"))
     first.add_argument("--project-root")
     first.add_argument("--destination")
-    first.add_argument("--tag")
+    first.add_argument("--tag", help="explicit published tag; otherwise choose the newest stable release")
     first.add_argument("--cache-dir")
     first.add_argument("--timeout", type=float, default=30)
     second = commands.add_parser("apply", help="install the reviewed candidate")

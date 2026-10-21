@@ -221,7 +221,7 @@ def record(store, state, task_id, report):
             "Test intent: контракт нужен только активной задаче новой политики")
     task, attempt = _attempt(state, task_id)
     require(task.get("status") == "running" and not attempt.get("rounds")
-            and not attempt.get("acceptance") and not attempt.get("terminal"),
+            and not attempt.get("acceptance") and not attempt.get("verifiedCompletion") and not attempt.get("terminal"),
             "Test intent: контракт заморожен после начала критики")
     _report(store, state, task, attempt, report)
     journal = store.read_journal()

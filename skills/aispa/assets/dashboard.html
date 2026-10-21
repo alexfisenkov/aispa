@@ -192,7 +192,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
     <div><small>AI мастерская</small><h1>AISpa</h1></div>
     <span class="sr-only" data-i18n="workshopLink"> — Telegram-канал, новая вкладка</span>
     </a>
-    <span class="pill" id="version">Альфа-версия</span>
+    <span class="pill" id="version">Версия</span>
   </div>
   <div class="hdr-r">
     <div class="source"><span class="dot" id="sourceDot"></span><span id="sourceLabel">Загрузка…</span></div>
@@ -365,7 +365,11 @@ var EN={
  'Принято на дату снимка':'Accepted as of snapshot','Обновите состояние или проверьте совместимость версии.':'Refresh the state or check version compatibility.',
  'Не подтверждено или устарело':'Unconfirmed or stale','Нет актуального подтверждения':'No current confirmation',
  'Состояние недоступно':'State unavailable','Нет данных':'No data','Пока нет оценки':'No estimate yet',
- 'Задача принята':'Task accepted','Проверки устарели':'Checks are stale',
+ 'Задача принята':'Task accepted','Выполнение проверено':'Completion verified',
+ 'Лёгкая задача':'Light task','Тяжёлая задача':'Heavy task',
+ 'Без отдельных критиков · общая приёмка проекта':'No task reviewers · project-level acceptance',
+ 'Стандартный маршрут проверки':'Standard review route',
+ 'Версия':'Version','Предварительная версия':'Prerelease','Проверки устарели':'Checks are stale',
  'Архив':'Archive','на дату снимка':'as of the snapshot','На дату снимка':'As of snapshot',
  'пример':'example','Была в работе':'Was in progress',
  'Фаза на дату снимка: ':'Phase as of snapshot: ',
@@ -463,7 +467,7 @@ function taskLabel(t,d){
   t.status==='running'&&d.status!=='running'?tr('Приостановлена'):
   t.status==='running'&&phaseName(t)?phaseName(t):
   t.status==='completed'&&t.proofCurrent===false?tr('Нужна повторная проверка'):
-  t.status==='completed'&&t.proofCurrent===true?tr('Задача принята'):tr(TASK[t.status]||UNKNOWN);
+  t.status==='completed'&&t.proofCurrent===true?tr(t.completionKind==='verified_completion'?'Выполнение проверено':'Задача принята'):tr(TASK[t.status]||UNKNOWN);
  return label+sourceSuffix();
 }
 function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
@@ -471,6 +475,11 @@ function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
 function phaseTime(t,d){var p=t.phaseTiming;if(t.phaseStale||!p||!Number.isFinite(p.elapsedSeconds))return null;
  return p.elapsedSeconds+(p.activeSince&&t.status==='running'&&d.status==='running'?delta():0)}
 function phaseName(t){var p=t.phaseTiming;return tr(t.phaseLabel||p&&(PHASE_LABEL[p.phase]||p.phase)||'')}
+function versionLabel(version){
+ if(!version)return tr('Версия');
+ var pre=String(version).split('+')[0].split('-').slice(1).join('-');
+ return (pre?(tr(/^alpha(?:[.-]|$)/i.test(pre)?'Альфа':'Предварительная версия')+' · '):'')+version;
+}
 function phaseSteps(t){if(!Array.isArray(t.phaseSteps)||!t.phaseSteps.length)return null;
  var row=h('div','phase-steps');row.setAttribute('role','list');row.setAttribute('aria-label',tr('Этапы задачи'));
  t.phaseSteps.forEach(function(step){if(!step||!PHASE_STATUS[step.status])return;
@@ -589,7 +598,7 @@ function remainingItem(value,key,reqs,tasks){
 }
 function render(d){
  var status=viewStatus(d),reqs=d.requirements,tasks=d.tasks,rem=d.remaining||{};
- $('title').textContent=d.title||tr('Без названия');$('version').textContent=d.version?tr('Альфа')+' · '+d.version:tr('Альфа-версия');
+ $('title').textContent=d.title||tr('Без названия');$('version').textContent=versionLabel(d.version);
  $('label').textContent=source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
   tr(LABELS[status]||UNKNOWN)+(source==='archive'||source==='demo'?sourceSuffix():'');
  $('hint').textContent=source==='archive'?tr('Это историческое состояние. Текущий статус проекта здесь не проверяется.'):
@@ -625,13 +634,18 @@ function render(d){
  var wv=$('waves');wv.replaceChildren();
  if(!tasks.length)wv.append(h('div','note',tr('План задач ещё не подготовлен.')));
  waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
+  var hasLight=ts.some(function(t){return t.tier==='light'||t.completionKind==='verified_completion'});
   var hasProof=ts.some(function(t){return typeof t.proofCurrent==='boolean'}),accepted=ts.filter(function(t){return t.status==='completed'&&t.proofCurrent===true}).length;
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,tr('Волна')+' '+n));
-  hd.append(l,h('span',null,(hasProof?(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято'):
+  hd.append(l,h('span',null,(hasProof?(hasLight?(locale==='en'?accepted+' of '+ts.length+' completed and verified':accepted+' из '+ts.length+' выполнено и проверено'):(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято')):
    (locale==='en'?c+' of '+ts.length+' completed':c+' из '+ts.length+' завершено'))+sourceSuffix()));var box=h('div','tasks');
   ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')+(t.status==='completed'&&t.proofCurrent===false?' proof-stale':'')),b=h('div','task-body');
    b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?tr('Требования: ')+t.requirements.join(', '):tr('Без привязки к требованиям')));
    var steps=phaseSteps(t);if(steps)b.append(steps);
+   if(t.tier==='light'||t.tier==='heavy'){
+    b.append(h('small',null,tr(t.tier==='light'?'Лёгкая задача':'Тяжёлая задача')+' · '+tr(t.tier==='light'?'Без отдельных критиков · общая приёмка проекта':'Стандартный маршрут проверки')));
+    if(t.tierReason)b.append(h('small',null,t.tierReason));
+   }
    var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));
    var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,h('span','task-time',tr('Вся задача')),clock);
    if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
@@ -718,7 +732,7 @@ function demoSteps(states){return Object.keys(PHASE_LABEL).map(function(id,i){re
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.1.0-alpha.10',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.1.0',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[

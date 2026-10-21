@@ -352,3 +352,28 @@ test('light faint text and touch controls meet stated size and contrast',()=>{
  assert.match(html,/\.pref\{height:44px/);assert.match(html,/\.btn\{height:44px/);assert.match(html,/\.tab\{[^}]*height:44px/);
  assert.match(html,/\.task-body b\{font-size:16px/);assert.match(html,/\.dec b\{[^}]*font-size:16px/);
 });
+
+
+test('stable version and prerelease labels follow the actual version',async()=>{
+ const d=sample();d.version='0.1.0';const f=await fixture('',d);
+ assert.equal(f.text('version'),'0.1.0');
+ d.version='0.1.0+build-test';await f.update(d);assert.equal(f.text('version'),d.version);
+ d.version='0.1.0-alpha.10';await f.update(d);assert.equal(f.text('version'),'Альфа · '+d.version);
+ d.version='0.2.0-rc.1';await f.update(d);assert.match(f.text('version'),/^Предварительная версия/);
+ f.el('language').change('en');assert.match(f.text('version'),/^Prerelease/);
+});
+test('light completion is distinct from task and project acceptance',async()=>{
+ const d=sample();d.tasks=[{id:'T01',title:'Текст подсказки',requirements:['R01'],wave:1,
+ status:'completed',proofCurrent:true,tier:'light',tierReason:'Только текст',completionKind:'verified_completion',
+ perTaskReview:'skipped_light',elapsedSeconds:12,
+ phaseSteps:[{id:'implementation',label:'Реализация',status:'done'},
+ {id:'verified_completion',label:'Выполнение проверено',status:'done'},
+ {id:'critic_1',label:'Первый критик',status:'skipped'}]}];
+ const f=await fixture('',d);assert.match(f.text('waves'),/Выполнение проверено/);
+ assert.match(f.text('waves'),/Лёгкая задача/);assert.match(f.text('waves'),/1 из 1 выполнено и проверено/);
+ assert.doesNotMatch(f.text('waves'),/Задача принята|задач принято/);assert.equal(f.text('label'),'В работе');
+ d.tasks[0].proofCurrent=false;await f.update(d);assert.match(f.text('waves'),/Нужна повторная проверка/);
+ assert.match(f.text('waves'),/0 из 1 выполнено и проверено/);
+ d.tasks[0].tier='heavy';d.tasks[0].completionKind=null;d.tasks[0].status='running';
+ await f.update(d);assert.match(f.text('waves'),/Тяжёлая задача/);assert.doesNotMatch(f.text('waves'),/Без отдельных критиков/);
+});

@@ -248,7 +248,10 @@ def _attempts(state, tasks):
                            "createdAt": attempt.get("createdAt"), "rounds": len(attempt.get("rounds", [])),
                            "terminal": bool(attempt.get("terminal")),
                            "actors": sorted(set(attempt.get("actors", {}).values()) | set(attempt.get("writers", []))),
-                           "accepted": bool((attempt.get("acceptance") or {}).get("passed"))})
+                           "accepted": bool((attempt.get("acceptance") or {}).get("passed")),
+                           **({"completionKind": "verified_completion", "verifiedCompletion": bool(attempt["verifiedCompletion"].get("passed"))}
+                              if attempt.get("verifiedCompletion") else {}),
+                           **({"tier": attempt["tier"]} if "tier" in attempt else {})})
     return result
 
 

@@ -150,7 +150,7 @@ class Journal:
         if not state or state.get("schema") != SCHEMA:
             raise Invalid("Неподдерживаемая схема журнала")
         if state.get("version") != VERSION:
-            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9"}
+            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10"}
             if not (handoff_only and state.get("version") in supported
                     and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
                 raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")

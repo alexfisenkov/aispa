@@ -47,19 +47,22 @@ class UpdateTests(unittest.TestCase):
             file.write_bytes(data)
             file.chmod(0o644)
 
-    def release(self, version="0.1.0-alpha.3", *, files=None, zip_names=None, symlink=False):
+    def release(self, version="0.1.0-alpha.3", *, files=None, zip_names=None, symlink=False, modes=None):
         files = files or self.package_content(version)
+        modes = modes or {}
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
             for index, (name, data) in enumerate(sorted(files.items())):
                 info = zipfile.ZipInfo((zip_names or {}).get(name, "aispa/" + name))
                 info.create_system = 3
-                info.external_attr = ((stat.S_IFLNK if symlink and index == 0 else stat.S_IFREG) | 0o644) << 16
+                info.external_attr = ((stat.S_IFLNK if symlink and index == 0 else stat.S_IFREG)
+                                      | modes.get(name, 0o644)) << 16
                 archive.writestr(info, data)
         archive = stream.getvalue()
         manifest = {"schema": 1, "repository": updates.REPOSITORY, "version": version, "commit": "a" * 40,
                     "archive": {"name": "aispa.zip", "sha256": hashlib.sha256(archive).hexdigest()},
-                    "files": [{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "mode": 0o644}
+                    "files": [{"path": name, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+                               "mode": modes.get(name, 0o644)}
                               for name, data in sorted(files.items())]}
         tag = "v" + version
         ref_url = f"https://api.github.com/repos/{updates.REPOSITORY}/git/ref/tags/{tag}"
@@ -365,6 +368,54 @@ class UpdateTests(unittest.TestCase):
         updates.apply(self.package, result["candidateId"], confirmed=True)
         self.assertEqual(updates._snapshot(runtime)[1], before)
 
+    def test_alpha10_to_stable_and_rollback_preserve_bytes_modes_and_pinned_runtime(self):
+        old = dict(self.package_content("0.1.0-alpha.10"), **{"assets/original.bin": b"\x00\xffalpha.10\r\n"})
+        self.write_package(self.package, old)
+        (self.package / "tools/aispa.py").chmod(0o755)
+        runtime = self.root / "project/.aispa/runs/active-alpha10/runtime"
+        shutil.copytree(self.package, runtime)
+        journal = runtime.parent / "events.jsonl"
+        journal.write_bytes(b'{"version":"0.1.0-alpha.10","status":"running"}\n')
+
+        def file_state(directory):
+            return {p.relative_to(directory): (p.read_bytes(), stat.S_IMODE(p.stat().st_mode))
+                    for p in directory.rglob("*") if p.is_file()}
+
+        before = file_state(self.package)
+        pinned_before = file_state(runtime.parent)
+        stable = dict(self.package_content("0.1.0"), **{"assets/stable.bin": b"\x00\xffstable\n"})
+        release = self.release("0.1.0", files=stable, modes={"tools/aispa.py": 0o755})
+        with self.network([release]):
+            self.assertEqual(updates.check(self.package)["status"], "available")
+            self.assertEqual(updates.check(runtime)["installReason"], "pinned_runtime")
+            with self.assertRaisesRegex(Invalid, "pinned_runtime"):
+                updates.prepare(runtime)
+            review = updates.prepare(self.package)
+        self.assertEqual((review["installedVersion"], review["version"]), ("0.1.0-alpha.10", "0.1.0"))
+        self.assertEqual(file_state(self.package), before)
+        self.assertEqual(file_state(runtime.parent), pinned_before)
+        staged = self.package.parent / review["candidateId"] / "package"
+        stable_before = file_state(staged)
+        self.assertEqual({name.as_posix(): value[0] for name, value in stable_before.items()}, stable)
+        with self.assertRaisesRegex(Invalid, "pinned_runtime"):
+            updates.apply(runtime, review["candidateId"], confirmed=True)
+        installed = updates.apply(self.package, review["candidateId"], confirmed=True)
+        backup = self.package.parent / installed["backupId"]
+        self.assertEqual((installed["previousVersion"], installed["version"]), ("0.1.0-alpha.10", "0.1.0"))
+        self.assertEqual(file_state(self.package), stable_before)
+        self.assertEqual(file_state(backup / "package"), before)
+        self.assertEqual(file_state(runtime.parent), pinned_before)
+        self.assertEqual(updates._version(runtime), "0.1.0-alpha.10")
+        with self.network([release, self.release("0.2.0-alpha.1")]):
+            checked = updates.check(self.package)
+        self.assertEqual((checked["status"], checked["channel"]), ("current", "stable"))
+        restored = updates.rollback(self.package, installed["backupId"], confirmed=True)
+        self.assertEqual(restored["status"], "rolled_back")
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.10")
+        self.assertEqual(file_state(self.package), before)
+        self.assertEqual(file_state(backup / "replaced"), stable_before)
+        self.assertEqual(file_state(runtime.parent), pinned_before)
+
     def test_candidate_for_other_target_and_path_ids_refused(self):
         result = self.prepare()
         other = self.package.parent / "different"
@@ -409,6 +460,50 @@ class UpdateTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
         with self.assertRaises(Invalid):
             producer.build_release(repo, self.root / "artifact-bad")
+
+    def test_stable_producer_package_prepares_applies_and_rolls_back(self):
+        spec = importlib.util.spec_from_file_location("package_update_stable", ROOT / "tools/package_update.py")
+        producer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(producer)
+        repo = self.root / "stable-repo"
+        repo.mkdir()
+        self.write_package(repo / "skills/aispa", self.package_content("0.1.0"))
+        (repo / "LICENSE").write_bytes(b"MIT fixture\n")
+        (repo / "tools").mkdir()
+        installer = (ROOT / "tools/install.py").read_bytes()
+        (repo / "tools/install.py").write_bytes(installer)
+        for args in (("init", "-q"), ("add", "."), ("update-index", "--chmod=+x", "skills/aispa/tools/aispa.py"),
+                     ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "stable fixture")):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        first = producer.build_release(repo, self.root / "stable-artifact-1")
+        second = producer.build_release(repo, self.root / "stable-artifact-2")
+        self.assertEqual(first["version"], "0.1.0")
+        self.assertFalse(first["published"])
+        for key in ("archive", "manifest", "installer"):
+            self.assertEqual(Path(first[key]).read_bytes(), Path(second[key]).read_bytes())
+        self.assertEqual(Path(first["installer"]).read_bytes(), installer)
+        self.assertEqual(first["installerSha256"], hashlib.sha256(installer).hexdigest())
+        manifest = json.loads(Path(first["manifest"]).read_bytes())
+        self.assertEqual(manifest["commit"], first["commit"])
+        self.assertEqual(next(row["mode"] for row in manifest["files"] if row["path"] == "tools/aispa.py"), 0o755)
+        release = self.release("0.1.0")
+        for asset in release["assets"]:
+            key = "archive" if asset["name"] == "aispa.zip" else "manifest"
+            self.assets[asset["browser_download_url"]] = Path(first[key]).read_bytes()
+        ref = f"https://api.github.com/repos/{updates.REPOSITORY}/git/ref/tags/v0.1.0"
+        self.assets[ref] = json.dumps({"ref": "refs/tags/v0.1.0",
+                                      "object": {"type": "commit", "sha": first["commit"]}}).encode()
+        self.write_package(self.package, self.package_content("0.1.0-alpha.10"))
+        before = updates._snapshot(self.package)
+        with self.network([release]):
+            review = updates.prepare(self.package)
+        self.assertEqual(review["commit"], first["commit"])
+        self.assertEqual(updates._snapshot(self.package), before)
+        installed = updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(updates._version(self.package), "0.1.0")
+        self.assertEqual(updates._snapshot(self.package)[0], updates._disk_records(updates._manifest(manifest, review)))
+        updates.rollback(self.package, installed["backupId"], confirmed=True)
+        self.assertEqual(updates._snapshot(self.package), before)
 
 
 if __name__ == "__main__":

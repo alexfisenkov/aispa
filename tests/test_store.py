@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core.store import Invalid, Journal, confined
@@ -57,6 +58,41 @@ class StorageTests(unittest.TestCase):
         self.store.append(state, "unsupported")
         with self.assertRaises(Invalid):
             self.store.load(handoff_only=True)
+
+    def test_alpha10_terminal_handoff_is_read_only_after_stable_upgrade(self):
+        for status in ("accepted", "delivered_with_remaining", "cancelled"):
+            with self.subTest(status=status):
+                store = Journal(self.root / status)
+                with patch("aispa_core.store.VERSION", "0.1.0-alpha.10"):
+                    state = store.create("prior", "Alpha.10 fixture")
+                    state["status"] = status
+                    store.append(state, "terminal-fixture")
+                before = {p.relative_to(store.home): p.read_bytes()
+                          for p in store.home.rglob("*") if p.is_file()}
+                with self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+                    store.load()
+                self.assertEqual(store.load(handoff_only=True), state)
+                self.assertEqual({p.relative_to(store.home): p.read_bytes()
+                                  for p in store.home.rglob("*") if p.is_file()}, before)
+                next_state = store.create("next", "Stable run")
+                self.assertEqual(next_state["version"], "0.1.0")
+                self.assertEqual((store.home / "runs" / state["run"] / "events.jsonl").read_bytes(),
+                                 before[Path("runs") / state["run"] / "events.jsonl"])
+
+    def test_active_alpha10_requires_its_pinned_runtime(self):
+        with patch("aispa_core.store.VERSION", "0.1.0-alpha.10"):
+            prior = self.store.create("prior", "Active alpha.10")
+        before = {p.relative_to(self.store.home): p.read_bytes()
+                  for p in self.store.home.rglob("*") if p.is_file()}
+        for handoff_only in (False, True):
+            with self.subTest(handoff_only=handoff_only), self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+                self.store.load(handoff_only=handoff_only)
+        with self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+            self.store.create("next", "Must not replace active alpha.10")
+        self.assertEqual({p.relative_to(self.store.home): p.read_bytes()
+                          for p in self.store.home.rglob("*") if p.is_file()}, before)
+        with patch("aispa_core.store.VERSION", "0.1.0-alpha.10"):
+            self.assertEqual(self.store.load(), prior)
 
     def test_zone_aliases_hash_real_files_and_reject_reserved_paths(self):
         self.repository()

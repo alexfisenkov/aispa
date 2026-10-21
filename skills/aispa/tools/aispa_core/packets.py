@@ -5,7 +5,7 @@ import json
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
 from .store import common_input, confined, Invalid
 from .portable import match_name, relative_name
-from . import docmeta, telemetry, review_policy
+from . import docmeta, telemetry, review_policy, task_tiers
 
 MAX_PACKET_BYTES = 16000
 
@@ -48,6 +48,18 @@ def routing(state, task, role, attempt=None, store=None):
     strong = (role != "worker" or task.get("risk", "normal") != "low" or foundation
               or bool((attempt or {}).get("authorization")) or inherited_retry
               or bool((attempt or {}).get("repairPlan")))
+    light = task_tiers.is_light(attempt if attempt is not None else task)
+    if light:
+        require(role == "worker", "У light нет роли критика или приёмщика")
+        return {"tier": "standard", "advisory": True, "taskTier": "light",
+                "tierReason": (attempt or task).get("tierReason"),
+                "selection": "Use only host-exposed models permitted by project rules",
+                "reason": "Explicit bounded low-risk change; semantic safety still requires final review",
+                "reviewPolicy": "verified_completion", "criticRounds": 0,
+                "minimumCriticRounds": 0, "maximumCriticRounds": 0, "actualCriticRounds": 0,
+                "taskRoleSlots": {"minimum": 1, "maximum": 1},
+                "perTaskReview": "skipped_light", "projectReviewSeparate": True,
+                "reviewRule": "Current verification and worker evidence complete implementation; independent project review and final acceptance remain mandatory."}
     policy = review_policy.mode(attempt) if attempt is not None else review_policy.selected(state)
     return {"tier": "strong" if strong else "standard", "advisory": True,
             "reason": "Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation",
@@ -183,7 +195,10 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         task = next(t for t in selected if t["id"] == task_id)
         packet.update(verification=current.get("verification"), attempt=current["id"],
                       reviewPolicy=review_policy.mode(current),
-                      maximumCriticRounds=2, actualCriticRounds=len(current["rounds"]),
+                      taskTier=current.get("tier", "heavy"), tierReason=current.get("tierReason", ""),
+                      verifiedCompletion=current.get("verifiedCompletion"),
+                      maximumCriticRounds=0 if task_tiers.is_light(current) else 2, actualCriticRounds=len(current["rounds"]),
+                      perTaskReview="skipped_light" if task_tiers.is_light(current) else "required",
                       testIntent=current.get("testIntent"),
                       testSourceChanges=test_intent.source_changes(store, state, task_id),
                       repairPlan=current.get("repairPlan"),
@@ -201,7 +216,8 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                                         for rid, criterion in sorted(pipeline.expected_checks(task_id, role))]
     if kind == "acceptance":
         packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
-                      blindReview=state.get("blindReview"), handoff=state.get("handoff"))
+                      blindReview=state.get("blindReview"), handoff=state.get("handoff"),
+                      projectIntegrationReview=state.get("projectIntegrationReview"))
         if state.get("policy", {}).get("executionObligations"):
             from . import execution_obligations
             packet["executionObligations"] = execution_obligations.view(store, state)
@@ -210,6 +226,9 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         from . import integration
         packet["branchReview"] = integration.context(store, state, task_id)
         packet["branchReviewAxes"] = list(integration.AXES)
+        if task_tiers.is_light(state["taskHistory"][task_id][-1]):
+            packet["projectReviewRole"] = "integration-reviewer"
+            packet["projectReviewSeparate"] = True
     if kind == "task" and state.get("ownerReferences"):
         ids = {rid for task in selected for rid in task["requirements"]}
         packet["ownerReferences"] = [ref for ref in state["ownerReferences"] if set(ref["requirements"]) & ids]
