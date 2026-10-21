@@ -1,0 +1,322 @@
+{
+  "schema": 1,
+  "candidate_commit": "7b39b9e33e9cf6d09af808f510dd5d6b4d2facec",
+  "reference_commit": "9fc898cbe941d5b8a369f1dd657e9119676eb44f",
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "python": "3.11.15",
+  "model_attempt_retries": 0,
+  "surface": "fresh exact designated-project-commit clones; two source judges per pair in opposite orders; fixed manual IDs merged into separate manual-completion oracle pass",
+  "blinding": "LIMITED: retained product README and .gitignore provenance hints",
+  "arms": [
+    {
+      "project": "pulsefold",
+      "method": "aispa",
+      "designated_project_commit": "acc01cc80f5361fae8252866f2e738ad0482b866",
+      "delivery_classification": "COMPLETED_PRODUCT",
+      "native_final_capture": "captured",
+      "capture_issues": [],
+      "raw_freeze_attempt_state": "invalid_or_partial",
+      "raw_freeze_invalid_reasons": [
+        "immutable_input_changed:AGENTS.md"
+      ],
+      "raw_frozen_snapshot_acceptance": "PASS",
+      "raw_snapshot_groups": {
+        "R1": "PASS",
+        "R2": "PASS",
+        "R3": "PASS",
+        "R4": "PASS",
+        "R5": "PASS",
+        "R6": "PASS",
+        "R7": "PASS"
+      },
+      "raw_snapshot_probe_counts": {
+        "PASS": 47
+      },
+      "completed_product_acceptance": "PASS",
+      "own_tests_status": "EXECUTED",
+      "own_commands": [
+        {
+          "argv": [
+            "python3.11",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-v"
+          ],
+          "status": "COMPLETED",
+          "returncode": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c7116610db7fcd74b39625a1b442844475a547f48dbe5d7088565b0b37aa6d7e"
+        },
+        {
+          "argv": [
+            "python3.11",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_main.py",
+            "-k",
+            "test_example",
+            "-v"
+          ],
+          "status": "COMPLETED",
+          "returncode": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e8db08c1e58813c5576a80515b0fbca4b8f2582a37eccebf16d86feae560ff85"
+        }
+      ],
+      "external_report_sha256": "683fa974513480fe8cf9b0b7bb663e9c073485b16f44d0463572d7434e375eef"
+    },
+    {
+      "project": "pulsefold",
+      "method": "reference",
+      "designated_project_commit": "ac458d55a28895a5b62b38f1f9f40780da5583f2",
+      "delivery_classification": "COMPLETED_PRODUCT",
+      "native_final_capture": "captured",
+      "capture_issues": [],
+      "raw_freeze_attempt_state": "valid",
+      "raw_freeze_invalid_reasons": [],
+      "raw_frozen_snapshot_acceptance": "PASS",
+      "raw_snapshot_groups": {
+        "R1": "PASS",
+        "R2": "PASS",
+        "R3": "PASS",
+        "R4": "PASS",
+        "R5": "PASS",
+        "R6": "PASS",
+        "R7": "PASS"
+      },
+      "raw_snapshot_probe_counts": {
+        "PASS": 47
+      },
+      "completed_product_acceptance": "PASS",
+      "own_tests_status": "EXECUTED",
+      "own_commands": [
+        {
+          "argv": [
+            "python3.11",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-v"
+          ],
+          "status": "COMPLETED",
+          "returncode": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "212ca42d48a30f59e484ff2444c3b38d92951c9528c6093a4a3c444d139f2678"
+        },
+        {
+          "argv": [
+            "python3.11",
+            "-B",
+            "-m",
+            "py_compile",
+            "main.py",
+            "tests/test_main.py"
+          ],
+          "status": "COMPLETED",
+          "returncode": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "external_report_sha256": "450505f7e771035a8596da71df97134fb3976fd6c29d20099c5d4546845138ca"
+    },
+    {
+      "project": "queuelet",
+      "method": "reference",
+      "designated_project_commit": "3bb987ad95a191b6492c3aa7e7b7fa2e35b8af93",
+      "delivery_classification": "COMPLETED_PRODUCT",
+      "native_final_capture": "captured",
+      "capture_issues": [],
+      "raw_freeze_attempt_state": "valid",
+      "raw_freeze_invalid_reasons": [],
+      "raw_frozen_snapshot_acceptance": "PASS",
+      "raw_snapshot_groups": {
+        "R1": "PASS",
+        "R2": "PASS",
+        "R3": "PASS",
+        "R4": "PASS",
+        "R5": "PASS",
+        "R6": "PASS",
+        "R7": "PASS"
+      },
+      "raw_snapshot_probe_counts": {
+        "PASS": 44
+      },
+      "completed_product_acceptance": "PASS",
+      "own_tests_status": "EXECUTED",
+      "own_commands": [
+        {
+          "argv": [
+            "python3.11",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-v"
+          ],
+          "status": "COMPLETED",
+          "returncode": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "41451ceff92ef9b1a7a5c4a967ecfac679a1311b88c61df697280155d40bedae"
+        },
+        {
+          "argv": [
+            "python3.11",
+            "-B",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-p",
+            "test_queuelet.py",
+            "-v"
+          ],
+          "status": "COMPLETED",
+          "returncode": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4bfa8c9d60d0bc58b0e0ade499e29ca4d2aee07fc8cd1527c06fe9bdc03d3204"
+        }
+      ],
+      "external_report_sha256": "b73a7e4638f8203fcc8443192cc804a03fd3ce790d72d5de5418820df46ba5ca"
+    },
+    {
+      "project": "queuelet",
+      "method": "aispa",
+      "designated_project_commit": "d633b646fb1fa3b8f55fb66290ccb70e0976c844",
+      "delivery_classification": "PROVIDER_INTERRUPTED",
+      "native_final_capture": "unavailable",
+      "capture_issues": [
+        "missing_final_reply"
+      ],
+      "raw_freeze_attempt_state": "invalid_or_partial",
+      "raw_freeze_invalid_reasons": [
+        "immutable_input_changed:AGENTS.md",
+        "uncommitted_candidate_changes"
+      ],
+      "raw_frozen_snapshot_acceptance": "FAIL",
+      "raw_snapshot_groups": {
+        "R1": "FAIL",
+        "R2": "NOT_CHECKED",
+        "R3": "NOT_CHECKED",
+        "R4": "NOT_CHECKED",
+        "R5": "NOT_CHECKED",
+        "R6": "NOT_CHECKED",
+        "R7": "FAIL"
+      },
+      "raw_snapshot_probe_counts": {
+        "FAIL": 2,
+        "NOT_CHECKED": 7
+      },
+      "completed_product_acceptance": null,
+      "own_tests_status": "NOT_RUN",
+      "own_commands": [],
+      "external_report_sha256": "00fee97d38bc99611c3267adaf8635b0f798c4cdfd9fcb2360b55591bc6c38e5"
+    },
+    {
+      "project": "weavecfg",
+      "method": "aispa",
+      "designated_project_commit": "5369fd327c1998dcbf327c076335d92b6b6f952b",
+      "delivery_classification": "PROVIDER_INTERRUPTED",
+      "native_final_capture": "unavailable",
+      "capture_issues": [
+        "missing_final_reply"
+      ],
+      "raw_freeze_attempt_state": "invalid_or_partial",
+      "raw_freeze_invalid_reasons": [
+        "immutable_input_changed:AGENTS.md",
+        "uncommitted_candidate_changes"
+      ],
+      "raw_frozen_snapshot_acceptance": "FAIL",
+      "raw_snapshot_groups": {
+        "R1": "PASS",
+        "R2": "FAIL",
+        "R3": "FAIL",
+        "R4": "FAIL",
+        "R5": "FAIL",
+        "R6": "FAIL",
+        "R7": "FAIL"
+      },
+      "raw_snapshot_probe_counts": {
+        "PASS": 1,
+        "FAIL": 9
+      },
+      "completed_product_acceptance": null,
+      "own_tests_status": "NOT_RUN",
+      "own_commands": [],
+      "external_report_sha256": "45b3febfb8b58ae6f4849a7e515c743c615924a24419840e07ecb5c136aa5645"
+    },
+    {
+      "project": "weavecfg",
+      "method": "reference",
+      "designated_project_commit": "4e40fb4b4db2333e3a3313df39e4ae698188e92d",
+      "delivery_classification": "OUTPUT_ROOT_CONTRACT_CONFLICT",
+      "native_final_capture": "invalid",
+      "capture_issues": [
+        "final_commit_differs_from_frozen_HEAD"
+      ],
+      "raw_freeze_attempt_state": "valid",
+      "raw_freeze_invalid_reasons": [],
+      "raw_frozen_snapshot_acceptance": "FAIL",
+      "raw_snapshot_groups": {
+        "R1": "PASS",
+        "R2": "FAIL",
+        "R3": "FAIL",
+        "R4": "FAIL",
+        "R5": "FAIL",
+        "R6": "FAIL",
+        "R7": "FAIL"
+      },
+      "raw_snapshot_probe_counts": {
+        "PASS": 1,
+        "FAIL": 9
+      },
+      "completed_product_acceptance": null,
+      "own_tests_status": "NOT_RUN",
+      "own_commands": [],
+      "external_report_sha256": "d9f5595543a48065f52fa20436e9effd7cd4ac39e63775d8e7fef5f271789878"
+    }
+  ],
+  "supplemental_weavecfg_reference_claimed_product": {
+    "label": "POST_HOC_DIAGNOSTIC_NOT_PRIMARY",
+    "commit": "5e07e47449b2e4320f515f8cc773e2e32a163834",
+    "automated_probe_counts": {
+      "PASS": 8,
+      "NOT_CHECKED": 2
+    },
+    "status": "NOT_CHECKED",
+    "groups": {
+      "R1": "PASS",
+      "R2": "PASS",
+      "R3": "PASS",
+      "R4": "PASS",
+      "R5": "NOT_CHECKED",
+      "R6": "PASS",
+      "R7": "NOT_CHECKED"
+    },
+    "external_report_sha256": "36a80e12e2028a74a914d6b2a3751ff07a4c991df21ca8a779c2faa8d373eb99",
+    "replaces_primary": false,
+    "postfreeze_manual_review": "NOT_RUN",
+    "reason": "Diagnose the exact completed product named in native handoff under conflicting directory instructions; not replacement of preregistered primary freeze."
+  },
+  "limitations": [
+    "Provider-interrupted baseline snapshot failures are not delivered-product quality failures.",
+    "Reference Weavecfg completed code in a sibling candidate directory as general PROCESS requested; per-arm INSTRUCTIONS and freezer use project. The contradictory output-root contract prevents attributing the mismatch solely to the executor.",
+    "One attempt per method per project; no universal winner or causal version economy claim."
+  ]
+}
