@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "source_commit": "c17744e4d0f421f84e0c2348fff5285e874faffa",
+  "initial_commit": "dc8596ea64953ea14e737f8d98c73ee2ba135a7f",
+  "historical_initial_commit": "9dae1b9825a12d0b2aa3dd716386ce1a81db94f6",
+  "initial_files": {
+    "PROCESS.md": {
+      "sha256": "9057797af1fbfb9c2d4e0abcfd8c2902e467fab6b954563be17c566bf1e085c3",
+      "bytes": 2475
+    },
+    ".gitignore": {
+      "sha256": "d19726feaecc23bf526f659d461da95de91c9c333e406a2c6d1701f04a810da0",
+      "bytes": 43
+    },
+    "BRIEF.md": {
+      "sha256": "fdf2f72cd9bcc0f5b163502fe63c34c049d498add46951274a5ff4e4a241a480",
+      "bytes": 4796
+    },
+    "AGENTS.md": {
+      "sha256": "f17fcfbbb6c07c1544f758d3f4552da46526713f5b8b1272b81726fcea64ca1a",
+      "bytes": 3736
+    }
+  },
+  "brief_identical": true,
+  "process_amended": true,
+  "full_aispa_attempt_limit": 1,
+  "reference_attempt_limit": 0,
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "max_active_children": 2,
+  "window_seconds": 3600,
+  "historical_results": {
+    "aispa": {
+      "freeze.json": "65cb4c06c5a4bca54b3d0985c36aa54e102baae8b525a9d40a645280371eeb16",
+      "usage.json": "8fb1914695d57d0d00bc65ff7552c555317b495453d0935a5af790c9b70ca9fc",
+      "capture.json": "5736ea67cff6ceb0cfbc11ee87e2be3f44a163e1d0bf79ecaecf4ab4b93ae521",
+      "final-native.txt": "150fdf1638158c974e5ff9b211ce33b07040929a307aa1edccfb8e98dc6f3d99"
+    },
+    "reference": {
+      "freeze.json": "05bdac76e1425385a6673e79736f502b3b8f43be937d1560a4773910e28fd520",
+      "usage.json": "840968ef89fdec4daed8faea60ffca2ea6c87a6a2dd77a109296fa20175c265d",
+      "capture.json": "eec668196f10e501b7d5ac4e712e0263cfa97796d50f7216b1d1264c01b72975",
+      "final-native.txt": "fa623e6d854dbf6c2d72917d725317e3537f0281bea172f355ec80ea47192402"
+    }
+  },
+  "external_evaluation": {
+    "fixed_oracle": "unchanged historical Pulsefold evaluator",
+    "manual": "one fresh independent source reviewer for the same two mandatory manual IDs; historical products retain their existing two-judge results",
+    "own_tests": "one actual documented comprehensive command from README; extra separately documented examples only if not covered",
+    "new_reference_runs": 0,
+    "disclosure": "Historical control; known task; amended process clarifies output root and service artifacts, not causal or newly blinded estimate."
+  },
+  "ci_run": 39581645652,
+  "ci_pass_required_before_dispatch": true,
+  "state": "PREREGISTERED_NOT_DISPATCHED",
+  "package_manifest_sha256": "30317af03af7ef68b2657cc47e17aceb8304195957f8d08694e46e1294a4b9bd",
+  "measurement_helper_sha256": "5349fe97e47e07876077e0dba1d70995a78053dc505b19e27b47175eaca7e317",
+  "evaluation_helper_sha256": "f0cb785384d5b66a0ffc4d3dfc7c76d78b7d670edf7033408bac19b420792a9c",
+  "historical_aispa_source_commit": "7b39b9e33e9cf6d09af808f510dd5d6b4d2facec",
+  "historical_reference_source_commit": "9fc898cbe941d5b8a369f1dd657e9119676eb44f",
+  "process_clarifications": [
+    "The prepared project directory is the final candidate root; no sibling product repository.",
+    "Keep ignored .aispa workflow state inside the project, preserve original AGENTS bytes as exact prefix and append only managed links.",
+    "Only scoped agent inventory; no global results exposure.",
+    "One full model attempt, no automatic restart or reference rerun."
+  ]
+}
