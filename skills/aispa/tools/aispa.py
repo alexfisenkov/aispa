@@ -80,6 +80,8 @@ def parser():
     ctx.add_argument("--role", choices=("worker", "critic1", "critic2", "acceptor"))
     ctx.add_argument("--source", action="append", help="Уже известный точный файл: не вкладывать каталог; можно повторять")
     ctx.add_argument("--write", action="store_true", help="Сохранить пакет контекста, вернуть только путь и basis")
+    ctx.add_argument("--with-template", action="store_true",
+                     help="Для task --role --write также подготовить пустую форму назначенного участника")
     discover = sub.add_parser("discover")
     discover.add_argument("--file")
     discover.add_argument("--actor")
@@ -218,9 +220,11 @@ def execute(args):
             emit(store, publish(store, state), compact_mode=args.compact)
             return 0
         state = store.load()
-        read_only = (args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
-                     or (args.action in controls.READS
-                         and not (args.action == "template" and args.write))
+        preparation_write = (args.action in ("template", "brief-source", "brief-map-context") and args.write
+                             or args.action == "context" and args.with_template)
+        read_only = not preparation_write and (
+                     args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
+                     or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
                      or (args.action in ("idea", "repair-plan") and not args.file)
                      or (args.action == "documents" and not args.refresh))
@@ -297,6 +301,13 @@ def execute(args):
         elif action == "scope":
             flow.scope(args.id, args.decision, args.brief, args.quote)
         elif action == "context":
+            if args.with_template:
+                if args.kind != "task" or not args.write or not args.task or not args.role:
+                    raise Invalid("--with-template требует --kind task, --task, --role и --write")
+                result = packets.write_task_bundle(store, state, flow.pipeline, args.task, args.role,
+                                                   source_paths=args.source)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
             if args.kind == "acceptance" and state.get("policy", {}).get("cleanClone") and not blind.valid(store, state):
                 raise Invalid("Сначала сохраните независимые наблюдения: context --kind blind, затем blind --file")
             if args.kind == "blind":

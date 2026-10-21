@@ -232,8 +232,10 @@ class TaskReportTests(unittest.TestCase):
             self.execute("template", "worker")
         with self.assertRaisesRegex(Invalid, "--actor"):
             self.execute("template", "worker", "--task", "T01", "--actor", "forged")
-        with self.assertRaises(Invalid):
-            self.execute("template", "interfaces", "--write")
+        prepared = self.execute("template", "interfaces", "--write")
+        self.assertEqual(prepared["kind"], "interfaces")
+        self.assertEqual(json.loads((self.root / prepared["path"]).read_text(encoding="utf-8")),
+                         preparation.template(self.store, self.state, "interfaces"))
         with self.assertRaises(Invalid):
             self.execute("template", "interfaces", "--task", "T01")
         parsed = self.parser().parse_args(["template", "critic2", "--task", "T01", "--write"])
@@ -248,6 +250,7 @@ class TaskReportTests(unittest.TestCase):
         second = self.execute("template", "worker", "--task", "T01", "--write")
         self.assertNotEqual(first["path"], second["path"])
         path = self.root / first["path"]
+        self.assertEqual(Path(first["absolutePath"]), path.resolve())
         self.assertEqual(path.parent.resolve(), self.store.home / "inbox")
         self.assertEqual(first["status"], "draft-not-evidence")
         self.assertEqual(first["sha256"], file_hash(path))

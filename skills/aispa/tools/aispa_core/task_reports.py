@@ -13,6 +13,8 @@ from .contracts import require, task_basis
 from .store import Invalid, confined
 from .team import ROLES, _actor_valid, acceptance_chain
 
+PREPARATION_KINDS = ("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces")
+
 
 def template(pipeline, tid, role):
     """Populate mechanical references only, at the role's current stage."""
@@ -79,16 +81,16 @@ def template(pipeline, tid, role):
     return report
 
 
-def write(store, report, tid, role):
-    """Create one private, editable inbox draft without journal mutations."""
-    require(role in ROLES, "Неизвестная роль шаблона")
+def _write_draft(store, report, kind):
+    """Create a private editable draft for an allowlisted form, never evidence."""
+    require(kind in (*ROLES, *PREPARATION_KINDS), "Неизвестный вид черновика")
     inbox = confined(store.root, ".aispa/inbox")
     inbox.mkdir(parents=True, exist_ok=True)
     # Recheck after mkdir, including .aispa, to reject replaced/link directories.
     inbox = confined(store.root, ".aispa/inbox")
     require(inbox.is_dir(), "Для черновиков нужен обычный каталог .aispa/inbox")
     # Never interpolate a task ID or accept a caller-selected output path.
-    relative = ".aispa/inbox/report-" + role + "-" + uuid.uuid4().hex + ".json"
+    relative = ".aispa/inbox/report-" + kind + "-" + uuid.uuid4().hex + ".json"
     destination = confined(store.root, relative)
     raw = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     try:
@@ -101,10 +103,27 @@ def write(store, report, tid, role):
         os.fsync(stream.fileno())
     require(confined(store.root, relative).read_bytes() == raw, "Записанный черновик изменился при проверке")
     return {
-        "status": "draft-not-evidence", "task": tid, "role": role,
-        "path": relative, "sha256": hashlib.sha256(raw).hexdigest(),
+        "status": "draft-not-evidence",
+        "path": relative, "absolutePath": str(destination), "sha256": hashlib.sha256(raw).hexdigest(),
+        "note": "Редактируемый черновик; не свидетельство и не принятый отчёт. Заполните оценки, доказательства и независимость.",
+    }
+
+
+def write(store, report, tid, role):
+    """Create one task-report draft without journal mutations."""
+    require(role in ROLES, "Неизвестная роль шаблона")
+    return {
+        **_write_draft(store, report, role), "task": tid, "role": role,
         "counts": {"checks": len(report["checks"]), "trace": len(report.get("trace", [])),
                    "resolutions": len(report.get("resolutions", [])),
                    "branchAxes": len(report.get("branchReview", {}).get("axes", []))},
-        "note": "Редактируемый черновик; не свидетельство и не принятый отчёт. Заполните оценки, доказательства и независимость.",
+    }
+
+
+def write_preparation(store, report, kind):
+    """Reuse the same file guards for the five existing preparation forms."""
+    require(kind in PREPARATION_KINDS, "Неизвестный шаблон подготовки")
+    return {
+        **_write_draft(store, report, kind), "kind": kind, "basis": report["basis"],
+        "counts": {key: len(report[key]) for key in ("units", "rows", "features", "interfaces") if key in report},
     }

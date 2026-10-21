@@ -45,7 +45,8 @@ class CliTests(unittest.TestCase):
     def call(self, *args, expected=0, cli=None):
         cli = cli or (CLI if args and args[0] == "init" else getattr(self, "cli", CLI))
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
-                           text=True, capture_output=True, timeout=20, encoding="utf-8", env=self.command_env)
+                           text=True, capture_output=True, timeout=20, encoding="utf-8", env=self.command_env,
+                           cwd=getattr(self, "command_cwd", None))
         self.assertEqual(r.returncode, expected, r.stderr + r.stdout)
         if expected:
             self.assertNotIn("Traceback", r.stderr)
@@ -192,6 +193,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(state["decisions"][0]["text"], "Новая запись")
 
     def test_full_cli_scenario(self):
+        self.command_cwd = Path(self.temp.name) / "посторонний каталог 🙂"
+        self.command_cwd.mkdir()
         self.init()
         from tests import alpha10_fixtures as fixtures
         from aispa_core.store import Journal
@@ -303,8 +306,24 @@ class CliTests(unittest.TestCase):
         self.call("verify", "--task", "T01", "--", sys.executable, "tests/check_output.py")
 
         def proof(kind, rid, extra=()):
-            ctx = self.context(kind, *extra)
             role = extra[extra.index("--role") + 1] if "--role" in extra else None
+            if role:
+                bundle = self.context(kind, *extra, "--write", "--with-template")
+                self.assertEqual(bundle["role"], role)
+                ctx = json.loads(Path(bundle["context"]["absolutePath"]).read_text(encoding="utf-8"))
+                for key, section in ctx.pop("sections", {}).items():
+                    ctx[key] = json.loads(Path(section["absolutePath"]).read_text(encoding="utf-8"))
+                draft_path = Path(bundle["template"]["absolutePath"])
+                self.assertEqual(draft_path, (self.root / bundle["template"]["path"]).resolve())
+                self.assertFalse((self.command_cwd / bundle["template"]["path"]).exists())
+                self.assertEqual(file_hash(draft_path), bundle["template"]["sha256"])
+                draft = json.loads(draft_path.read_text(encoding="utf-8"))
+                self.assertEqual(draft["basis"], ctx["basis"])
+                self.assertEqual(draft["reviewer"], ctx["actors"][role])
+                self.assertTrue(all(row["status"] == "not_tested" for row in draft["checks"]))
+                self.assertIsNone(draft["unmapped"])
+            else:
+                ctx = self.context(kind, *extra)
             checks = ctx.get("expectedChecks", [{"requirement": rid, "criterion": "Выводит ready"}])
             report = {"basis": ctx["basis"], "reviewer": ctx["actors"][role] if role else
                       getattr(self, "blind_actor", "synthetic") if kind == "acceptance" else "synthetic", "independent": True,

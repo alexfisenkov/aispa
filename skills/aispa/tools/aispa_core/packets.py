@@ -241,6 +241,25 @@ def write(store, packet, *, maximum=MAX_PACKET_BYTES):
             "sectionCount": len(sections), "tokenCount": None}
 
 
+def write_task_bundle(store, state, pipeline, task_id, role, *, source_paths=None):
+    """Prepare addressed inputs only; assignment and report submission stay separate."""
+    from . import task_reports
+    from .contracts import task_verified
+    # Validate the actual assignment and lifecycle before creating any files.
+    report = task_reports.template(pipeline, task_id, role)
+    if role == "worker":
+        require(task_verified(store, state, task_id),
+                "Форма worker в пакете требует успешной адресной проверки текущей задачи")
+    packet = build(store, state, pipeline, "task", task_id, role, source_paths=source_paths)
+    require(packet["basis"] == report["basis"], "Кандидат изменился во время подготовки пакета")
+    card = packet["roles"][role]
+    return {"kind": "task-handoff", "task": task_id, "role": role, "actor": report["reviewer"],
+            "card": {"file": card["file"], "sha256": card["sha256"],
+                     "absolutePath": str(confined(store.run, card["file"]))},
+            "context": write(store, packet),
+            "template": task_reports.write(store, report, task_id, role)}
+
+
 def record_usage(store, state, value):
     return telemetry.record(store, state, value)
 

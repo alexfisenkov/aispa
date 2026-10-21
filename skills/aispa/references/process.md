@@ -115,18 +115,21 @@ value_cost, operations, lifecycle, actors. В `auto` аналитик самос
 ```text
 participant --role brief-analyst --runtime codex --native-id <ID> --session <session>
 participant --role brief-reviewer --runtime codex --native-id <другой-ID> --session <другая-session>
-brief-source
-template brief-extract --actor <ID аналитика>
-brief-extract --file .aispa/inbox/brief-extract.json
-template brief-review --actor <ID проверяющего>
-brief-review --file .aispa/inbox/brief-review.json
-brief-map-context
-template brief-map --actor <ID проверяющего>
-brief-map --file .aispa/inbox/brief-map.json
+brief-source --write
+template brief-extract --actor <ID аналитика> --write
+brief-extract --file <absolutePath заполненной формы аналитика>
+template brief-review --actor <ID проверяющего> --write
+brief-review --file <absolutePath заполненной формы проверяющего>
+brief-map-context --write
+template brief-map --actor <ID проверяющего> --write
+brief-map --file <absolutePath заполненной карты>
 ```
 
-`template` оставляет пустые смысловые поля. Аналитик и проверяющий получают
-исходник отдельно; map связывает **каждый** исходный фрагмент с действующим
+`template --write` сохраняет форму с пустыми смысловыми полями и возвращает
+её `absolutePath`; участник заполняет файл сам, без перепечатки координатором.
+Аналитик и проверяющий независимо читают полный `brief-source`; проверяющий
+не получает разбор аналитика или требования до своего сохранённого отчёта.
+Только после обоих разборов он открывает `brief-map-context`. Карта связывает **каждый** исходный фрагмент с действующим
 требованием или помечает контекст/расхождение. Только согласованная полная
 карта пропускает `seal`; хеши и позиции не удостоверяют смысл.
 До фиксации брифа выполни разбор идеи по [product-development.md](product-development.md):
@@ -170,9 +173,10 @@ expand → migrate всех известных потребителей → cont
 Схема — [contracts](contracts.md); проверка структуры не находит потребителей
 сама, их надо установить по проекту.
 
-После `spec` и `coverage` до `plan` выполни `template scenarios`, заполни
-восемь измерений каждой действующей функции и сохрани `scenarios --file …`.
-Следом `template interfaces` → `interfaces --file …` закрепляет сигнатуры,
+После `spec` и `coverage` до `plan` выполни `template scenarios --write`.
+В файле по `absolutePath` заполни восемь измерений каждой действующей функции
+и сохрани `scenarios --file …`.
+Следом `template interfaces --write` → заполнение файла → `interfaces --file …` закрепляет сигнатуры,
 зоны владельца и потребителей, тестовые швы и ссылки на материалы. Сценарии
 не позволяют заменить исходную функцию инициативой агента; план должен
 связать владельца интерфейса с задачей, а потребителей — с её зависимостями.
@@ -219,6 +223,8 @@ context --kind task --task T01 --role worker --write
 start T01 --context <basis>
 ```
 
+Это начальный пакет worker без формы: `--with-template` допустим только после
+успешной адресной проверки текущего кандидата и реального назначения.
 Создай нативного исполнителя инструментом фактической среды. Передай ему
 карточку worker, путь пакета, правила проекта и границы записи. Сразу запиши:
 
@@ -252,19 +258,22 @@ assign T01 --role worker --runtime codex --native-id <реальный-ID> --ses
 
 ```text
 verify --task T01 --purpose test -- python3 -m unittest discover -s tests -p 'test_feature.py' -v
-context --kind task --task T01 --role worker --write
-submit T01 --file .aispa/inbox/T01-worker.json
+context --kind task --task T01 --role worker --write --with-template
+submit T01 --file <absolutePath заполненной формы worker>
 ```
 
 Команда проверки здесь — пример: замени её реальной проверкой проекта.
 Не используй true/echo или самоподтверждающий тест. Точный output-файл
-находится в verification пакета. Отчёт покрывает каждую пару expectedChecks.
+находится в verification пакета. Bundle возвращает ссылки `context`, `card` и
+`template`; передай их участнику по `absolutePath`. Он заполняет форму, затем
+координатор отдельно записывает submit. Отчёт покрывает каждую пару expectedChecks.
 
 Создай нового независимого critic1, сразу запиши assign, передай его карточку
-и свежий пакет с `--role critic1`. Запиши отчёт:
+и свежий пакет с формой через
+`context --kind task --task T01 --role critic1 --write --with-template`. Запиши отчёт:
 
 ```text
-critic T01 --round 1 --file .aispa/inbox/T01-critic1.json
+critic T01 --round 1 --file "<absolutePath заполненной формы critic1>"
 ```
 
 В adaptive отчёт каждого критика и приёмщика содержит явный
@@ -285,11 +294,12 @@ task, attempt, firstReport, requiredFindingIds и requiredFindings. Затем �
 исходный worker; при `missing_context` или `wrong_approach` назначь нового
 свежего сильного worker и передай адресный контекст. `external_blocker`
 остаётся blocked до снятия препятствия. Затем повтори `verify --task T01`,
-получи свежий пакет worker и сохрани `repair T01 --file …`.
+получи свежий пакет worker с `--write --with-template` и сохрани `repair T01 --file …`.
 Repair связан с SHA первого отчёта и всеми обязательными finding IDs.
 
 После ремонта создай второго критика отдельным новым нативным участником:
-assign critic2 → пакет critic2 → `critic T01 --round 2 --file …`.
+assign critic2 → `context --kind task --task T01 --role critic2 --write --with-template`
+→ заполнение формы → `critic T01 --round 2 --file …`.
 Он независимо проверяет кандидат, связь с первым отчётом и результаты
 исправлений. Resolutions охватывает каждый обязательный ID; unresolved
 блокирует PASS. WARN/BLOCK/FAIL второго раунда блокирует задачу; третьего
@@ -297,14 +307,15 @@ assign critic2 → пакет critic2 → `critic T01 --round 2 --file …`.
 первого PASS: без ремонта, с repairReceipt null и неизменным кандидатом.
 
 После PASS последнего обязательного критика создай отдельного acceptor, запиши assign и выдай пакет
-`--role acceptor`. Приёмщик сначала читает полные оригинальные брифы, затем
+`context --kind task --task T01 --role acceptor --write --with-template`.
+Приёмщик сначала читает полные оригинальные брифы, затем
 проверяет задачу, все критерии предков, ограничения и точные исходные цитаты.
 Он записывает verdict, trace и inheritedProofs; previousReport ссылается на
 реальный последний обязательный отчёт критика. Basis должен совпадать с этим
 кандидатом. Только отчёт приёмщика передаётся в:
 
 ```text
-complete T01 --file .aispa/inbox/T01-acceptance.json
+complete T01 --file "<absolutePath заполненной формы acceptor>"
 ```
 
 WARN/BLOCK/FAIL приёмщика блокирует задачу. Для обычного препятствия используй
@@ -424,9 +435,17 @@ new-attempt T01 --brief B002 --quote "Исправь поиск по этому 
 Для обычных команд записи и status поставь `--compact` перед подкомандой:
 полный результат сохранится по возвращённым адресу и SHA. Коды выхода
 и блокировки прежние; команды чтения остаются полными.
-После assign получи `template <worker|critic1|critic2|acceptor> --task T01
---write` и передай участнику адрес формы вместе с адресным контекстом.
-Она заполняет вычисляемые поля, а не результаты проверки или независимость.
+После assign и при допустимом этапе роли получи
+`context --kind task --task T01 --role <роль> --write --with-template`:
+выдача содержит адреса пакета, карточки и формы, без их тел. Worker на старте
+получает обычный пакет без формы, а после успешного адресного verify — bundle.
+Передавай `absolutePath`, который не зависит от рабочего каталога участника;
+`path` формы сохраняет путь относительно корня проекта для совместимости.
+Отдельный `template <роль> --task T01 --write` остаётся совместимым маршрутом
+только для формы. Bundle дополнительно проверяет наличие успешного актуального
+verify worker; отдельная команда сохраняет прежние условия выдачи формы.
+В обоих случаях следуй порядку verify → форма → отдельная сдача отчёта.
+Форма заполняет вычисляемые поля, а не результаты проверки или независимость.
 Не печатай заготовку в главный диалог и не проставляй PASS автоматически.
 
 Поля sections в context --write — обязательные адреса полных данных, а не

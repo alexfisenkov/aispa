@@ -1,6 +1,6 @@
 """CLI controls for source-first planning, usage and recovery."""
 import argparse
-from . import participants, preparation, briefmap, design_contract, telemetry, task_reports
+from . import participants, preparation, briefmap, design_contract, telemetry, task_reports, packets
 from .contracts import require
 
 READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context", "execution-obligations"}
@@ -11,10 +11,11 @@ WRITES = {"brief-extract", "brief-review", "brief-map", "scenarios", "interfaces
 
 def parsers(sub):
     for name in sorted(READS - {"template"}):
-        sub.add_parser(name)
+        command = sub.add_parser(name)
+        if name in ("brief-source", "brief-map-context"):
+            command.add_argument("--write", action="store_true", help="Сохранить адресный пакет исходного контекста")
     t = sub.add_parser("template")
-    t.add_argument("kind", choices=("brief-extract", "brief-review", "brief-map", "scenarios", "interfaces",
-                                   "failure-checks", *task_reports.ROLES))
+    t.add_argument("kind", choices=(*task_reports.PREPARATION_KINDS, "failure-checks", *task_reports.ROLES))
     t.add_argument("--actor")
     t.add_argument("--task")
     t.add_argument("--write", action="store_true")
@@ -65,10 +66,9 @@ def execute(store, state, flow, args):
         result = test_intent.record(store, state, args.task, json.loads(flow.read_input(args.file)))
         flow.save("test-intent-recorded:" + args.task)
         return result
-    if action == "brief-source":
-        return preparation.source_context(store, state)
-    if action == "brief-map-context":
-        return preparation.map_context(store, state)
+    if action in ("brief-source", "brief-map-context"):
+        context = (preparation.source_context if action == "brief-source" else preparation.map_context)(store, state)
+        return packets.write(store, context) if args.write else context
     if action == "preparation":
         return {"brief": briefmap.view(store, state, actor_check), "design": design_contract.view(store, state)}
     if action == "template":
@@ -82,9 +82,9 @@ def execute(store, state, flow, args):
             require(args.actor is None, "Actor шаблона задачи берётся из назначенной роли; --actor не нужен")
             report = task_reports.template(flow.pipeline, args.task, args.kind)
             return task_reports.write(store, report, args.task, args.kind) if args.write else report
-        require(args.task is None and not args.write,
-                "--task и --write поддерживаются только для шаблонов worker, critic1, critic2, acceptor")
-        return preparation.template(store, state, args.kind, actor=args.actor)
+        require(args.task is None, "--task поддерживается только для шаблонов worker, critic1, critic2, acceptor")
+        report = preparation.template(store, state, args.kind, actor=args.actor)
+        return task_reports.write_preparation(store, report, args.kind) if args.write else report
     if action == "ready":
         return flow.ready()
     if action == "participants":
