@@ -217,6 +217,10 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 @media(max-width:800px){.gate-list{grid-template-columns:minmax(0,1fr)}.task-summary{grid-template-columns:30px minmax(0,1fr) minmax(120px,auto);gap:10px}.task-steps{margin-left:40px}}
 @media(max-width:480px){.task-summary{grid-template-columns:26px minmax(0,1fr)}.task-right{grid-column:2;justify-items:start;margin:0;max-width:100%}.task-state{text-align:left;justify-content:flex-start;margin:0}.task-steps{margin-left:0}.time-summary{gap:12px}.time-summary>div+div{padding-left:12px}.detail-row{grid-template-columns:minmax(0,1fr)}.stages-card,.activity-card,.gates{padding:18px}}
 
+.verification-note{font-size:12px;line-height:1.45;max-width:240px;overflow-wrap:anywhere}
+.verification-note.stale{color:var(--warning)}.verification-note.current{color:var(--success)}
+.phase-step.recorded{background:var(--paper);color:var(--ink);border-color:var(--line)}
+.meter.implementation-meter>i{background:var(--active)}
 </style>
 </head>
 <body>
@@ -504,6 +508,14 @@ Object.assign(EN,{
  'Причина блокера не указана':'No blocker reason recorded','Исключено':'Excluded',
  'Исключено по решению владельца':'Excluded by owner decision'});
 Object.assign(EN,{
+ 'Реализовано':'Implemented','Частично реализовано':'Partially implemented',
+ 'Итоговую приёмку нужно обновить':'Final acceptance needs refreshing',
+ 'Проверку нужно обновить':'Verification needs refreshing',
+ 'Актуальность проверки не подтверждена':'Verification freshness is unconfirmed',
+ 'Проверка актуальна':'Verification is current','Проверено на дату снимка':'Verified at snapshot time',
+ 'Проверка не подтверждена':'Verification is unconfirmed',
+ 'Выполнено; проверку нужно обновить':'Implemented; verification needs refreshing',
+ 'Требуют внимания':'Needs attention','Реализованные задачи волны':'Implemented tasks in this wave',
  'Бриф готов · агент работает самостоятельно':'Brief complete · agent is working autonomously',
  'Проверено исполнителем':'Checked by the worker','Независимая проверка ещё впереди':'Independent review is still pending',
  'Проверка исполнителя по маршруту задачи':'Worker verification under the task policy',
@@ -565,15 +577,20 @@ function delta(){if(last&&last.waiting&&typeof last.waiting==='object'&&last.wai
 function sourceSuffix(){return source==='archive'?' · '+tr('на дату снимка'):
  source==='offline'?' · '+tr('последний снимок'):source==='demo'?' · '+tr('пример'):''}
 function taskLabel(t,d){
- var label=t.phaseStale?tr('Проверки устарели'):
+ var label=t.status==='completed'?tr('Реализовано'):
+  t.phaseStale?tr('Проверки устарели'):
   (source==='archive'||source==='offline')&&t.status==='running'?tr('Была в работе'):
   t.status==='running'&&d.status!=='running'?tr('Приостановлена'):
   t.status==='running'&&phaseName(t)?phaseName(t):
   t.status==='pending'&&t.assignment?tr('Исполнитель назначен'):
-  t.status==='completed'&&t.proofCurrent===false?tr('Нужна повторная проверка'):
-  t.status==='completed'&&t.proofCurrent===true?tr(t.completionKind==='verified_completion'?'Выполнение проверено':'Задача принята'):tr(TASK[t.status]||UNKNOWN);
+  tr(TASK[t.status]||UNKNOWN);
  return label+sourceSuffix();
 }
+function verificationNote(t){if(t.status!=='completed')return null;
+ if(source==='offline')return tr('Актуальность проверки не подтверждена');
+ if(t.phaseStale||t.proofCurrent===false)return tr('Проверку нужно обновить');
+ if(t.proofCurrent===true)return tr(source==='archive'?'Проверено на дату снимка':'Проверка актуальна');
+ return tr('Проверка не подтверждена');}
 function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
  (t.activeSince&&t.status==='running'&&d.status==='running'?delta():0)}
 function phaseTime(t,d){var p=t.phaseTiming;if(t.phaseStale||!p||!Number.isFinite(p.elapsedSeconds))return null;
@@ -587,12 +604,14 @@ function versionLabel(version){
 function phaseSteps(t){if(!Array.isArray(t.phaseSteps)||!t.phaseSteps.length)return null;
  var row=h('div','phase-steps');row.setAttribute('role','list');row.setAttribute('aria-label',tr('Этапы задачи'));
  t.phaseSteps.forEach(function(step){if(!step||!PHASE_STATUS[step.status])return;
-  var state=PHASE_STATUS[step.status],name=tr(step.label||PHASE_LABEL[step.id]||step.id||'Этап');
-  var item=h('span','phase-step '+step.status,state[0]+' '+name);item.setAttribute('role','listitem');
-  item.setAttribute('aria-label',name+' — '+tr(state[1]));if(step.id==='repair'&&step.status==='current')item.className+=' repairing';row.append(item)});
+  var effective=step.status==='done'&&t.status==='completed'&&(t.phaseStale||t.proofCurrent===false)?'stale':step.status;
+  var state=PHASE_STATUS[effective],name=tr(step.label||PHASE_LABEL[step.id]||step.id||'Этап');
+  var recorded=t.status==='completed'&&step.id==='implementation'&&effective==='stale';
+  var item=h('span','phase-step '+(recorded?'recorded':effective),(recorded?'•':state[0])+' '+(recorded?tr('Реализовано'):name));item.setAttribute('role','listitem');
+  item.setAttribute('aria-label',name+' — '+tr(recorded?'Выполнено; проверку нужно обновить':state[1]));if(step.id==='repair'&&step.status==='current')item.className+=' repairing';row.append(item)});
  return row.children.length?row:null}
 var FILTERS={all:['Все',function(){return true}],core:['Ядро',function(r){return r.core&&active(r)}],
- additions:['Добавления',isAdd],open:['Не завершено',function(r){return active(r)&&r.implementation!=='implemented'}]};
+ additions:['Добавления',isAdd],open:['Требуют внимания',function(r){return active(r)&&(source==='offline'||r.implementation!=='implemented'||r.progress&&(r.progress.status==='stale'||r.progress.acceptance&&r.progress.acceptance.status==='stale'))}]};
 
 function renderSource(){
  var m={loading:['#C7C9CC','Загрузка…'],demo:['#C7C9CC','Демо-данные · пример'],live:['#1F8A5B','Живые данные · локальный сервер'],
@@ -739,7 +758,17 @@ function requirementProgress(r,tasks){if(r.progress)return r.progress;
   counts.repair?'repair':counts.review?'review':counts.implementation?'implementation':counts.blocked?'blocked':complete?'partial':'queued';
  return {status:status,completed:complete,total:holders.length,counts:counts,taskIds:holders.map(function(t){return t.id}),acceptance:{status:'pending'}};}
 function reqStatus(p){return p.acceptance&&p.acceptance.status==='passed'?'accepted':p.status}
-function reqProgressText(p){return (locale==='en'?'Tasks completed: ':'Выполнено задач: ')+p.completed+' / '+p.total}
+function recordedRequirements(r,tasks){var holders=tasks.filter(function(t){return (t.requirements||[]).includes(r.id)});
+ return {total:holders.length,implemented:holders.filter(function(t){return t.status==='completed'}).length};}
+function requirementLabel(r,p,tasks){var count=recordedRequirements(r,tasks);
+ if(active(r)&&(p.status==='stale'||p.acceptance&&p.acceptance.status==='stale'||source==='offline')&&count.implemented)return tr(count.implemented===Math.max(count.total,p.total)?'Реализовано':'Частично реализовано')+sourceSuffix();
+ return tr(PROGRESS_TEXT[reqStatus(p)]||UNKNOWN)+sourceSuffix();}
+function requirementCheckNote(r,p,tasks){return active(r)&&(p.status==='stale'||p.acceptance&&p.acceptance.status==='stale'||source==='offline')&&recordedRequirements(r,tasks).implemented?
+ tr(source==='offline'?'Актуальность проверки не подтверждена':p.status!=='stale'&&p.acceptance&&p.acceptance.status==='stale'?'Итоговую приёмку нужно обновить':'Проверку нужно обновить'):null;}
+function reqProgressText(p,r,tasks){var count=recordedRequirements(r,tasks);
+ return (locale==='en'?'Implemented tasks: ':'Реализовано задач: ')+count.implemented+' / '+Math.max(count.total,p.total)+
+  (locale==='en'?' · currently verified: ':' · актуально проверено: ')+(connected()?p.completed:0)+' / '+p.total;}
+
 function meter(done,total,label){var el=h('div','meter'),bar=h('i');var value=total?Math.max(0,Math.min(100,done/total*100)):0;
  el.setAttribute('role','progressbar');el.setAttribute('aria-label',label);el.setAttribute('aria-valuemin','0');el.setAttribute('aria-valuemax',String(total||1));el.setAttribute('aria-valuenow',String(done));bar.style.width=value+'%';el.append(bar);return el;}
 function renderTask(t,d){
@@ -749,7 +778,7 @@ function renderTask(t,d){
  body.append(h('b',null,t.title||t.id),h('small',null,tr('Требования: ')+(t.requirements||[]).join(', ')));
  var assignment=assignmentText(t);if(assignment)body.append(h('small',null,assignment));
  var state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));
- var time=h('span','mono task-time');time.id='time-'+t.id;right.append(state,h('span','task-time',wholeTaskLabel(t)),time);
+ var time=h('span','mono task-time');time.id='time-'+t.id;right.append(state);var checkNote=verificationNote(t);if(checkNote)right.append(h('span','verification-note '+(t.phaseStale||t.proofCurrent!==true||source==='offline'?'stale':'current'),checkNote));right.append(h('span','task-time',wholeTaskLabel(t)),time);
  if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
   var clock=h('span','mono task-time');clock.id='phase-time-'+t.id;right.append(h('span','task-time',tr(source==='archive'?'Фаза на дату снимка: ':source==='offline'?'Фаза на момент снимка: ':'Интервал этапа: ')+phaseName(t)),clock);}
  line.append(h('span','task-id mono',t.id),body,right);summary.append(line);
@@ -763,7 +792,7 @@ function renderTask(t,d){
  var reqs=Array.isArray(t.requirementsDetails)?t.requirementsDetails:d.requirements.filter(function(r){return t.requirements.includes(r.id)});
  var reqBox=h('div');reqBox.append(h('h3',null,tr('Требования в задаче')));
  reqs.forEach(function(r){var p=requirementProgress(r,d.tasks),item=h('div','detail-row'),text=h('div');text.append(h('b',null,r.id+' · '+r.text));
-  text.append(h('small',null,reqProgressText(p)+(r.core?' · '+tr('Обязательное ядро'):'')));item.append(text,chip(reqStatus(p)));reqBox.append(item)});
+  text.append(h('small',null,reqProgressText(p,r,d.tasks)+(r.core?' · '+tr('Обязательное ядро'):'')));var note=requirementCheckNote(r,p,d.tasks);if(note)text.append(h('small','verification-note stale',note));item.append(text,chip(reqStatus(p),requirementLabel(r,p,d.tasks)));reqBox.append(item)});
  if(!reqs.length)reqBox.append(h('span','note',tr('Без привязки к требованиям')));detail.append(reqBox);
  var criteria=Array.isArray(t.criteriaDetails)?t.criteriaDetails:(t.criteria||[]).map(function(text){return {text:text,status:'pending',source:'task_state'}});
  if(criteria.length){var cb=h('div');cb.append(h('h3',null,tr('Критерии результата')));criteria.forEach(function(c){var cr=h('div','detail-row'),ct=h('div');
@@ -814,21 +843,21 @@ function render(d){
   if(r.core&&active(r)){var cd=h('span','chrome-dot');cd.style.width=cd.style.height='14px';cd.title=tr('Обязательное ядро');id.append(cd)}
   var body=h('div','req-body'),meta=[r.kind==='constraint'?tr('Общее ограничение'):isAdd(r)?tr('Добавление агента')+(r.parent?' · '+tr('к')+' '+r.parent:''):tr('Исходный заказ')];
   if(r.core&&active(r))meta.push(tr('ядро'));body.append(h('b',null,r.text),h('small',null,meta.join(' · ')));
-  if(p.total)body.append(h('small',null,reqProgressText(p)));
-  var tag=h('span','tag '+(off?'off':rs));tag.append(h('span','dot'),document.createTextNode(tr(off||PROGRESS_TEXT[rs]||IMPL[impl]||UNKNOWN)));
+  if(p.total)body.append(h('small',null,reqProgressText(p,r,tasks)));
+  var note=requirementCheckNote(r,p,tasks);if(note)body.append(h('small','verification-note stale',note));
+  var tag=h('span','tag '+(off?'off':rs));tag.append(h('span','dot'),document.createTextNode(off?tr(off):requirementLabel(r,p,tasks)));
   row.append(id,body,tag);list.append(row)});
  var wv=$('waves');wv.replaceChildren();
  if(!tasks.length)wv.append(h('div','note',tr('План задач ещё не подготовлен.')));
  waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
-  var hasLight=ts.some(function(t){return t.tier==='light'||t.tier==='standard'||t.tier==='fast'||t.completionKind==='verified_completion'});
   var hasProof=ts.some(function(t){return typeof t.proofCurrent==='boolean'}),accepted=ts.filter(function(t){return t.status==='completed'&&t.proofCurrent===true}).length;
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,tr('Волна')+' '+n));
-  hd.append(l,h('span',null,(hasProof?(hasLight?(locale==='en'?accepted+' of '+ts.length+' completed and verified':accepted+' из '+ts.length+' выполнено и проверено'):(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято')):
-   (locale==='en'?c+' of '+ts.length+' completed':c+' из '+ts.length+' завершено'))+sourceSuffix()));var box=h('div','tasks');
+  hd.append(l,h('span',null,(locale==='en'?'Implemented: ':'Реализовано: ')+c+' / '+ts.length+
+   (hasProof?(locale==='en'?' · currently verified: ':' · актуально проверено: ')+(connected()?accepted:0)+' / '+ts.length:'')+sourceSuffix()));var box=h('div','tasks');
   var wd=Array.isArray(d.waveDetails)?d.waveDetails.find(function(x){return x.wave===n}):null;
   var meta=h('div','wave-meta');meta.append(h('span',null,locale==='en'?'Parallel tasks within this wave':'Задачи этой волны могут выполняться параллельно'));
   if(wd&&wd.review){var review=wd.review,historical=review.status==='passed'&&(review.reason==='accepted_checkpoint'||review.basisCurrent===false);meta.append(chip(historical?'historical':review.status,(locale==='en'?'Wave review: ':'Сверка волны: ')+tr(historical?'Пройдена на границе волны':PROGRESS_TEXT[review.status]||UNKNOWN)));}
-  ts.forEach(function(t){box.append(renderTask(t,d))});w.append(hd,meter(accepted,ts.length,tr('Задачи волны выполнены')),meta,box);wv.append(w)});
+  ts.forEach(function(t){box.append(renderTask(t,d))});var bar=meter(c,ts.length,tr('Реализованные задачи волны'));bar.className+=' implementation-meter';w.append(hd,bar,meta,box);wv.append(w)});
  journalNotice(d);
  var rb=$('remaining');rb.replaceChildren();var any=false;
  REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;
@@ -924,7 +953,7 @@ function demoSteps(states){return Object.keys(PHASE_LABEL).map(function(id,i){re
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.3.2',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.3.3',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[

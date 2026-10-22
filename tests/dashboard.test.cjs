@@ -183,8 +183,8 @@ test('without backend phase data, the dashboard invents neither phase steps nor 
 test('completed task with stale proof is not labelled accepted',async()=>{
  const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=false;
  d.tasks[0].phaseSteps=[{id:'task_acceptance',label:'Приёмка задачи',status:'stale'}];
- const f=await fixture('',d);assert.match(f.text('waves'),/Нужна повторная проверка/);
- assert.match(f.text('waves'),/0 из 1 задач принято/);
+ const f=await fixture('',d);assert.match(f.text('waves'),/Проверку нужно обновить/);
+ assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 0 \/ 1/);
  assert.doesNotMatch(f.text('waves'),/Задача принята/);
 });
 test('source change after first PASS hides superseded second review and its clock',async()=>{
@@ -281,8 +281,8 @@ test('embedded accepted archive is explicitly historical and never fetches or ti
  const f=await fixture('?status=running&demo',sample(),{archive});
  assert.equal(f.fetchCount(),0);assert.equal(f.intervalCount(),0);
  assert.equal(f.text('label'),'Принято на дату снимка');assert.match(f.text('sourceLabel'),/Архивный снимок/);
- assert.match(f.text('waves'),/1 из 1 задач принято · на дату снимка/);
- assert.match(f.text('waves'),/Задача принята · на дату снимка/);
+ assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 1 \/ 1 · на дату снимка/);
+ assert.match(f.text('waves'),/Реализовано · на дату снимка/);
  assert.equal(f.el('refresh').hidden,true);assert.equal(f.text('runElapsed'),'2 мин 00 с');
  f.advance(90000);assert.equal(f.text('runElapsed'),'2 мин 00 с');
  await f.el('refresh').click();assert.equal(f.fetchCount(),0);
@@ -334,13 +334,13 @@ test('offline and demo acceptance stay qualified; global stale preserves scoped 
  const live=sample('accepted');live.tasks[0].status='completed';live.tasks[0].proofCurrent=true;
  const f=await fixture('',live);await f.fail();
  assert.equal(f.text('label'),'Состояние не подтверждено');
- assert.match(f.text('waves'),/1 из 1 задач принято · последний снимок/);
- assert.match(f.text('waves'),/Задача принята · последний снимок/);
+ assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 0 \/ 1 · последний снимок/);
+ assert.match(f.text('waves'),/Реализовано · последний снимок/);
  const demo=await fixture('?demo&status=accepted');
- assert.match(demo.text('label'),/пример/);assert.match(demo.text('waves'),/Задача принята · пример/);
+ assert.match(demo.text('label'),/пример/);assert.match(demo.text('waves'),/Реализовано · пример/);
  const stale=sample('stale');stale.tasks[0].status='completed';stale.tasks[0].proofCurrent=true;
  const s=await fixture('',stale);
- assert.match(s.text('label'),/устарела/);assert.match(s.text('waves'),/Задача принята/);
+ assert.match(s.text('label'),/устарела/);assert.match(s.text('waves'),/РеализованоПроверка актуальна/);
 });
 test('light faint text and touch controls meet stated size and contrast',()=>{
  const faint=html.match(/--faint:(#[0-9A-Fa-f]{6})/)[1];
@@ -370,10 +370,10 @@ test('light completion is distinct from task and project acceptance',async()=>{
  {id:'verified_completion',label:'Выполнение проверено',status:'done'},
  {id:'critic_1',label:'Первый критик',status:'skipped'}]}];
  const f=await fixture('',d);assert.match(f.text('waves'),/Выполнение проверено/);
- assert.match(f.text('waves'),/Лёгкая задача/);assert.match(f.text('waves'),/1 из 1 выполнено и проверено/);
+ assert.match(f.text('waves'),/Лёгкая задача/);assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 1 \/ 1/);
  assert.doesNotMatch(f.text('waves'),/Задача принята|задач принято/);assert.equal(f.text('label'),'В работе');
- d.tasks[0].proofCurrent=false;await f.update(d);assert.match(f.text('waves'),/Нужна повторная проверка/);
- assert.match(f.text('waves'),/0 из 1 выполнено и проверено/);
+ d.tasks[0].proofCurrent=false;await f.update(d);assert.match(f.text('waves'),/Проверку нужно обновить/);
+ assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 0 \/ 1/);
  d.tasks[0].tier='heavy';d.tasks[0].completionKind=null;d.tasks[0].status='running';
  await f.update(d);assert.match(f.text('waves'),/Тяжёлая задача/);assert.doesNotMatch(f.text('waves'),/Без отдельных критиков/);
 });
@@ -385,7 +385,7 @@ test('standard and lean tasks name their review route',async()=>{
  reviewPolicy:'lean',completionKind:'critic_acceptance',elapsedSeconds:20,phaseSteps:[]}];
  const f=await fixture('',d);const text=f.text('waves');
  assert.match(text,/Обычная задача · Без критика задачи · общий обзор версии/);
- assert.match(text,/Тяжёлая задача · PASS критика закрывает задачу/);assert.match(text,/Задача принята/);
+ assert.match(text,/Тяжёлая задача · PASS критика закрывает задачу/);assert.match(text,/РеализованоПроверка актуальна/);
  f.el('language').change('en');assert.match(f.text('waves'),/Standard task · No task reviewer/);
  assert.match(f.text('waves'),/A passing critic closes the task/);
 });
@@ -588,4 +588,55 @@ test('a historical wave checkpoint does not look like a fresh review of current 
 test('conditional ETA separates estimated work from unknown blocked waiting',async()=>{
  const d=sample();d.estimate={reason:'estimate',basis:'mixed',sampleCount:2,confidence:'low',lowerSeconds:600,upperSeconds:1800,waitingForBlockers:true};
  const f=await fixture('',d);assert.match(f.text('eta'),/10–30 мин работы \+ ожидание/);assert.match(f.text('etaNote'),/Время ожидания снятия блокеров неизвестно/);assert.match(f.text('etaNote'),/разных классов/);
+});
+
+test('completed stale task keeps implementation separate from verification in both languages',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=false;d.tasks[0].phaseStale=true;
+ d.tasks[0].phaseSteps=[{id:'implementation',label:'Реализация',status:'stale'},{id:'verified_completion',label:'Выполнение проверено',status:'stale'}];
+ const original=JSON.stringify(d);const f=await fixture('',d);const task=f.el('task-T01');
+ assert.match(task.textContent,/РеализованоПроверку нужно обновить/);
+ assert.equal(task.children[0].children[1].children[0].children[0].className,'phase-step recorded');
+ assert.doesNotMatch(task.textContent,/Проверка актуальна|Задача принята/);assert.equal(JSON.stringify(d),original);
+ f.el('language').change('en');
+ assert.match(f.text('task-T01'),/ImplementedVerification needs refreshing/);
+});
+
+test('stale requirements preserve implementation inside cards and in the shared registry',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=false;d.requirements[0].implementation='needs_check';
+ d.requirements[0].progress={status:'stale',completed:0,total:1,acceptance:{status:'pending'}};
+ d.tasks[0].requirementsDetails=[d.requirements[0]];
+ const f=await fixture('',d);for(const id of ['requirements','task-T01']){
+  assert.match(f.text(id),/Реализовано задач: 1 \/ 1 · актуально проверено: 0 \/ 1/);
+  assert.match(f.text(id),/Проверку нужно обновить/);
+ }
+ assert.match(f.text('requirements'),/Реализовано/);assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 0 \/ 1/);
+ assert.equal(f.el('waves').children[0].children[1].attributes['aria-valuenow'],'1');
+ assert.equal(f.el('waves').children[0].children[1].attributes['aria-label'],'Реализованные задачи волны');
+ assert.match(f.text('tabs'),/Требуют внимания/);
+});
+
+test('a stale running task and an unfinished shared requirement are never labelled fully implemented',async()=>{
+ const d=sample();d.tasks[0].phaseStale=true;d.tasks[1].requirements=['R01'];d.tasks[1].status='completed';d.tasks[1].proofCurrent=false;
+ d.requirements[0].progress={status:'stale',completed:0,total:2,acceptance:{status:'pending'}};
+ const f=await fixture('',d);assert.match(f.text('task-T01'),/Проверки устарели/);
+ assert.doesNotMatch(f.el('task-T01').children[0].textContent,/Реализовано/);
+ assert.match(f.text('requirements'),/Частично реализовано/);assert.match(f.text('requirements'),/Реализовано задач: 1 \/ 2/);
+});
+
+test('offline completed history keeps its work but withdraws current verification',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=true;const f=await fixture('',d);
+ await f.fail();assert.match(f.text('task-T01'),/Реализовано · последний снимокАктуальность проверки не подтверждена/);
+ assert.doesNotMatch(f.el('task-T01').children[0].textContent,/Проверка актуальна/);
+ assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 0 \/ 1/);
+});
+
+test('attention filter includes stale proof or stale acceptance even when implementation is recorded',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=true;
+ d.requirements[0].implementation='implemented';d.requirements[0].progress={status:'completed',completed:1,total:1,acceptance:{status:'stale'}};
+ const f=await fixture('',d);f.el('tabs').children[3].click();
+ assert.match(f.text('requirements'),/Отправка формы/);assert.match(f.text('requirements'),/Итоговую приёмку нужно обновить/);
+ d.requirements[0].progress.status='stale';d.requirements[0].progress.acceptance.status='pending';await f.update(d);assert.match(f.text('requirements'),/Отправка формы/);
+ d.requirements[0].progress.status='partial';d.requirements[0].implementation='unfinished';await f.update(d);assert.match(f.text('requirements'),/Отправка формы/);
+ d.requirements[0].progress.status='completed';d.requirements[0].implementation='implemented';d.requirements[0].progress.acceptance.status='passed';await f.update(d);assert.doesNotMatch(f.text('requirements'),/Отправка формы/);
+ await f.fail();assert.match(f.text('requirements'),/Отправка формы/);assert.match(f.text('requirements'),/Актуальность проверки не подтверждена/);
 });
