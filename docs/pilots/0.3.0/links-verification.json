@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-22T13:14:13.936896+00:00",
+  "checkedLocalLinks": 144,
+  "missing": [],
+  "documentHashes": {
+    "AGENTS.md": "d14f0b52289ba6fa71940ed65dcfea534fd87f9af1158cde617f628ade52ea86",
+    "README.md": "95c92c511d937e82b35b4c2d02dadf3b24c828bf55f971ded98fdb4ffb1d9934",
+    "docs/changes.md": "5bfae7f56b5699264fe18322e68f6ef970fbbeadd9a580c4e52e59eb3149c284",
+    "docs/decisions.md": "7a5c0b271a6526cfaf5bcdd79b8b6d159c7287511263fdfe656a232f1b9e7c39",
+    "docs/install.md": "04f60eb76aa09aaa69a6725daaeb4d0c83ba2f4d7469c2d17d94f96e8317f072",
+    "docs/plan-project-documents.md": "e76432a7bb5e552ae41497f5b31a0105fa594c9a31762d18ef8e5f452bd959ff",
+    "docs/release-0.3.0.md": "09e60a3dfa39a4e1f44179d842ee8f3e44f65fa2ec34ce02e032b847fd92c403",
+    "docs/updates.md": "6dee6016c98a6baff572531888716b5a59bcdb9bb3dac617b6c31bca2799517a",
+    "docs/validation-0.3.0.md": "a6bf8ff2a0a9b932de1a849eceba336479d2ba8360558c4a5866883a1eb251d1",
+    "skills/aispa/SKILL.md": "f9214cd0b410339b6c39e91d16814f1e211795f45d2d71c54e30142cc56ba40a",
+    "skills/aispa/phases/01-start.md": "a4c10d94fe644ebf14b64bbc5f401ac8d6e84075aec3ee7e3f8a20a26974b543",
+    "skills/aispa/references/documents.md": "f8689d9200980c442e4de717761d4e442de0513126872ded45d1e23374d6d230"
+  },
+  "exitCode": 0
+}

@@ -1,9 +1,9 @@
 # Установка AISpa из опубликованного Release
 
-Последний опубликованный выпуск — [0.2.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.2.0):
-Codex, Claude Code и Cursor. **0.3.0 — рабочий кандидат, не опубликован**;
-OpenClaw, Gemini CLI и Antigravity доступны в его исходниках. Скачивание
-последнего Release сейчас не устанавливает новые адаптеры.
+Опубликован [AISpa 0.3.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.3.0):
+Codex, Claude Code, Cursor, OpenClaw, Gemini CLI и Antigravity app/IDE.
+Выпуск на Mac разрешён владельцем до завершения Windows CI;
+[подтверждённые проверки](validation-0.3.0.md).
 
 Всегда берите `install.py`, `aispa.zip` и `aispa-update.json` из одного выбранного
 Release. Установщик из старого выпуска может не знать новые значения runtime.
@@ -17,9 +17,9 @@ Release. Установщик из старого выпуска может не
 | codex | `.agents/skills/aispa` | `~/.codex/skills/aispa` | опубликовано |
 | claude-code | `.claude/skills/aispa` | `~/.claude/skills/aispa` | опубликовано |
 | cursor | `.cursor/skills/aispa` | `~/.cursor/skills/aispa` | опубликовано |
-| openclaw | `.agents/skills/aispa` | `~/.openclaw/skills/aispa` | кандидат 0.3.0 |
-| gemini | `.gemini/skills/aispa` | `~/.gemini/skills/aispa` | кандидат 0.3.0 |
-| antigravity | `.agents/skills/aispa` | `~/.gemini/config/skills/aispa` | кандидат 0.3.0 app/IDE |
+| openclaw | `.agents/skills/aispa` | `~/.openclaw/skills/aispa` | опубликовано в 0.3.0 |
+| gemini | `.gemini/skills/aispa` | `~/.gemini/skills/aispa` | опубликовано в 0.3.0 |
+| antigravity | `.agents/skills/aispa` | `~/.gemini/config/skills/aispa` | опубликовано · app/IDE |
 
 Project-пути отсчитываются от `--project-root`. Для global этот аргумент
 не нужен. Общая Codex-копия `~/.agents/skills/aispa` выбирается через
@@ -34,7 +34,7 @@ Project-пути отсчитываются от `--project-root`. Для global
 python3 install.py preview --runtime claude-code --scope project --project-root <абсолютный-корень-проекта>
 ```
 
-После публикации выпуска с новыми адаптерами его `install.py` принимает:
+Установщик выпуска 0.3.0 принимает:
 
 ```text
 python3 install.py preview --runtime openclaw --scope global
@@ -71,5 +71,5 @@ python3 install.py apply --candidate <candidateId> --confirm
 Активный прогон продолжает работать собственным закреплённым runtime.
 
 Проверенная доставка 0.2.0 описана в [validation-0.2.0.md](validation-0.2.0.md).
-Адресные тесты кандидата — [validation-agent-runtimes.md](validation-agent-runtimes.md).
-Они не подтверждают полное модельное исполнение и не означают публикацию 0.3.0.
+Адресные тесты выпуска — [validation-agent-runtimes.md](validation-agent-runtimes.md).
+Они не подтверждают полное модельное исполнение во всех приложениях.
