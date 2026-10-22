@@ -417,6 +417,18 @@ Object.assign(EN,{
  'Осталась итоговая проверка':'Final review remains','Задачи реализованы; длительность приёмки пока неизвестна.':'Tasks are implemented; acceptance duration is unknown.',
  'Движок ещё не накопил данные.':'The engine has not collected enough data.',
  'Последний подтверждённый снимок':'Last confirmed snapshot','Выполняется проверка кода':'Code verification is running',
+ 'Проверка в чистом клоне':'Verification in a clean clone','Исполнитель назначен':'Worker assigned',
+ 'Старт реализации не отмечен':'Implementation start not recorded','Назначен: ':'Assigned: ',
+ 'Назначение: ':'Assigned at: ','Назначение на момент снимка: ':'Assignment at snapshot: ',
+ 'Интервал этапа':'Phase interval','Интервал этапа: ':'Phase interval: ','Начало этапа отмечено агентом':'Phase start recorded by the agent',
+ 'Исполнитель':'Worker','Критик · круг 1':'Critic · round 1','Критик · круг 2':'Critic · round 2',
+ 'Приёмщик задачи':'Task acceptor',
+ 'Разбор идеи':'Idea assessment','Подготовка брифа':'Brief preparation','Изучение проекта':'Project discovery',
+ 'Подготовка спецификации':'Specification preparation','Сверка покрытия требований':'Requirements coverage review',
+ 'Подготовка плана':'Planning','Подготовка команды':'Team preparation','Сверка волны с брифом':'Wave review against the brief',
+ 'Общий обзор версии':'Whole-project review','Подготовка передачи проекта':'Handoff preparation',
+ 'Проверка чистой копии':'Clean-copy verification','Независимая слепая проверка':'Independent blind review',
+ 'Итоговая приёмка':'Final acceptance','Сохранение знаний проекта':'Recording project knowledge',
  'волна':'wave','Проверки устарели · требуется повторная проверка':'Checks are stale · another review is required',
  'Сейчас: ':'Now: ','На момент снимка: ':'At snapshot: ','Вся задача':'Whole task',
  'Текущий этап не определён':'Current stage unknown','Ожидает запуска: ':'Waiting to start: ',
@@ -486,6 +498,7 @@ function taskLabel(t,d){
   (source==='archive'||source==='offline')&&t.status==='running'?tr('Была в работе'):
   t.status==='running'&&d.status!=='running'?tr('Приостановлена'):
   t.status==='running'&&phaseName(t)?phaseName(t):
+  t.status==='pending'&&t.assignment?tr('Исполнитель назначен'):
   t.status==='completed'&&t.proofCurrent===false?tr('Нужна повторная проверка'):
   t.status==='completed'&&t.proofCurrent===true?tr(t.completionKind==='verified_completion'?'Выполнение проверено':'Задача принята'):tr(TASK[t.status]||UNKNOWN);
  return label+sourceSuffix();
@@ -544,15 +557,19 @@ function tick(){
  var d=last;
  $('runElapsed').textContent=duration(d.elapsedSeconds==null?null:d.elapsedSeconds+(d.status==='running'?delta():0));
  d.tasks.forEach(function(t){var time=document.getElementById('time-'+t.id);if(time)time.textContent=
-  t.elapsedSeconds==null&&t.status==='pending'?tr('Ещё не начата'):t.elapsedSeconds==null&&t.status==='blocked'?tr('Не запускалась'):duration(taskTime(t,d));
+  t.elapsedSeconds==null&&t.status==='pending'?tr(t.assignment?'Старт реализации не отмечен':'Ещё не начата'):t.elapsedSeconds==null&&t.status==='blocked'?tr('Не запускалась'):duration(taskTime(t,d));
   var current=document.getElementById('active-time-'+t.id);if(current)current.textContent=duration(taskTime(t,d));
   var phase=document.getElementById('phase-time-'+t.id);if(phase)phase.textContent=duration(phaseTime(t,d));
   var activePhase=document.getElementById('active-phase-time-'+t.id);if(activePhase)activePhase.textContent=duration(phaseTime(t,d));});
  var v=document.getElementById('verification-time');
- if(v&&d.activity){var seconds=(new Date(d.observedAt)-new Date(d.activity.startedAt))/1000;v.textContent=duration(Math.max(0,seconds)+delta());}
+ if(v&&d.activity){var seconds=(new Date(d.observedAt)-new Date(d.activity.startedAt))/1000;v.textContent=duration(Math.max(0,seconds)+(d.status==='running'?delta():0));}
+ var wp=document.getElementById('work-progress-time');if(wp&&d.workProgress){var work=d.workProgress;
+  wp.textContent=duration(work.elapsedSeconds+(work.activeSince&&d.status==='running'?delta():0));}
  var la=document.getElementById('last-action'),agoNow=lastActionText(d);if(la&&agoNow)la.textContent=agoNow;
  var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];
 }
+function assignmentText(t){var a=t.assignment;if(!a||typeof a.roleLabel!=='string')return null;
+ return tr(source==='archive'||source==='offline'?'Назначение на момент снимка: ':'Назначен: ')+tr(a.roleLabel)+(a.runtime?' · '+a.runtime:'')+(a.model?' · '+a.model:'');}
 function wholeTaskLabel(t){return tr(t.attemptNumber>1?'Всего по всем попыткам':'Вся задача')}
 function agoText(seconds){seconds=Math.max(0,Math.floor(seconds));
  if(seconds<10)return tr('только что');if(seconds<60)return seconds+' '+tr('с назад');
@@ -561,16 +578,23 @@ function agoText(seconds){seconds=Math.max(0,Math.floor(seconds));
 function lastActionText(d){var cw=d.currentWork;if(!cw||!cw.lastActionAt)return null;
  var seconds=(new Date(d.observedAt)-new Date(cw.lastActionAt))/1000;if(!Number.isFinite(seconds))return null;
  return tr('Последнее действие в журнале: ')+agoText(seconds+delta())+(cw.lastAction?' · '+cw.lastAction:'')}
+function renderWorkProgress(box,d){var work=d.workProgress;if(!work||work.finishedAt||typeof work.label!=='string')return false;
+ var wr=h('div','active-task'),wb=h('div');
+ wb.append(h('b',null,tr(work.label)),h('small','sub',tr('Начало этапа отмечено агентом')));
+ var wt=h('span','mono task-time');wt.id='work-progress-time';wr.append(wb,wt);box.append(wr);return true;}
 function renderActivity(d,status){
  var box=$('currentActivity');box.replaceChildren();
  if(!connected()){box.append(h('div','activity-title',tr('Последний подтверждённый снимок')));return;}
  if(source==='archive'){box.append(h('div','activity-title',tr('Состояние на дату снимка')));return;}
  if(status!=='running'){box.append(h('div','activity-title',tr(SHORT[status]||UNKNOWN)+sourceSuffix()));
-  return;}
- if(d.activity&&d.activity.kind==='verification'){
-  var check=h('div','active-task');check.append(h('b',null,tr('Выполняется проверка кода')));
+  if(status==='paused'||status==='blocked')renderWorkProgress(box,d);return;}
+ var activityLabels={'verification':'Выполняется проверка кода','clean-verification':'Проверка в чистом клоне'};
+ var knownActivity=d.activity&&activityLabels[d.activity.kind];
+ if(knownActivity){
+  var check=h('div','active-task');check.append(h('b',null,tr(knownActivity)+(d.activity.task?' · '+d.activity.task:'')));
   var clock=h('span','mono task-time');clock.id='verification-time';check.append(clock);box.append(check);
  }
+ var reportedWork=renderWorkProgress(box,d);
  var running=d.tasks.filter(function(t){return t.status==='running'});
  running.forEach(function(t){var row=h('div','active-task'),text=h('div');
   text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · '+tr('волна')+' '+t.wave));
@@ -578,9 +602,10 @@ function renderActivity(d,status){
   else if(phaseName(t)){var phase=h('span','task-phase',tr(connected()?'Сейчас: ':'На момент снимка: ')+phaseName(t));
    if(t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){var clock=h('span','mono');clock.id='active-phase-time-'+t.id;phase.append(clock)}text.append(phase)}
   var right=h('div','task-right'),time=h('span','mono task-time');time.id='active-time-'+t.id;
+  var assignment=assignmentText(t);if(assignment)text.append(h('small','sub',assignment));
   if(t.attemptNote)text.append(h('span','task-phase',t.attemptNote));
   right.append(h('span','sub',wholeTaskLabel(t)),time);row.append(text,right);box.append(row);});
- if(!running.length&&!d.activity){
+ if(!running.length&&!knownActivity&&!reportedWork){
   var next=d.tasks.find(function(t){return t.status==='pending'&&t.dependsOn&&t.dependsOn.every(function(id){
    return d.tasks.some(function(other){return other.id===id&&other.status==='completed'})})});
   var stage=STAGES.find(function(x){return x[0]===(d.displayStage||d.stage)}),cw=d.currentWork||{};
@@ -692,6 +717,8 @@ function render(d){
    (locale==='en'?c+' of '+ts.length+' completed':c+' из '+ts.length+' завершено'))+sourceSuffix()));var box=h('div','tasks');
   ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')+(t.status==='completed'&&t.proofCurrent===false?' proof-stale':'')),b=h('div','task-body');
    b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?tr('Требования: ')+t.requirements.join(', '):tr('Без привязки к требованиям')));
+   var assignment=assignmentText(t);if(assignment)b.append(h('small',null,assignment));
+   if(t.assignment&&t.assignment.assignedAt)b.append(h('small',null,tr('Назначение: ')+fmt(t.assignment.assignedAt)));
    if(t.attemptNote)b.append(h('small',null,t.attemptNote));
    var steps=phaseSteps(t);if(steps)b.append(steps);
    if(TIER[t.tier]){
@@ -704,7 +731,7 @@ function render(d){
    if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
     var pclock=h('span','mono task-time');pclock.id='phase-time-'+t.id;
     right.append(h('span','task-time',tr(source==='archive'?'Фаза на дату снимка: ':
-     connected()?'Фаза: ':'Фаза на момент снимка: ')+phaseName(t)),pclock)}
+     connected()?'Интервал этапа: ':'Фаза на момент снимка: ')+phaseName(t)),pclock)}
    row.append(h('span','task-id mono',t.id),b,right);box.append(row)});w.append(hd,box);wv.append(w)});
  var rb=$('remaining');rb.replaceChildren();var any=false;
  REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;

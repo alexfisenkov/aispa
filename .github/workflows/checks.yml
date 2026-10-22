@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Verification scope (full suite or runtime adapter regressions)
+        description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes]
+        options: [full, runtimes, dashboard]
 permissions:
   contents: read
 jobs:
@@ -30,7 +30,7 @@ jobs:
         working-directory: tests
         run: python -B -m unittest test_dashboard_server.DashboardServerTests.test_start_status_stop_and_port_reuse -v
       - name: Contract tests
-        if: inputs.scope != 'runtimes'
+        if: inputs.scope == 'full'
         run: python -m unittest discover -s tests -v
       - name: Runtime adapters and regression boundaries
         if: inputs.scope == 'runtimes'
@@ -48,8 +48,18 @@ jobs:
           test_project_documents test_project_documents_cli test_project_file_map
           test_ideas test_planning test_workflow test_cli_output
           test_check_modes_e2e.FastModeE2E
+      - name: Dashboard startup and lifecycle regressions
+        if: inputs.scope == 'dashboard'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_dashboard_host test_dashboard_server test_cli_output
+          test_lean_control.BatchCliTests test_runtime_evidence test_store
+          test_project_documents_cli test_work_progress test_dashboard_activity
+          test_phase_progress test_dashboard_liveness test_timing test_workflow
       - name: Study-plan pilot example tests
-        if: inputs.scope != 'runtimes'
+        if: inputs.scope == 'full'
         working-directory: examples/study-plan
         run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests

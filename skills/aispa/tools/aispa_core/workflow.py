@@ -37,6 +37,8 @@ class Workflow:
 
     def save(self, event, at=None):
         at = at or timestamp()
+        from . import work_progress
+        work_progress.sync(self.s, event, at)
         for task in self.s.get("tasks", []):
             timing.sync_phase(task, at, self.s.get("status") == "running")
         self.store.append(self.s, event)
@@ -45,6 +47,23 @@ class Workflow:
                 project_context.refresh(self.store, self.s)
             except (OSError, Invalid) as error:
                 raise Invalid("Событие записано, но память проекта не обновилась. Выполните context-refresh без повтора операции") from error
+
+    def progress_begin(self, phase):
+        from . import work_progress
+        self.running()
+        at = timestamp()
+        if work_progress.begin(self.s, phase, at):
+            self.save("work-progress-began:" + phase, at)
+        return work_progress.view(self.s, at)
+
+    def progress_end(self):
+        from . import work_progress
+        require(not self.s.get("journalRecovery", {}).get("pending"),
+                "После восстановления сначала journal-verify и journal-reconcile")
+        at = timestamp()
+        if work_progress.end(self.s, at):
+            self.save("work-progress-ended:" + self.s["workProgress"]["phase"], at)
+        return work_progress.view(self.s, at)
 
     def running(self, *, allow_wait=False):
         require(not self.s.get("journalRecovery", {}).get("pending"),

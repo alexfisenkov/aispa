@@ -14,7 +14,7 @@ from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
 from aispa_core import check_modes, project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 from aispa_core.cli_output import emit
-from aispa_core import phase_receipts
+from aispa_core import phase_receipts, dashboard_host, work_progress
 from aispa_core import project_documents
 
 PACKAGE = Path(__file__).resolve().parents[1]
@@ -48,6 +48,10 @@ def parser():
     init.add_argument("--check", required=True, choices=check_modes.MODES,
                       help="Сколько проверять: fast (быстро), balanced (сбалансированно), max (максимум)")
     controls.parsers(sub)
+    progress = sub.add_parser("progress")
+    progress_steps = progress.add_subparsers(dest="progress_action", required=True)
+    progress_steps.add_parser("begin").add_argument("phase", choices=work_progress.PHASES)
+    progress_steps.add_parser("end")
     for name in ("brief", "requirements", "spec", "coverage", "acceptance"):
         action = sub.add_parser(name)
         action.add_argument("--file", required=True)
@@ -163,8 +167,9 @@ def parser():
 BATCH_LIMIT = 25
 # Each step is an ordinary command with its own lock and journal event; these
 # change the package, run a server, repair the journal or create a run.
+# Resume returns control to the host for its mandatory visible dashboard action.
 BATCH_DENIED = frozenset({"update-check", "update-prepare", "update-apply", "update-rollback", "serve",
-                          "dashboard", "init", "batch"})
+                          "dashboard", "init", "resume", "batch"})
 BATCH_JOURNAL_READS = frozenset({"journal-inspect", "journal-context"})
 
 
@@ -251,6 +256,7 @@ def execute(args):
     if args.action == "dashboard" and args.operation != "archive":
         if args.operation == "start":
             value = dashboard_server.start(store, port=args.port)
+            value = {**value, "requiredHostActions": dashboard_host.open_request(value)}
         elif args.operation == "stop":
             value = dashboard_server.stop(store)
         else:
@@ -313,7 +319,8 @@ def execute(args):
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
             project_context.refresh(store, state)
-            emit(store, publish(store, state), compact_mode=args.compact)
+            output = {**publish(store, state), "requiredHostActions": dashboard_host.start_request()}
+            emit(store, output, compact_mode=args.compact)
             return 0
         state = store.load()
         preparation_write = (args.action in ("template", "brief-source", "brief-map-context") and args.write
@@ -335,7 +342,9 @@ def execute(args):
         ok = True
         receipt = None
         action = args.action
-        if action in controls.READS | controls.WRITES:
+        if action == "progress":
+            receipt = flow.progress_begin(args.phase) if args.progress_action == "begin" else flow.progress_end()
+        elif action in controls.READS | controls.WRITES:
             receipt = controls.execute(store, state, flow, args)
             if action in controls.READS or action == "test-intent" and not args.file:
                 print(json.dumps(receipt, ensure_ascii=False, indent=2))
@@ -570,6 +579,8 @@ def execute(args):
             "counts": {name: sum(t["status"] == name for t in state["tasks"])
                        for name in ("pending", "running", "blocked", "completed")},
             "contextIndex": str(store.home / "context/INDEX.md")}
+        if action == "resume" and ok:
+            output["requiredHostActions"] = dashboard_host.start_request()
         emit(store, output, compact_mode=args.compact)
         return 0 if ok else 2
 
