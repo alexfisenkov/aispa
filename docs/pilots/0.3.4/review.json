@@ -18,5 +18,5 @@
     "blockers": []
   },
   "fullModelRuns": 0,
-  "releaseVerification": "pending"
+  "releaseVerification": "release-verification.json"
 }

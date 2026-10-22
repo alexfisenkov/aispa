@@ -1,9 +1,9 @@
 # Установка AISpa из опубликованного Release
 
-Опубликован [AISpa 0.3.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.3.0):
+Опубликован [AISpa 0.3.4](https://github.com/alexfisenkov/aispa/releases/tag/v0.3.4):
 Codex, Claude Code, Cursor, OpenClaw, Gemini CLI и Antigravity app/IDE.
-Выпуск на Mac разрешён владельцем до завершения Windows CI;
-[подтверждённые проверки](validation-0.3.0.md).
+Целевые проверки обновления и установки прошли на macOS, Linux и Windows;
+[подтверждённые проверки](validation-0.3.4.md).
 
 Всегда берите `install.py`, `aispa.zip` и `aispa-update.json` из одного выбранного
 Release. Установщик из старого выпуска может не знать новые значения runtime.

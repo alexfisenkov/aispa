@@ -25,8 +25,41 @@ CLI preview/apply и файловые guards. Совместный целево�
 с командой, подтверждённым exit code и SHA исходников (локальные, не в Git).
 Независимый review: tech — OK в первом круге; reality — OK во втором
 после уточнения квитанций и сужения сетевого утверждения до сохранённых ответов.
-Код после review не менялся. Финальная CI, публикация 0.3.4 и установка
-пока не подтверждены.
+Код после review не менялся.
+
+## CI и публикация
+
+Одна [финальная CI updates](https://github.com/alexfisenkov/aispa/actions/runs/39822444422):
+шесть jobs PASS — macOS/Linux/Windows × Python 3.11/3.13, адресные updater,
+installer и portable guards плюс запуск/остановка панели. Остальные scope,
+включая полный набор и модельные проекты, не запускались.
+Проверенный commit `0aede6d550ecd1e024b099edc90419bdbf93efff` и merge commit
+`b0a7ba34e305993e51faeffb90c8ec46d196f99c` имеют одинаковое дерево.
+
+[PR #8](https://github.com/alexfisenkov/aispa/pull/8) слит;
+[Release 0.3.4](https://github.com/alexfisenkov/aispa/releases/tag/v0.3.4)
+опубликован как stable. [Сборка ресурсов](https://github.com/alexfisenkov/aispa/actions/runs/39822683370)
+завершилась успешно. Скачанные `aispa.zip`, `aispa-update.json`, `install.py`
+побайтово совпали с локальной сборкой точного commit; проверены все 89 файлов.
+Квитанция: [release-verification.json](pilots/0.3.4/release-verification.json).
+
+## Живая установка и обнаружение
+
+Скачанный `install.py preview --tag v0.3.4` успешно подготовил кандидата в
+изолированной папке: опубликованный тег, исходный commit, архив и manifest
+проверены. Этот preview не устанавливался поверх пользовательского каталога.
+
+Из верифицированного опубликованного пакета вызваны обычные check → prepare →
+apply для четырёх существующих копий 0.3.3: shared, Claude Code, Cursor,
+Antigravity. Каждый check нашёл `available: 0.3.4` без подстановки метаданных.
+Для каждой установки совпали 89 файлов, SHA/размеры/права и digest; сохранённая
+0.3.3 backup тоже проверена. После установки запущен CLI каждой копии:
+четыре раза `current`, обнаружен Release 0.3.4, exit code 0.
+[Квитанция установки](pilots/0.3.4/installation-verification.json).
+
+Активные закреплённые runtime и проекты не изменялись. Нативные сессии шести
+агентов заново не запускались; проверены файлы установок и их CLI.
+
 
 ## Границы
 
