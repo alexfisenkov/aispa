@@ -1,5 +1,20 @@
 # Изменения и проверки
 
+## 22.10.2026 — 0.2.0 опубликован и проверен
+
+Release [v0.2.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.2.0) на
+commit `a4790ab20333a27d7afa3cde49a1cc0c8092399d`. Финальная CI
+[39744521796](https://github.com/alexfisenkov/aispa/actions/runs/39744521796) —
+шесть jobs успешны (800 Python-проверок в каждом, 15/15 study-plan, панель 48/48);
+workflow ресурсов [39750083544](https://github.com/alexfisenkov/aispa/actions/runs/39750083544) —
+success. Скачанные `aispa.zip` (414504 байт), `aispa-update.json` (14705) и
+`install.py` (31313) совпали с повторной сборкой из чистого клона tag. В
+изолированных папках: preview без `--tag` выбрал stable 0.2.0, установка
+80 файлов совпала с manifest, повторная установка отклонена; 0.1.0 → 0.2.0
+прошло prepare/apply, откат вернул побайтно прежние 78 файлов. Глобальные
+установки не менялись. Свидетельства — [validation-0.2.0.md](validation-0.2.0.md),
+[квитанция](pilots/0.2.0/release-verification.json).
+
 ## 22.10.2026 — подготовка кандидата 0.2.0 (ветка `work/lean-control`, не опубликовано)
 
 Выпуск разрешён владельцем ([решения](decisions.md)). Номер 0.2.0 в `VERSION`,
