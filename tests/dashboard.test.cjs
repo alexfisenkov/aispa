@@ -17,6 +17,7 @@ class Element {
  addEventListener(name,fn){this.events[name]=fn;}
  setAttribute(name,value){this.attributes[name]=value;}
  getAttribute(name){return this.attributes[name];}
+ focus(options){this.ownerDocument.activeElement=this;this.focusOptions=options;}
  click(){return this.events.click?.();}
  change(value){this.value=value;return this.events.change?.call(this);}
 }
@@ -28,7 +29,7 @@ async function fixture(search='',data=sample(),options={}){
  }
  const intervals=[];let response=data,error=null,clock=0,calls=0;
  const document={getElementById(id){return elements[id]||Object.values(elements).map(e=>descend(e,id)).find(Boolean)||null;},
-  createElement(tag){return new Element(tag);},createTextNode(text){return new Element('#text',String(text));},
+  createElement(tag){const el=new Element(tag);el.ownerDocument=document;return el;},createTextNode(text){return new Element('#text',String(text));},
   documentElement:new Element('html'),querySelectorAll(selector){return selector==='[data-i18n]'?staticEls:[];}};
  const context={document,location:{search},URLSearchParams,Date,Set,Array,Number,AbortController,
   performance:{now:()=>clock},setInterval:fn=>intervals.push(fn),setTimeout:()=>1,clearTimeout(){},
@@ -40,7 +41,7 @@ async function fixture(search='',data=sample(),options={}){
  await settle();
  return {el:id=>document.getElementById(id),text:id=>document.getElementById(id).textContent,
   staticText:key=>staticEls.find(el=>el.getAttribute('data-i18n')===key)?.textContent,
-  htmlElement:document.documentElement,
+  htmlElement:document.documentElement,activeElement:()=>document.activeElement,
   async update(data){response=data;error=null;await elements.refresh.click();await settle();},
   async fail(){error=true;await elements.refresh.click();await settle();},
   advance(ms){clock+=ms;intervals.forEach(fn=>{if(fn.name==='tick')fn();});},
@@ -169,7 +170,7 @@ test('phase row reflects supplied states: repair may be skipped, second review i
   {id:'repair',label:'Правка',status:'skipped'},
   {id:'critic_2',label:'Второй критик',status:'done'},
   {id:'task_acceptance',label:'Приёмка задачи',status:'done'}];
- const f=await fixture('',d);const row=f.el('task-T01').children[0].children[1].children[0];
+ const f=await fixture('',d);const row=f.el('task-phases-T01').children[0];
  assert.equal(row.attributes.role,'list');assert.equal(row.children.length,5);
  assert.equal(row.children[2].attributes['aria-label'],'Правка — не требуется');
  assert.equal(row.children[3].attributes['aria-label'],'Второй критик — завершено');
@@ -206,13 +207,13 @@ test('demo illustrates repair and second review as examples only',async()=>{
  assert.match(f.text('waves'),/Правка/);assert.match(f.text('waves'),/Второй критик/);
  assert.match(f.text('waves'),/Препятствие/);assert.match(f.text('waves'),/Ожидает/);
  assert.equal(f.text('phase-time-T03'),'1 мин 30 с');
- const t02=f.el('task-T02').children[0].children[1].children[0];
+ const t02=f.el('task-phases-T02').children[0];
  assert.equal(t02.children[2].attributes['aria-label'],'Правка — не требуется');
  assert.equal(t02.children[3].attributes['aria-label'],'Второй критик — не требуется');
  const accepted=await fixture('?demo&status=accepted');
  let skipped=0,reviewed=0;
  for(const wave of accepted.el('waves').children)for(const task of wave.children[3].children){
-  const steps=task.children[0].children[1].children[0];
+  const steps=accepted.el('task-phases-'+task.id.slice(5)).children[0];
   const repairSkipped=steps.children[2].attributes['aria-label']==='Правка — не требуется';
   assert.equal(steps.children[3].attributes['aria-label'],repairSkipped?'Второй критик — не требуется':'Второй критик — завершено');
   assert.equal(steps.children[4].attributes['aria-label'],'Приёмка задачи — завершено');
@@ -340,7 +341,7 @@ test('offline and demo acceptance stay qualified; global stale preserves scoped 
  assert.match(demo.text('label'),/пример/);assert.match(demo.text('waves'),/Реализовано · пример/);
  const stale=sample('stale');stale.tasks[0].status='completed';stale.tasks[0].proofCurrent=true;
  const s=await fixture('',stale);
- assert.match(s.text('label'),/устарела/);assert.match(s.text('waves'),/РеализованоПроверка актуальна/);
+ assert.match(s.text('label'),/устарела/);assert.match(s.text('waves'),/РеализованоПроверено/);
 });
 test('light faint text and touch controls meet stated size and contrast',()=>{
  const faint=html.match(/--faint:(#[0-9A-Fa-f]{6})/)[1];
@@ -385,7 +386,7 @@ test('standard and lean tasks name their review route',async()=>{
  reviewPolicy:'lean',completionKind:'critic_acceptance',elapsedSeconds:20,phaseSteps:[]}];
  const f=await fixture('',d);const text=f.text('waves');
  assert.match(text,/Обычная задача · Без критика задачи · общий обзор версии/);
- assert.match(text,/Тяжёлая задача · PASS критика закрывает задачу/);assert.match(text,/РеализованоПроверка актуальна/);
+ assert.match(text,/Тяжёлая задача · PASS критика закрывает задачу/);assert.match(text,/РеализованоПроверено/);
  f.el('language').change('en');assert.match(f.text('waves'),/Standard task · No task reviewer/);
  assert.match(f.text('waves'),/A passing critic closes the task/);
 });
@@ -520,11 +521,14 @@ test('reported work and task assignment stay text-only for untrusted labels',asy
  assert.match(f.text('waves'),/<script>bad\(\)<\/script>/);
 });
 
-test('section order puts checks and stages above the two-clock summary and wave details',()=>{
- const stages=html.indexOf('<section class="card stages-card">'),clocks=html.indexOf('<section class="card activity-card"'),waves=html.indexOf('<section class="card waves-card"');
- assert.ok(html.indexOf('id="gates"')<stages&&stages<clocks&&clocks<waves&&waves<html.indexOf('id="requirements"'));
- const timeCard=html.slice(clocks,html.indexOf('</section>',clocks));
- assert.match(timeCard,/id="runElapsed"/);assert.match(timeCard,/id="eta"/);assert.doesNotMatch(timeCard,/currentActivity|Сейчас выполняется/);
+test('compact hero contains work and both clocks before visible checks stages and tasks',()=>{
+ const hero=html.indexOf('<section class="hero-row">'),stages=html.indexOf('<section class="card stages-card">'),waves=html.indexOf('<section class="card waves-card"');
+ assert.ok(hero<html.indexOf('id="gates"')&&html.indexOf('id="gates"')<stages&&stages<waves&&waves<html.indexOf('id="requirements"'));
+ const overview=html.slice(hero,html.indexOf('</section>',hero));
+ for(const id of ['currentActivity','overviewCounts','runElapsed','eta']){
+  assert.ok(overview.includes('id="'+id+'"'));assert.equal((html.match(new RegExp('id="'+id+'"','g'))||[]).length,1);
+ }
+ assert.doesNotMatch(html,/<section class="card activity-card"/);
  assert.match(html,/\.task-summary\{display:grid/);assert.match(html,/@media\(max-width:480px\)/);
 });
 
@@ -594,11 +598,12 @@ test('completed stale task keeps implementation separate from verification in bo
  const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=false;d.tasks[0].phaseStale=true;
  d.tasks[0].phaseSteps=[{id:'implementation',label:'Реализация',status:'stale'},{id:'verified_completion',label:'Выполнение проверено',status:'stale'}];
  const original=JSON.stringify(d);const f=await fixture('',d);const task=f.el('task-T01');
- assert.match(task.textContent,/РеализованоПроверку нужно обновить/);
- assert.equal(task.children[0].children[1].children[0].children[0].className,'phase-step recorded');
+ assert.match(task.children[0].textContent,/РеализованоПроверку обновить/);
+ assert.match(task.children[1].textContent,/Проверку нужно обновить/);
+ assert.equal(f.el('task-phases-T01').children[0].children[0].className,'phase-step recorded');
  assert.doesNotMatch(task.textContent,/Проверка актуальна|Задача принята/);assert.equal(JSON.stringify(d),original);
  f.el('language').change('en');
- assert.match(f.text('task-T01'),/ImplementedVerification needs refreshing/);
+ assert.match(f.text('task-T01'),/ImplementedRefresh verification/);
 });
 
 test('stale requirements preserve implementation inside cards and in the shared registry',async()=>{
@@ -625,7 +630,7 @@ test('a stale running task and an unfinished shared requirement are never labell
 
 test('offline completed history keeps its work but withdraws current verification',async()=>{
  const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=true;const f=await fixture('',d);
- await f.fail();assert.match(f.text('task-T01'),/Реализовано · последний снимокАктуальность проверки не подтверждена/);
+ await f.fail();assert.match(f.text('task-T01'),/Реализовано · последний снимокНет подтверждения/);
  assert.doesNotMatch(f.el('task-T01').children[0].textContent,/Проверка актуальна/);
  assert.match(f.text('waves'),/Реализовано: 1 \/ 1 · актуально проверено: 0 \/ 1/);
 });
@@ -639,4 +644,146 @@ test('attention filter includes stale proof or stale acceptance even when implem
  d.requirements[0].progress.status='partial';d.requirements[0].implementation='unfinished';await f.update(d);assert.match(f.text('requirements'),/Отправка формы/);
  d.requirements[0].progress.status='completed';d.requirements[0].implementation='implemented';d.requirements[0].progress.acceptance.status='passed';await f.update(d);assert.doesNotMatch(f.text('requirements'),/Отправка формы/);
  await f.fail();assert.match(f.text('requirements'),/Отправка формы/);assert.match(f.text('requirements'),/Актуальность проверки не подтверждена/);
+});
+
+
+test('task disclosure keeps phase timing assignment and criteria out of the concise summary',async()=>{
+ const d=sample();const t=d.tasks[0];t.phase='critic_1';t.phaseLabel='Первый критик';
+ t.phaseTiming={phase:'critic_1',elapsedSeconds:8,activeSince:d.observedAt};
+ t.phaseSteps=[{id:'implementation',status:'done'},{id:'critic_1',status:'current'}];
+ t.assignment={roleLabel:'Исполнитель',runtime:'codex',model:'fixture-model'};
+ t.criteriaDetails=[{text:'Письмо доставлено',status:'pending',source:'task_state'}];
+ const f=await fixture('',d),task=f.el('task-T01'),summary=task.children[0],detail=task.children[1];
+ assert.equal(task.open,false);assert.equal(summary.tag,'summary');
+ assert.match(summary.textContent,/Форма/);assert.match(summary.textContent,/Первый критик/);assert.match(summary.textContent,/30 с/);
+ assert.doesNotMatch(summary.textContent,/codex|fixture-model|Требования:|Письмо доставлено|Интервал этапа|8 с|✓/);
+ for(const text of ['codex','fixture-model','Письмо доставлено','Отправка формы','Интервал этапа','8 с'])assert.ok(detail.textContent.includes(text));
+ assert.equal(f.el('task-phases-T01').children[0].attributes.role,'list');
+});
+
+test('overview names actual work and reports implemented blocked and pending counts',async()=>{
+ const d=sample();d.tasks[0].title='Форма с длинным предметным заголовком';d.tasks[0].phase='critic_1';
+ d.tasks.push({...d.tasks[1],id:'T03',status:'blocked'},{...d.tasks[1],id:'T04',status:'completed',proofCurrent:false});
+ const f=await fixture('',d);
+ assert.match(f.text('currentActivity'),/Форма с длинным предметным заголовком/);
+ assert.match(f.text('overviewCounts'),/1 \/ 4Реализовано задач/);assert.match(f.text('overviewCounts'),/1Блокеры задач/);
+ assert.match(f.text('overviewCounts'),/1На проверке/);assert.match(f.text('overviewCounts'),/1В очереди/);
+ assert.match(f.text('overviewCounts'),/1Проверку обновить/);assert.doesNotMatch(f.text('overviewCounts'),/%|Принято/);
+ f.el('language').change('en');assert.match(f.text('overviewCounts'),/1 \/ 4Implemented tasks/);assert.match(f.text('overviewCounts'),/1Under review/);
+});
+
+test('phase colors distinguish implementation review repair blocked and completed with text labels',async()=>{
+ const d=sample();const base=d.tasks[0];d.tasks=[
+  {...base,id:'T01',phase:'implementation',phaseLabel:'Реализация'},
+  {...base,id:'T02',phase:'critic1',phaseLabel:'Первый критик'},
+  {...base,id:'T03',phaseTiming:{phase:'repair',elapsedSeconds:1},phaseLabel:'Правка'},
+  {...base,id:'T04',status:'blocked'},
+  {...base,id:'T05',status:'completed',proofCurrent:false}];
+ const f=await fixture('',d);
+ for(const [id,kind,label] of [['T01','implementation','Реализация'],['T02','review','Первый критик'],['T03','repair','Правка'],['T04','blocked','Препятствие'],['T05','completed','Реализовано']]){
+  assert.ok(f.el('task-'+id).className.split(' ').includes(kind));assert.ok(f.el('task-'+id).children[0].textContent.includes(label));
+ }
+ assert.match(html,/--review:#0F766E/);assert.match(html,/--review:#99F6E4/);
+ assert.match(html,/\.task\.review\{border-left:4px solid var\(--review\)/);
+ assert.match(f.el('task-T05').children[0].textContent,/Проверку обновить/);
+});
+
+test('overview counters and work headlines qualify offline archive paused and stale phases',async()=>{
+ const d=sample();d.tasks[0].phase='critic_2';d.tasks[0].phaseStale=true;
+ const f=await fixture('',d);assert.match(f.text('overviewCounts'),/Проверку обновить/);assert.doesNotMatch(f.text('overviewCounts'),/На проверке/);
+ await f.fail();assert.match(f.text('currentActivity'),/Последний подтверждённый снимок/);assert.match(f.text('overviewCounts'),/Данные последнего снимка/);
+ assert.doesNotMatch(f.text('overviewCounts'),/На проверке|Реализация/);
+ const paused=await fixture('',sample('paused'));assert.match(paused.text('currentActivity'),/Пауза/);
+ assert.match(paused.text('overviewCounts'),/Сохранённая активность/);assert.doesNotMatch(paused.text('currentActivity'),/Форма|В работе задач/);
+ const archive=await fixture('',sample(),{archive:archivedSample('running')});assert.match(archive.text('currentActivity'),/Состояние на дату снимка/);
+ assert.match(archive.text('overviewCounts'),/Активность на момент снимка/);
+});
+
+test('an owner question suppresses stale active headlines estimates and ready claims',async()=>{
+ const d=sample('accepted');d.waiting={kind:'owner_question',note:'Нужно решение'};
+ d.estimate={reason:'estimate',lowerSeconds:600,upperSeconds:1200,sampleCount:2};
+ const f=await fixture('',d);assert.equal(f.text('label'),'Приостановлено');
+ assert.match(f.text('currentActivity'),/Ожидает ответа владельца/);assert.doesNotMatch(f.text('currentActivity'),/Форма/);
+ assert.equal(f.text('eta'),'Ожидает ответа владельца');assert.doesNotMatch(f.text('overviewCounts'),/Реализация/);
+ f.advance(2000);assert.equal(f.text('runElapsed'),'2 мин 00 с');
+});
+
+test('polling preserves native disclosure and focused summary before its asynchronous toggle event',async()=>{
+ const d=sample(),f=await fixture('',d),task=f.el('task-T01'),summary=f.el('task-summary-T01');
+ task.open=true;summary.focus();await f.update(d);
+ assert.equal(f.el('task-T01').open,true);assert.equal(f.activeElement(),f.el('task-summary-T01'));
+ assert.equal(f.activeElement().focusOptions.preventScroll,true);
+ task.open=false;task.events.toggle(); // A detached node must not overwrite the live disclosure.
+ await f.update(d);assert.equal(f.el('task-T01').open,true);
+ f.el('task-T01').open=false;await f.update(d);assert.equal(f.el('task-T01').open,false);
+});
+
+test('an empty plan or no data never becomes a completion percentage in the overview',async()=>{
+ const d=sample();d.tasks=[];const f=await fixture('',d);
+ assert.match(f.text('overviewCounts'),/План задач ещё не подготовлен/);assert.doesNotMatch(f.text('overviewCounts'),/100|0 \/ 0|Реализовано/);
+ const none=await fixture('',null);assert.equal(none.text('overviewCounts'),'');assert.equal(none.text('eta'),'Нет данных');
+});
+
+test('running explanation is disclosed while exception and readiness states stay visible',async()=>{
+ const f=await fixture();assert.equal(f.el('heroStatus').hidden,true);assert.equal(f.el('runExplanation').hidden,false);
+ assert.match(f.text('runExplanation'),/Промежуточный результат не является приёмкой/);
+ for(const status of ['paused','blocked','stale','accepted','delivered_with_remaining']){
+  await f.update(sample(status));assert.equal(f.el('heroStatus').hidden,false);assert.equal(f.el('runExplanation').hidden,true);
+ }
+ await f.fail();assert.equal(f.el('heroStatus').hidden,false);assert.match(f.text('hint'),/Текущая готовность неизвестна/);
+});
+
+test('compact ETA qualifier preserves assumptions and unknown waiting without the long explanation',async()=>{
+ const d=sample();d.estimate={reason:'estimate',basis:'plan_assumption',sampleCount:0,lowerSeconds:600,upperSeconds:1200};
+ const f=await fixture('',d);assert.equal(f.text('etaQualifier'),'Ориентир по плану');assert.match(f.text('etaNote'),/Предварительный ориентир/);
+ d.estimate.basis='mixed';await f.update(d);assert.equal(f.text('etaQualifier'),'По замерам и плану');
+ d.estimate.waitingForBlockers=true;await f.update(d);assert.equal(f.text('etaQualifier'),'Ожидание блокеров не учтено');assert.match(f.text('eta'),/работы \+ ожидание/);
+ await f.fail();assert.equal(f.text('etaQualifier'),'');assert.equal(f.text('eta'),'Не подтверждено');
+ const paused=sample('paused');paused.activity={kind:'verification',startedAt:paused.observedAt};
+ const p=await fixture('',paused);assert.match(p.text('currentActivity'),/Сохранённая активность · Проверка кода/);assert.doesNotMatch(p.text('currentActivity'),/Выполняется проверка/);
+});
+
+test('an unknown task status remains unknown instead of being added to queued work',async()=>{
+ const d=sample();d.tasks=[{...d.tasks[0],status:'future-state'}];const f=await fixture('',d);
+ assert.match(f.text('overviewCounts'),/1Состояние не определено/);assert.doesNotMatch(f.text('overviewCounts'),/В очереди/);
+ assert.match(f.el('task-T01').children[0].textContent,/Состояние не определено/);
+});
+
+
+test('a new run never inherits task disclosure or summary focus from matching task IDs',async()=>{
+ const d=sample();d.run='first-run';const f=await fixture('',d);
+ f.el('task-T01').open=true;f.el('task-summary-T01').focus();
+ const same={...d};await f.update(same);
+ assert.equal(f.el('task-T01').open,true);assert.equal(f.activeElement(),f.el('task-summary-T01'));
+ const previous=f.el('task-T01'),oldSummary=f.el('task-summary-T01'),next={...d,run:'second-run'};
+ await f.update(next);
+ assert.equal(f.el('task-T01').open,false);assert.notEqual(f.activeElement(),f.el('task-summary-T01'));
+ assert.equal(f.el('task-summary-T01').focusOptions,undefined);
+ previous.events.toggle();await f.update(next);assert.equal(f.el('task-T01').open,false);
+ assert.notEqual(f.activeElement(),f.el('task-summary-T01'));
+ assert.notEqual(f.el('task-summary-T01'),oldSummary);
+ // Dropping a run identifier is also a boundary, never evidence of the same run.
+ f.el('task-T01').open=true;f.el('task-summary-T01').focus();await f.update(sample());
+ assert.equal(f.el('task-T01').open,false);assert.notEqual(f.activeElement(),f.el('task-summary-T01'));
+});
+
+test('mobile task titles span the status and time columns before the narrow phone breakpoint',()=>{
+ const layout=html.match(/@media\(max-width:650px\)\{\.task-summary[\s\S]*?(?=@media\(max-width:480px\))/)[0];
+ assert.match(layout,/\.task-summary \.task-body\{grid-column:2 \/ 4;grid-row:1/);
+ assert.match(layout,/\.task-right\{grid-column:2;grid-row:2/);
+ assert.match(layout,/\.task-elapsed\{grid-column:3;grid-row:2/);
+ assert.match(layout,/\.task-toggle\{grid-column:4;grid-row:1/);
+ assert.doesNotMatch(layout,/text-overflow|line-clamp|white-space:nowrap/);
+});
+
+
+test('task disclosures have a visible translated details label and a full accessible label',async()=>{
+ const f=await fixture();let toggle=f.el('task-summary-T01').children[0].children.at(-1);
+ assert.equal(toggle.children[0].className,'task-toggle-label');assert.equal(toggle.children[0].textContent,'Детали');
+ assert.equal(toggle.children[0].attributes['aria-hidden'],'true');assert.equal(toggle.children[1].textContent,'Детали задачи');
+ f.el('language').change('en');toggle=f.el('task-summary-T01').children[0].children.at(-1);
+ assert.equal(toggle.children[0].textContent,'Details');assert.equal(toggle.children[1].textContent,'Task details');
+ assert.match(html,/\.task-time\{font-size:12px\}/);assert.doesNotMatch(html,/\.task-time\{font-size:11px\}/);
+ assert.match(html,/\.task-detail \.task-time\{font-size:13px\}/);
+ assert.match(html,/\.phase-step\{[^}]*font-size:13px/);
 });
