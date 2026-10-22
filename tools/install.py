@@ -6,6 +6,7 @@ fixed publisher is the trust root. HTTPS, the published tag, manifest and file
 hashes establish provenance and integrity, not an independent signature.
 """
 import argparse
+import ast
 import hashlib
 import importlib
 import importlib.util
@@ -42,8 +43,30 @@ _SEMVER = re.compile(
     r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?"
     r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?\Z"
 )
-_RUNTIME_DIRS = {"codex": ".codex", "claude-code": ".claude", "cursor": ".cursor"}
-_PROJECT_DIRS = {"codex": ".agents", "claude-code": ".claude", "cursor": ".cursor"}
+# Standalone installer: keep keys in sync with project_context.RUNTIMES.
+_RUNTIME_DIRS = {"codex": ".codex", "claude-code": ".claude", "cursor": ".cursor",
+                 "openclaw": ".openclaw", "gemini": ".gemini",
+                 "antigravity": ".gemini/config"}
+_PROJECT_DIRS = {"codex": ".agents", "claude-code": ".claude", "cursor": ".cursor",
+                 "openclaw": ".agents", "gemini": ".gemini", "antigravity": ".agents"}
+
+
+def _require_runtime(package, runtime):
+    # Legacy releases supported the original three hosts before this metadata
+    # was introduced. New destinations must not install a host-incompatible ZIP.
+    if runtime is None or runtime in ("codex", "claude-code", "cursor"):
+        return
+    _need(isinstance(runtime, str) and runtime in _RUNTIME_DIRS, "Неизвестный runtime установки")
+    supported = ()
+    try:
+        tree = ast.parse((package / "tools/aispa_core/project_context.py").read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "RUNTIMES" for t in node.targets):
+                supported = ast.literal_eval(node.value)
+    except (OSError, SyntaxError, ValueError, TypeError):
+        pass
+    _need(isinstance(supported, (tuple, list)) and runtime in supported,
+          "Опубликованный пакет не поддерживает runtime " + runtime + "; нужен выпуск с этим адаптером")
 
 
 class InstallError(ValueError):
@@ -404,9 +427,10 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
         _need(verifier._version(staged) == validated["version"], "Версия файлов не совпала с Release")
         actual, candidate_digest = _scan_package(staged)
         _need(actual == _disk_records(records), "Файлы не совпали с manifest после распаковки")
+        _require_runtime(staged, runtime)
         _need(_safe_destination(target) == target, "Назначение изменилось во время подготовки")
         receipt = {"schema": 1, "status": "prepared", "candidateId": candidate.name,
-                   "repository": REPOSITORY, "destination": str(target),
+                   "repository": REPOSITORY, "destination": str(target), "runtime": runtime,
                    "version": validated["version"], "tag": validated["tag"],
                    "prerelease": release["prerelease"],
                    "commit": commit, "releaseUrl": validated["url"],
@@ -494,6 +518,7 @@ def apply(candidate_id, *, confirmed=False, cache_dir=None):
         records[name] = {key: row[key] for key in ("sha256", "size", "mode")}
     staged = candidate / "package"
     before, digest = _scan_package(staged)
+    _require_runtime(staged, receipt.get("runtime"))
     _need(before == _disk_records(records) and digest == receipt.get("candidateDigest"),
           "Подготовленные файлы изменились после просмотра")
     _mkdir_parents(target)

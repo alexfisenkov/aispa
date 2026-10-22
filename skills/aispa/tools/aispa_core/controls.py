@@ -2,6 +2,7 @@
 import argparse
 from . import participants, preparation, briefmap, design_contract, telemetry, task_reports, packets
 from .contracts import require
+from .project_context import RUNTIMES
 
 READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context", "execution-obligations"}
 WRITES = {"brief-extract", "brief-review", "brief-map", "scenarios", "interfaces",
@@ -26,7 +27,7 @@ def parsers(sub):
         sub.add_parser(name).add_argument("--file", required=True)
     p = sub.add_parser("participant")
     p.add_argument("--role", required=True, choices=sorted(participants.ROLES - participants.TASK_ROLES - {"knowledge-writer"}))
-    p.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
+    p.add_argument("--runtime", required=True, choices=RUNTIMES)
     p.add_argument("--native-id", required=True); p.add_argument("--session", required=True); p.add_argument("--model")
     u = sub.add_parser("usage-import")
     u.add_argument("--file", required=True); u.add_argument("--format", required=True, choices=("claude", "codex"))

@@ -15,7 +15,7 @@ from .portable import is_link, relative_name
 from . import carryover, docmeta, ideas
 
 
-RUNTIMES = ("codex", "claude-code", "cursor")
+RUNTIMES = ("codex", "claude-code", "cursor", "openclaw", "gemini", "antigravity")
 MEMORY_LIMIT = 8000
 BEGIN = b"<!-- AISPA_CONTEXT_BEGIN_V1 -->"
 END = b"<!-- AISPA_CONTEXT_END_V1 -->"
@@ -45,6 +45,9 @@ CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\
                + POINTER + b"\n")
 _LEGACY_CURSOR_RULE = ("---\ndescription: AISpa project context\nalwaysApply: true\n---\n\n".encode()
                        + _LEGACY_POINTER + b"\n")
+ANTIGRAVITY_RULE = (b"---\ntrigger: always_on\n---\n\n" + POINTER + b"\n")
+MANAGED_RULES = {".cursor/rules/aispa.mdc": (CURSOR_RULE, _LEGACY_CURSOR_RULE),
+                 ".agents/rules/aispa.md": (ANTIGRAVITY_RULE,)}
 VIEWS = ("INDEX.md", "brief.md", "spec.md", "plan.md", "decisions.md", "progress.md",
          "memory.md", "requirements.json", "project-study.md", "carryover.md", "idea.md", "knowledge.md", "documents.yaml", "source-map.json")
 VIEW_SUMMARIES = {
@@ -84,6 +87,8 @@ def _path(root, relative):
         current = current / part
         if is_link(current):
             raise Invalid("AISpa context: символическая ссылка запрещена: " + str(name))
+        if current != root / name and current.exists() and not current.is_dir():
+            raise Invalid("AISpa context: родительский каталог занят файлом: " + str(name))
     if not current.resolve().is_relative_to(root.resolve()):
         raise Invalid("AISpa context: путь выходит за корень проекта")
     return current
@@ -123,7 +128,7 @@ def inventory(root):
     if is_link(root):
         raise Invalid("AISpa context: ссылка вместо корня запрещена")
     result = {"zones": [], "manifests": [], "entrypoints": [], "documents": [], "instructions": []}
-    for name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md"):
+    for name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md"):
         path = root / name
         if not is_link(path) and path.is_file():
             result["instructions"].append(name)
@@ -190,7 +195,7 @@ def initialize(store, state, runtime):
     Repeated calls preserve all bytes when no changes are needed.
     """
     if runtime not in RUNTIMES:
-        raise Invalid("AISpa context: runtime должен быть codex, claude-code или cursor")
+        raise Invalid("AISpa context: runtime должен быть одним из " + ", ".join(RUNTIMES))
     previous = (state.get("projectContext", {}).get("runtime"), state.get("runtime"))
     if any(value and value != runtime for value in previous):
         raise Invalid("AISpa context: смена среды существующего прогона требует явной миграции")
@@ -203,16 +208,21 @@ def initialize(store, state, runtime):
         targets.append("CLAUDE.md")
     if runtime == "cursor":
         targets.append(".cursor/rules/aispa.mdc")
+    if runtime in ("gemini", "antigravity"):
+        targets.append("GEMINI.md")
+    if runtime == "antigravity":
+        targets.append(".agents/rules/aispa.md")
     edits = []
     for target in targets:
         path = _path(store.root, target)
         if path.exists() and not path.is_file():
             raise Invalid("AISpa context: файл правил занят каталогом: " + target)
         before = path.read_bytes() if path.exists() else None
-        if target.endswith(".mdc"):
-            if before is not None and before not in (CURSOR_RULE, _LEGACY_CURSOR_RULE):
-                raise Invalid("AISpa context: чужой или изменённый .cursor/rules/aispa.mdc; содержимое сохранено")
-            after = CURSOR_RULE
+        if target in MANAGED_RULES:
+            accepted = MANAGED_RULES[target]
+            if before is not None and before not in accepted:
+                raise Invalid("AISpa context: чужой или изменённый " + target + "; содержимое сохранено")
+            after = accepted[0]
         else:
             base = before if before is not None else _new_agents(store.root, found) if target == "AGENTS.md" else b""
             after = _rules(base, target)
@@ -224,7 +234,9 @@ def initialize(store, state, runtime):
         edits.append((path, before, after, backup))
     # Preflight hidden paths too; do not leave rule edits on an unsafe context path.
     for name in VIEWS:
-        _path(store.root, ".aispa/context/" + name)
+        path = _path(store.root, ".aispa/context/" + name)
+        if path.exists() and not path.is_file():
+            raise Invalid("AISpa context: файл контекста занят каталогом: " + name)
     for path, before, after, backup in edits:
         if backup is not None:
             _write(backup, before)

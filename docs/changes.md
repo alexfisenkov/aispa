@@ -1,5 +1,14 @@
 # Изменения и проверки
 
+## 22.10.2026 — адаптеры OpenClaw, Gemini, Antigravity
+
+Кандидат 0.3.0 расширяет CLI, установщик и правила проекта до шести сред.
+Точные правила Antigravity/Cursor включены в общие fingerprints, настройка
+адаптеров не ослабляет task-tier и independent-role guards. Добавлена
+read-only совместимость завершённой 0.2.0. [План](plan-agent-runtimes.md),
+[проверки и ограничения](validation-agent-runtimes.md). Полных модельных
+прогонов, нового Release и замены пользовательских установок нет.
+
 ## 22.10.2026 — 0.2.0 опубликован и проверен
 
 Release [v0.2.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.2.0) на

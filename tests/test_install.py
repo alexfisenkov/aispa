@@ -34,7 +34,7 @@ class InstallerTests(unittest.TestCase):
         self.commit = "a" * 40
         self.configure_release("0.1.0-alpha.10")
 
-    def configure_release(self, version, *, modes=None):
+    def configure_release(self, version, *, modes=None, runtimes=None):
         self.tag = "v" + version
         modes = modes or {}
         self.files = {
@@ -43,6 +43,8 @@ class InstallerTests(unittest.TestCase):
             "tools/aispa_core/__init__.py": ('VERSION = "' + version + '"\n').encode(),
             "LICENSE": b"Synthetic license for test fixture.\n",
         }
+        if runtimes is not None:
+            self.files["tools/aispa_core/project_context.py"] = ("RUNTIMES = " + repr(tuple(runtimes)) + "\n").encode()
         buffer = io.BytesIO()
         entries = []
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -259,7 +261,10 @@ class InstallerTests(unittest.TestCase):
         home.mkdir()
         for runtime, project_dir, global_dir in (("codex", ".agents", ".codex"),
                                                   ("claude-code", ".claude", ".claude"),
-                                                  ("cursor", ".cursor", ".cursor")):
+                                                  ("cursor", ".cursor", ".cursor"),
+                                                  ("openclaw", ".agents", ".openclaw"),
+                                                  ("gemini", ".gemini", ".gemini"),
+                                                  ("antigravity", ".agents", ".gemini/config")):
             self.assertEqual(install.choose_destination(runtime=runtime, scope="project", project_root=project),
                              (project / project_dir / "skills/aispa").resolve())
             self.assertEqual(install.choose_destination(runtime=runtime, scope="global", home=home),
@@ -268,6 +273,61 @@ class InstallerTests(unittest.TestCase):
                                 cwd=self.root, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("preview", result.stdout)
+
+    def test_new_runtime_preview_uses_native_unicode_destinations_without_installing(self):
+        from aispa_core.project_context import RUNTIMES
+        self.configure_release("0.3.0", runtimes=RUNTIMES)
+        self.assertEqual(set(install._RUNTIME_DIRS), set(RUNTIMES))
+        self.assertEqual(set(install._PROJECT_DIRS), set(RUNTIMES))
+        project = self.root / "проект с пробелами 🙂"
+        home = self.root / "дом пользователя 🙂"
+        project.mkdir(); home.mkdir()
+        for runtime in ("openclaw", "gemini", "antigravity"):
+            for scope in ("project", "global"):
+                with self.subTest(runtime=runtime, scope=scope), self.network(), patch.object(Path, "home", return_value=home):
+                    output = io.StringIO()
+                    args = ["preview", "--runtime", runtime, "--scope", scope,
+                            "--tag", self.tag, "--cache-dir", str(self.cache)]
+                    if scope == "project":
+                        args += ["--project-root", str(project)]
+                    with contextlib.redirect_stdout(output):
+                        self.assertEqual(install.main(args), 0)
+                    receipt = json.loads(output.getvalue())
+                    expected = ((project / install._PROJECT_DIRS[runtime]) if scope == "project"
+                                else (home / install._RUNTIME_DIRS[runtime])) / "skills/aispa"
+                    self.assertEqual(receipt["destination"], str(expected.resolve()))
+                    self.assertFalse(expected.exists())
+                    self.assertEqual(receipt["commit"], self.commit)
+                    self.assertEqual(receipt["runtime"], runtime)
+        with self.assertRaises(install.InstallError):
+            install.choose_destination(runtime="unknown-agent", scope="global", home=home)
+
+    def test_new_host_rejects_published_package_without_its_runtime_before_install(self):
+        for runtime in ("openclaw", "gemini", "antigravity"):
+            for version, supported in (("0.2.0", None), ("0.3.0", ("codex", "claude-code", "cursor"))):
+                with self.subTest(runtime=runtime, version=version):
+                    self.configure_release(version, runtimes=supported)
+                    home = self.root / "unused home"
+                    home.mkdir(exist_ok=True)
+                    with self.network(), self.assertRaisesRegex(install.InstallError, "не поддерживает runtime"):
+                        install.preview(runtime=runtime, scope="global", home=home,
+                                        cache_dir=self.cache, tag=self.tag)
+                    self.assertFalse((home / install._RUNTIME_DIRS[runtime] / "skills/aispa").exists())
+                    self.assertEqual(list(self.cache.glob("aispa-install-*")), [])
+
+    def test_new_host_apply_checks_runtime_and_installs_verified_capable_package(self):
+        from aispa_core.project_context import RUNTIMES
+        self.configure_release("0.3.0", runtimes=RUNTIMES)
+        home = self.root / "agent home"
+        home.mkdir()
+        for runtime in ("openclaw", "gemini", "antigravity"):
+            with self.subTest(runtime=runtime), self.network():
+                receipt = install.preview(runtime=runtime, scope="global", home=home,
+                                          cache_dir=self.cache, tag=self.tag)
+                applied = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+                self.assertEqual(applied["runtime"], runtime)
+                self.assertEqual(applied["status"], "installed")
+                self.assertEqual((Path(receipt["destination"]) / "SKILL.md").read_bytes(), self.files["SKILL.md"])
 
     def test_pinned_verifier_has_isolated_import_name(self):
         source = self.root / "source"

@@ -1,6 +1,12 @@
 name: AISpa checks
 on:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Verification scope (full suite or runtime adapter regressions)
+        type: choice
+        default: full
+        options: [full, runtimes]
 permissions:
   contents: read
 jobs:
@@ -24,10 +30,25 @@ jobs:
         working-directory: tests
         run: python -B -m unittest test_dashboard_server.DashboardServerTests.test_start_status_stop_and_port_reuse -v
       - name: Contract tests
+        if: inputs.scope != 'runtimes'
         run: python -m unittest discover -s tests -v
+      - name: Runtime adapters and regression boundaries
+        if: inputs.scope == 'runtimes'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_runtime_support test_runtime_evidence test_install test_updates
+          test_project_context test_portable_context test_store test_git_snapshot
+          test_task_tiers test_lean_control test_check_modes
+          test_context_navigation test_discovery test_docmeta_integration
+          test_packets test_team test_knowledge test_carryover test_telemetry
+          test_cli test_blind test_cleanroom test_windows_cli
+          test_windows_paths test_windows_cleanroom test_windows_portable_tools
       - name: Study-plan pilot example tests
+        if: inputs.scope != 'runtimes'
         working-directory: examples/study-plan
         run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests
-        if: matrix.python == '3.13'
+        if: inputs.scope != 'runtimes' && matrix.python == '3.13'
         run: node --test tests/dashboard.test.cjs

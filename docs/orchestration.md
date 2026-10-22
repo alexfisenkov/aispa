@@ -1,6 +1,8 @@
 # Оркестрация AISpa · 0.1.0
 
-Координатор работает в нативной среде Codex, Claude Code или Cursor. Он
+Координатор работает в Codex, Claude Code, Cursor, OpenClaw, Gemini CLI или
+Antigravity (последние три — кандидат 0.3.0). [Контракты сред](../skills/aispa/references/native-agents.md)
+определяют получение настоящих ID и доступность независимых контекстов. Он
 запускает агентов и передаёт им контекст. Python-движок проверяет переходы,
 сохраняет роли, связи и доказательства; вызовов модельных провайдеров в нём нет.
 Новый init 0.1.0 закрепляет `taskTiers` вместе с `adaptiveCritique`
@@ -398,4 +400,4 @@ coverage и план, создаются новые участники. Стар
 
 Команды и форматы: [process.md](../skills/aispa/references/process.md),
 [contracts.md](../skills/aispa/references/contracts.md). Нативные прогоны всех
-трёх сред остаются отдельным пунктом [испытаний](testing.md).
+сред остаются отдельным пунктом [испытаний](testing.md).
