@@ -416,6 +416,35 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(file_state(backup / "replaced"), stable_before)
         self.assertEqual(file_state(runtime.parent), pinned_before)
 
+    def test_stable_010_to_020_and_rollback_preserve_bytes_and_pinned_runtime(self):
+        old = dict(self.package_content("0.1.0"), **{"assets/original.bin": b"\x00\xff010\r\n"})
+        self.write_package(self.package, old)
+        (self.package / "tools/aispa.py").chmod(0o755)
+        runtime = self.root / "project/.aispa/runs/active-010/runtime"
+        shutil.copytree(self.package, runtime)
+
+        def file_state(directory):
+            return {p.relative_to(directory): (p.read_bytes(), stat.S_IMODE(p.stat().st_mode))
+                    for p in directory.rglob("*") if p.is_file()}
+
+        before = file_state(self.package)
+        pinned_before = file_state(runtime.parent)
+        new = dict(self.package_content("0.2.0"), **{"assets/new.bin": b"\x00\xffnew\n"})
+        release = self.release("0.2.0", files=new, modes={"tools/aispa.py": 0o755})
+        with self.network([release]):
+            self.assertEqual(updates.check(self.package)["status"], "available")
+            self.assertEqual(updates.check(runtime)["installReason"], "pinned_runtime")
+            review = updates.prepare(self.package)
+        self.assertEqual((review["installedVersion"], review["version"]), ("0.1.0", "0.2.0"))
+        installed = updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual((installed["previousVersion"], installed["version"]), ("0.1.0", "0.2.0"))
+        self.assertEqual(file_state(runtime.parent), pinned_before)
+        self.assertEqual(updates._version(runtime), "0.1.0")
+        restored = updates.rollback(self.package, installed["backupId"], confirmed=True)
+        self.assertEqual(restored["status"], "rolled_back")
+        self.assertEqual(file_state(self.package), before)
+        self.assertEqual(file_state(runtime.parent), pinned_before)
+
     def test_candidate_for_other_target_and_path_ids_refused(self):
         result = self.prepare()
         other = self.package.parent / "different"

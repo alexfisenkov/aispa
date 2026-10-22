@@ -120,7 +120,9 @@ def _journal(store, state):
             for tid, history in event_state.get("taskHistory", {}).items():
                 for attempt in history:
                     auth = attempt.get("authorization")
-                    if auth:
+                    # Only new-owner-brief authorizations carry a quote; promotion,
+                    # mode changes and the extra wave are recorded by their own rules.
+                    if auth and "brief" in auth:
                         value = {"task": tid, "attempt": attempt["id"], "brief": auth["brief"],
                                  "quote": auth["quote"], "previousAttempt": auth["previousAttempt"]}
                         retries[digest(value)] = value

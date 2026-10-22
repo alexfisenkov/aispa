@@ -1,4 +1,4 @@
-# Выполнение AISpa · 0.1.0
+# Выполнение AISpa · 0.2.0
 
 Новые `init` 0.1.0 добавляют `taskTiers` к прежним обязательствам:
 light и standard проходят worker → проверка → submit → verified completion, без

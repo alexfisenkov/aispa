@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
+from aispa_core import VERSION
 from aispa_core.store import Invalid, Journal, confined
 
 
@@ -75,9 +76,29 @@ class StorageTests(unittest.TestCase):
                 self.assertEqual({p.relative_to(store.home): p.read_bytes()
                                   for p in store.home.rglob("*") if p.is_file()}, before)
                 next_state = store.create("next", "Stable run")
-                self.assertEqual(next_state["version"], "0.1.0")
+                self.assertEqual(next_state["version"], VERSION)
                 self.assertEqual((store.home / "runs" / state["run"] / "events.jsonl").read_bytes(),
                                  before[Path("runs") / state["run"] / "events.jsonl"])
+
+    def test_stable_010_terminal_handoff_is_read_only_after_020_upgrade(self):
+        for status in ("accepted", "delivered_with_remaining", "cancelled"):
+            with self.subTest(status=status):
+                store = Journal(self.root / ("stable-" + status))
+                with patch("aispa_core.store.VERSION", "0.1.0"):
+                    state = store.create("prior", "Stable 0.1.0 fixture")
+                    state["status"] = status
+                    store.append(state, "terminal-fixture")
+                with self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+                    store.load()
+                self.assertEqual(store.load(handoff_only=True), state)
+                self.assertEqual(store.create("next", "Run 0.2.0")["version"], VERSION)
+
+    def test_active_stable_010_requires_its_pinned_runtime(self):
+        with patch("aispa_core.store.VERSION", "0.1.0"):
+            self.store.create("prior", "Active 0.1.0")
+        for handoff_only in (False, True):
+            with self.subTest(handoff_only=handoff_only), self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+                self.store.load(handoff_only=handoff_only)
 
     def test_active_alpha10_requires_its_pinned_runtime(self):
         with patch("aispa_core.store.VERSION", "0.1.0-alpha.10"):

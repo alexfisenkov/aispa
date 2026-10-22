@@ -4,7 +4,7 @@ from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
 from .team import _record_valid, task_proof_valid
-from . import carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers
+from . import display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи",
@@ -16,33 +16,6 @@ LABELS = {"running": "В работе", "paused": "Приостановлено"
           "cancelled": "Отменено", "accepted": "Все действующие требования приняты",
           "delivered_with_remaining": "Основная часть готова, есть остатки"}
 
-EVENT_LABELS = {
-    "task-verified-completed": "Выполнение лёгкой задачи проверено",
-    "task-promoted": "Задача переведена в тяжёлый класс",
-    "project-integration-reviewed": "Сохранено общее ревью проекта",
-    "brief-added": "Бриф сохранён", "brief-sealed": "Бриф зафиксирован",
-    "plan-validated": "План проверен", "task-started": "Началась задача",
-    "task-submitted": "Задача передана критикам", "task-repaired": "Исправления переданы на проверку",
-    "wave-reviewed": "Весь бриф сверен после волны", "acceptance-reviewed": "Проверена итоговая приёмка",
-    "delivery-recorded": "Результат сдан", "owner-answer-awaited": "Ожидается ответ владельца",
-    "owner-answer-received": "Ответ владельца получен", "run-paused": "Работа приостановлена",
-    "run-resumed": "Работа продолжена", "recovery-reconciled": "Восстановление журнала проверено",
-}
-
-
-def _events(store):
-    rows = store.read_journal().get("eventTail", [])
-    result = []
-    for row in reversed(rows):
-        name, _, target = row["event"].partition(":")
-        if name not in EVENT_LABELS:
-            continue
-        # Only identifiers, not arbitrary note/brief content, enter the feed.
-        suffix = " · " + target if target and len(target) <= 32 and target.replace("-", "").isalnum() else ""
-        result.append({"type": name, "at": row["at"], "text": EVENT_LABELS[name] + suffix})
-        if len(result) == 12:
-            break
-    return list(reversed(result))
 
 def _record_intact(store, record):
     try:
@@ -172,13 +145,16 @@ def project(store, state):
                           proofCurrent=current.get(task["id"], False),
                           maximumCriticRounds=0 if light else 2,
                           reviewPolicy=review_policy.mode((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]),
-                          criticRounds=len((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1].get("rounds", []))))
+                          criticRounds=len((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1].get("rounds", [])),
+                          **display_feed.attempts(state.get("taskHistory", {}).get(task["id"]))))
     estimate_tasks = [dict(t, status="pending") if t["status"] == "completed" and not current.get(t["id"]) else t
                       for t in tasks]
     mode = check_modes.current(state)
+    stage_now = display_stage(state, gates)
+    feed = display_feed.tail(store)
     return {"version": state["version"], "checkMode": mode, "checkModeLabel": MODE_LABELS[mode], "title": state["title"], "run": state["run"],
             "status": status, "label": LABELS.get(status, "Проект изменён; приёмка устарела"),
-            "stage": state["stage"], "displayStage": display_stage(state, gates),
+            "stage": state["stage"], "displayStage": stage_now,
             "updatedAt": state["updatedAt"], "observedAt": observed, "gates": gates,
             "verified": verified(store, state), "checkModeHistory": check_modes.history_view(store, state), "requirements": rows, "tasks": tasks,
             "remaining": remaining, "remainingAssessed": current_assessment, "decisions": state["notes"],
@@ -186,7 +162,8 @@ def project(store, state):
             "phaseAuthorship": phase_receipts.summary(store, state),
             "elapsedSeconds": elapsed(state, observed), "finishedAt": state.get("finishedAt"),
             "estimate": estimate(estimate_tasks, status, observed), "activity": state.get("activity"),
-            "waiting": state.get("waiting"), "events": _events(store),
+            "waiting": state.get("waiting"), "events": display_feed.events(feed),
+            "currentWork": display_feed.current_work(state, stage_now, feed),
             "runDirectory": "runs/" + state["run"]}
 
 

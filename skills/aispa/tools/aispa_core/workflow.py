@@ -235,15 +235,17 @@ class Workflow:
         carryover.guard_current(self.store, self.s)
         task = self.task(tid)
         require(task["status"] in ("pending", "blocked"), "Задача уже запущена или завершена")
-        if self.pipeline.start_guard(tid):
-            self.save("task-cards-refreshed:" + tid)
-            raise Invalid("Карточки обновлены из-за отложенной зависимости; запросите пакет контекста задачи заново")
-        require(context == basis(self.store, self.s, "task", tid), "Пакет контекста задачи устарел")
+        # Dependency proofs are read from the saved journal state, so they are checked before the guard
+        # adds its (not yet saved) baseline to this task's attempt.
         closure = {t["id"] for t in task_closure(self.s, tid)} - {tid}
         deferred = self.pipeline._deferred_ids()
         require(all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure)
                     for dep in task["dependsOn"] if dep not in deferred),
                 "Зависимости задачи не приняты или доказательства устарели; включите актуального преемника в dependsOn")
+        if self.pipeline.start_guard(tid):
+            self.save("task-cards-refreshed:" + tid)
+            raise Invalid("Карточки обновлены из-за отложенной зависимости; запросите пакет контекста задачи заново")
+        require(context == basis(self.store, self.s, "task", tid), "Пакет контекста задачи устарел")
         entry = self.s.setdefault("waveEntries", {}).get(str(task["wave"]))
         opening = not entry or entry["plan"] != plan_basis(self.s)
         for prior in {t["wave"] for t in self.s["tasks"] if t["wave"] < task["wave"]}:

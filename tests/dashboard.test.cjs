@@ -432,3 +432,43 @@ test('check mode, fast tasks and deferred tasks are named',async()=>{
  assert.match(f.text('waves'),/Deferred to remaining/);
  const old=await fixture('',sample());assert.equal(old.el('checkModeBox').hidden,true);
 });
+test('history shows an unknown event by its own text and keeps the newest rows',async()=>{
+ const d=sample();d.events=[];
+ for(let i=0;i<20;i++)d.events.push({type:'e'+i,at:d.observedAt,text:'Событие: e'+i});
+ d.events.push({type:'brief-review-recorded',at:d.observedAt,text:'Записана независимая сверка брифа'});
+ const f=await fixture('',d);
+ assert.match(f.text('events'),/Записана независимая сверка брифа/);
+ assert.match(f.text('events'),/Событие: e19/);
+ assert.doesNotMatch(f.text('events'),/Событие: e19 · Событие: e19/);
+ assert.equal(f.text('historyCount'),'16');
+});
+test('preparation stage names the real work and the age of the last journal action',async()=>{
+ const d=sample();d.stage='brief';d.displayStage='brief';d.tasks=[d.tasks[0]];d.tasks[0].status='pending';
+ d.currentWork={title:'Независимая сверка брифа',note:'Уточнение брифа: план сохранён, задачи продолжатся после пересогласования',
+  lastActionAt:'2026-10-19T11:56:06Z',lastAction:'Записана выжимка брифа'};
+ const f=await fixture('',d);const text=f.text('currentActivity');
+ assert.match(text,/Независимая сверка брифа/);assert.match(text,/план сохранён/);
+ assert.doesNotMatch(text,/Ожидает запуска/);
+ assert.match(text,/Последнее действие в журнале: 3 мин назад/);
+ f.advance(10000);assert.match(f.text('last-action'),/4 мин назад/);
+});
+test('legacy status without currentWork on a preparation stage does not claim a task is waiting to start',async()=>{
+ const d=sample();d.stage='brief';d.displayStage='brief';d.tasks[0].status='pending';
+ const f=await fixture('',d);const text=f.text('currentActivity');
+ assert.doesNotMatch(text,/Ожидает запуска/);assert.match(text,/Задачи ждут завершения подготовки/);
+ assert.equal(f.el('last-action'),null);
+});
+test('a new attempt shows the previous one and labels the clock as all attempts',async()=>{
+ const d=sample();d.tasks[0].attemptNumber=2;
+ d.tasks[0].attemptNote='Попытка 2 · прошлая: критик ×2, блок → новая по словам владельца';
+ const f=await fixture('',d);
+ assert.match(f.text('waves'),/Попытка 2 · прошлая: критик ×2, блок/);
+ assert.match(f.text('currentActivity'),/Всего по всем попыткам/);
+ assert.match(f.text('waves'),/Всего по всем попыткам/);
+ const old=await fixture('',sample());assert.doesNotMatch(old.text('waves'),/Всего по всем попыткам/);
+});
+test('missing estimate data explains when it will appear',async()=>{
+ const f=await fixture();assert.equal(f.text('etaNote'),'Оценка появится после двух завершённых задач.');
+ const d=sample();d.estimate={reason:'insufficient_data',sampleCount:1};
+ const one=await fixture('',d);assert.match(one.text('etaNote'),/после второй/);
+});
