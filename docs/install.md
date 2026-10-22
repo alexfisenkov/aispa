@@ -10,12 +10,12 @@ CI движка отдельно прошла на Windows, macOS и Linux.
 [Квитанция](pilots/0.1.0/release-verification.json) и
 [границы проверки](validation-0.1.0.md). Глобальные установки не менялись.
 
-Нужны Python 3.11+ и Git. Скачайте `install.py` из выбранного Release в рабочую
+Пошаговая инструкция для macOS, Linux и Windows — раздел «Установка» в [README](../README.md). Нужны Python 3.11+ и Git. Скачайте `install.py` из выбранного Release в рабочую
 папку и сохраните ссылку на этот выпуск. `preview` читает опубликованный tag,
 проверяет точный Git commit, manifest, ZIP, хеши и состав файлов и создаёт
 кандидата для просмотра. Он не создаёт папку навыка.
 
-Без `--tag` установщик 0.1.0 выбирает самый новый опубликованный выпуск,
+Без `--tag` установщик выбирает самый новый опубликованный выпуск,
 у которого одновременно нет SemVer prerelease-суффикса и GitHub хранит
 `prerelease=false`. Более высокий prerelease его не вытесняет. Если stable
 ещё нет, preview завершится понятной ошибкой до подготовки; автоматического
@@ -35,7 +35,8 @@ python3 install.py preview --runtime codex --scope project --project-root <аб�
 `--runtime claude-code`, для Cursor — `--runtime cursor`. Проектная установка
 выбирает `.agents/skills/aispa/`, `.claude/skills/aispa/` или
 `.cursor/skills/aispa/` соответственно. Глобальная установка использует
-`--scope global` без `--project-root`; она не выполняется автоматически.
+`--scope global` без `--project-root` и выбирает `~/.codex/skills/aispa/`,
+`~/.claude/skills/aispa/` или `~/.cursor/skills/aispa/`; автоматически она не выполняется.
 Вместо runtime/scope можно указать отдельный свободный абсолютный каталог
 через `--destination`.
 

@@ -136,31 +136,248 @@ Python-движок записывает роли, переходы и дока�
 
 ## Установка
 
-Вход — [skills/aispa/SKILL.md](skills/aispa/SKILL.md). Для опубликованного
-пакета используйте [первый установщик из Release](docs/install.md): он
-показывает точную версию, commit и destination до записи. Установщик 0.1.0
-по умолчанию выбирает опубликованный stable. Явный `--tag` позволяет выбрать опубликованный
-предварительный выпуск. При работе прямо с
-исходным checkout для разработки копируйте **всю папку** `skills/aispa` в
-свободный проектный каталог и не называйте это установкой опубликованного
-выпуска:
+AISpa ставится как навык (skill) для агента: папка `aispa` кладётся в каталог
+навыков вашей среды. Поддерживаются Codex, Claude Code и Cursor на macOS, Linux
+и нативной Windows. Установщик `install.py` скачивает **опубликованный выпуск
+GitHub** (по умолчанию последний стабильный), сверяет commit, хеши и состав
+файлов, показывает, что именно будет записано, и ставит только после вашего
+подтверждения. Существующую папку он никогда не перезаписывает.
 
-| Среда | Каталог | Явный вызов |
-|---|---|---|
-| Codex | `.agents/skills/aispa/` | `$aispa` |
-| Claude Code | `.claude/skills/aispa/` | `/aispa` |
-| Cursor | `.cursor/skills/aispa/` | `/aispa` |
+### 1. Что нужно заранее
 
-Если одноимённый пакет уже существует, сначала сохраните его. Не объединяйте
-версии поверх друг друга. Начните с небольшого проекта без реальных платежей
-и пользовательских данных. Установка в пользовательские каталоги skills
-не выполняется автоматически.
+- **Python 3.11 или новее.** Сторонние библиотеки не нужны.
+- **Git** (установщик берёт из него точный commit выпуска).
+- Доступ в интернет к `github.com` и `api.github.com` (только при установке и обновлении).
 
-`init` требует явный `--runtime codex|claude-code|cursor`: агент берёт значение
-из фактической среды, не угадывает его по переменным окружения. Операция создаёт
-проектные ссылки в правилах, локальную историю и закреплённую копию пакета.
-Все дальнейшие команды прогона идут через эту копию. Обновление установленного
-навыка не переписывает активный runtime.
+Проверка версий:
+
+```bash
+# macOS / Linux (bash, zsh)
+python3 --version
+git --version
+```
+
+```powershell
+# Windows (PowerShell)
+py -3 --version
+git --version
+```
+
+Если `py` нет, попробуйте `python --version`. Нужна версия 3.11 и выше.
+
+Где взять: Python — [python.org/downloads](https://www.python.org/downloads/)
+(на Windows отметьте «Add python.exe to PATH» и установите «py launcher»);
+на macOS также `brew install python git`, на Debian/Ubuntu —
+`sudo apt install python3 git`. Git на Windows — [Git for Windows](https://git-scm.com/download/win).
+После установки откройте новое окно терминала.
+
+### 2. Скачайте установщик
+
+Установщик публикуется как файл `install.py` в каждом Release. Ссылка на
+последний стабильный выпуск:
+`https://github.com/alexfisenkov/aispa/releases/latest/download/install.py`.
+Скачайте его в любую рабочую папку (не в проект, куда будете ставить).
+
+```bash
+# macOS / Linux
+mkdir -p ~/aispa-install && cd ~/aispa-install
+curl -fsSL -o install.py https://github.com/alexfisenkov/aispa/releases/latest/download/install.py
+```
+
+```powershell
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force "$HOME\aispa-install" | Out-Null
+Set-Location "$HOME\aispa-install"
+Invoke-WebRequest -Uri https://github.com/alexfisenkov/aispa/releases/latest/download/install.py -OutFile install.py
+```
+
+Проверьте, что установщик запускается: `python3 install.py --help`
+(Windows: `py -3 -X utf8 install.py --help`).
+
+### 3. Выберите, куда ставить
+
+Нужны два выбора: **среда** (`--runtime`) и **область** (`--scope`).
+
+| Среда | `--runtime` | В проект (`--scope project`) | Глобально (`--scope global`) | Вызов |
+|---|---|---|---|---|
+| Claude Code | `claude-code` | `<проект>/.claude/skills/aispa/` | `~/.claude/skills/aispa/` | `/aispa` |
+| Codex | `codex` | `<проект>/.agents/skills/aispa/` | `~/.codex/skills/aispa/` | `$aispa` |
+| Cursor | `cursor` | `<проект>/.cursor/skills/aispa/` | `~/.cursor/skills/aispa/` | `/aispa` |
+
+- **В проект** — навык виден только в этом проекте. Нужен `--project-root` с
+  абсолютным путём к корню проекта (папка должна существовать).
+- **Глобально** — навык доступен во всех проектах. `--project-root` не указывают.
+- Вместо пары `--runtime` + `--scope` можно задать любую свободную папку:
+  `--destination <абсолютный-путь>` (с ними не сочетается).
+- Навык вызывается только явно (`/aispa`, `$aispa`), сам он не включается.
+
+Папка назначения **не должна существовать**: нужна свежая установка, не поверх старой.
+Начните с небольшого проекта без реальных платежей и персональных данных.
+
+### 4. Предпросмотр (ничего не устанавливает)
+
+Пример: Claude Code, в проект. Для других сред поменяйте `--runtime`
+(`codex`, `cursor`); для глобальной установки замените `--scope project
+--project-root …` на `--scope global`.
+
+```bash
+# macOS / Linux
+python3 install.py preview --runtime claude-code --scope project --project-root "$HOME/мой-проект"
+```
+
+```powershell
+# Windows (PowerShell)
+py -3 -X utf8 install.py preview --runtime claude-code --scope project --project-root "$HOME\мой-проект"
+```
+
+Команда читает выпуск, проверяет commit, `aispa-update.json` и `aispa.zip`,
+собирает кандидата во временной папке `~/.aispa-installs/` и печатает JSON.
+Папку навыка она не создаёт. Проверьте в ответе: `version` и `tag` (нужный ли
+выпуск), `prerelease` (для стабильного — `false`), `destination` (куда
+встанет), `commit`, `releaseUrl`, `fileCount`. Скопируйте `candidateId`.
+
+### 5. Установка
+
+```bash
+# macOS / Linux
+python3 install.py apply --candidate <candidateId> --confirm
+```
+
+```powershell
+# Windows (PowerShell)
+py -3 -X utf8 install.py apply --candidate <candidateId> --confirm
+```
+
+`--confirm` означает, что вы просмотрели кандидата и согласны. Установщик ещё раз
+проверяет файлы, создаёт новую папку, копирует в неё пакет и перечитывает
+результат (`"status": "installed"`). Если папка появилась после предпросмотра,
+установка остановится; уже созданная частичная папка при ошибке не удаляется,
+её можно осмотреть и убрать вручную.
+
+### 6. Другая версия: `--tag`
+
+По умолчанию берётся самый новый **стабильный** выпуск; предварительные
+(alpha, beta) не выбираются. Чтобы поставить конкретный опубликованный выпуск,
+добавьте его тег в `preview`:
+
+```bash
+python3 install.py preview --runtime claude-code --scope project --project-root "$HOME/мой-проект" --tag v0.1.0
+```
+
+Тег должен быть у опубликованного Release с ресурсами `aispa.zip` и
+`aispa-update.json`. Черновики и теги без Release не подходят. Список — на
+странице [Releases](https://github.com/alexfisenkov/aispa/releases).
+Установщик `install.py` из нужного Release лучше брать оттуда же:
+`https://github.com/alexfisenkov/aispa/releases/download/<тег>/install.py`.
+
+### 7. Проверка установки
+
+1. Папка есть и в ней лежит `SKILL.md`:
+
+   ```bash
+   ls "$HOME/мой-проект/.claude/skills/aispa"
+   ```
+
+   ```powershell
+   Get-ChildItem "$HOME\мой-проект\.claude\skills\aispa"
+   ```
+
+2. Версия навыка (путь — из `destination` в предпросмотре):
+
+   ```bash
+   python3 "$HOME/мой-проект/.claude/skills/aispa/tools/aispa.py" --version
+   ```
+
+   ```powershell
+   py -3 -X utf8 "$HOME\мой-проект\.claude\skills\aispa\tools\aispa.py" --version
+   ```
+
+3. Проверка обновлений (только чтение, ничего не меняет):
+
+   ```bash
+   python3 "$HOME/мой-проект/.claude/skills/aispa/tools/aispa.py" update-check
+   ```
+
+4. В агенте введите вызов своей среды (`/aispa` в Claude Code и Cursor,
+   `$aispa` в Codex) и опишите идею проекта. Первое действие навыка при явном
+   вызове — та же проверка обновлений; без сети он продолжает работу с
+   установленной версией.
+
+### 8. Обновление и откат
+
+Обновляется уже установленная папка. Команды запускайте из установленного
+пакета (`<папка-навыка>` — путь из шага 7), из корня проекта, не из самой папки навыка:
+
+```bash
+python3 <папка-навыка>/tools/aispa.py update-check
+python3 <папка-навыка>/tools/aispa.py update-prepare
+python3 <папка-навыка>/tools/aispa.py update-apply --candidate <candidateId> --confirm
+python3 <папка-навыка>/tools/aispa.py update-rollback --backup <backupId> --confirm
+```
+
+В PowerShell то же самое с `py -3 -X utf8` вместо `python3`.
+
+- `update-check` показывает, есть ли новый опубликованный выпуск (статусы
+  `available`, `current`, `offline` и др.).
+- `update-prepare` скачивает и проверяет кандидата рядом с установленной папкой
+  (`.aispa-update-<id>/`) и печатает `candidateId` и список отличий.
+  Установленный пакет не меняется.
+- `update-apply` заменяет пакет после вашего решения. Прежняя версия остаётся
+  рядом в `.aispa-backup-<id>/`; её имя печатается как `backupId`. Если вы
+  правили файлы навыка руками, обновление откажется их затирать.
+- `update-rollback` возвращает сохранённую версию, пока установленная не менялась
+  после обновления.
+- **Начатый прогон не затрагивается:** при `init` пакет копируется в проект и
+  прогон до конца работает на этой закреплённой копии. Обновление или откат
+  установленного навыка влияют только на новые прогоны.
+
+Подробности и аварийное восстановление — [docs/updates.md](docs/updates.md).
+
+### 9. Удаление
+
+Отдельной команды удаления нет. Навык — обычная папка: закройте агент и удалите
+каталог из шага 3 (например `rm -r "$HOME/мой-проект/.claude/skills/aispa"`,
+в PowerShell `Remove-Item -Recurse -Force "$HOME\мой-проект\.claude\skills\aispa"`).
+Рядом можно удалить `.aispa-backup-*`, `.aispa-update-*` и `~/.aispa-installs/`.
+Папки `.aispa/` ваших проектов с историей прогонов и ссылки в `AGENTS.md`/`CLAUDE.md`
+не трогайте, если хотите сохранить историю.
+
+### 10. Частые проблемы
+
+- **Windows: `python` открывает Microsoft Store или «не найден».** Это заглушка
+  Store. Установите Python с python.org и пользуйтесь `py -3`, либо отключите
+  «App execution aliases» для python.exe в параметрах Windows.
+- **`python3: command not found` (Windows).** Там команда называется `py -3`
+  или `python`, не `python3`.
+- **Старый Python.** Ошибки синтаксиса или «3.11 required» — обновите Python.
+- **Каталог установки уже существует.** Установщик не перезаписывает: выберите
+  другой `--destination` или сначала сохраните и уберите старую папку.
+- **Нет прав на каталог.** Ставьте в папку, где вы владелец (проект или
+  `~/...`); не используйте `sudo` и «Запуск от администратора» без необходимости.
+  Корень проекта должен существовать, путь — абсолютный, без `..` и без ссылок
+  (symlink/junction).
+- **Нет сети или выпуск недоступен.** Предпросмотр и обновление требуют доступа к
+  GitHub. Офлайн установить нельзя; уже установленный навык работает без сети.
+  Ошибка «Опубликованный стабильный Release … не найден» значит, что на
+  GitHub ещё нет подходящего выпуска: укажите `--tag`.
+- **Сертификаты (SSL).** На macOS с Python с python.org запустите
+  «Install Certificates.command» из папки Python в «Программах».
+- **Git не найден или не завершился.** Установите Git и откройте новый терминал.
+
+Доверие основано на фиксированном GitHub-репозитории, HTTPS, опубликованном
+теге, точном commit и хешах файлов; это не независимая цифровая подпись.
+Подробности — [docs/install.md](docs/install.md), Windows — [docs/windows.md](docs/windows.md).
+
+### Работа прямо из исходников (для разработки)
+
+Копирование папки `skills/aispa` из ветки `main` не является установкой выпуска.
+Если нужно, скопируйте **всю** папку в свободный каталог из таблицы шага 3,
+не объединяя с существующей версией.
+
+Дальше `init` требует явный `--runtime codex|claude-code|cursor`: агент берёт
+значение из фактической среды, не угадывая по переменным окружения. Операция
+создаёт ссылки в правилах проекта, локальную историю и закреплённую копию пакета;
+все команды прогона идут через эту копию.
 
 `.aispa/context/` содержит производные документы; канон — журнал и неизменные
 источники `.aispa/runs/`. Частные брифы исключаются из Git вместе с `.aispa/`.
