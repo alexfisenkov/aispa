@@ -55,7 +55,7 @@ class ProjectDocumentIntegrationTests(unittest.TestCase):
         self.assertEqual(state["tasks"], [])
         self.assertIsNone(state["spec"])
         found = self.call("discover")["receipt"]
-        scan = json.loads(Path(found["absolutePath"]).read_text())
+        scan = json.loads(Path(found["absolutePath"]).read_text(encoding="utf-8"))
         self.assertTrue(set(originals) <= {r["path"] for r in scan["sources"]})
         self.call("close", "cancelled", "--note", "End synthetic first run")
         store, next_state = self.start("second")
@@ -120,19 +120,19 @@ class ProjectDocumentIntegrationTests(unittest.TestCase):
         path = self.write(".gitignore", "cache/\n")
         args = ("--title", "Fixture", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
         self.call("init", "--slug", "INVALID!", *args, code=2)
-        self.assertEqual(path.read_text(), "cache/\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), "cache/\n")
         self.start()
         path.write_text("cache/\n", encoding="utf-8")
         self.cli = CLI
         self.call("init", "--slug", "second", *args, code=2)
-        self.assertEqual(path.read_text(), "cache/\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), "cache/\n")
 
     def test_negated_ignore_and_tracked_history_refuse_init_without_snapshots(self):
         path = self.write(".gitignore", ".aispa/\n!.aispa/\n")
         self.write("INTENT.md", "Do not copy until private history is excluded.\n")
         args = ("init", "--slug", "private", "--title", "Fixture", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
         self.call(*args, code=2)
-        self.assertEqual(path.read_text(), ".aispa/\n!.aispa/\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), ".aispa/\n!.aispa/\n")
         self.assertFalse((self.root / ".aispa/runs").exists())
         path.write_text(".aispa/\n", encoding="utf-8")
         self.write(".aispa/manual.txt", "tracked fixture")

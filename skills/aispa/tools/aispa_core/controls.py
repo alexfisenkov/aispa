@@ -43,7 +43,7 @@ def parsers(sub):
     a = sub.add_parser("journal-recover")
     a.add_argument("--sha256", required=True); a.add_argument("--confirm", action="store_true")
     dashboard = sub.add_parser("dashboard")
-    dashboard.add_argument("operation", choices=("start", "status", "stop", "archive"))
+    dashboard.add_argument("operation", choices=("start", "refresh-view", "status", "stop", "archive"))
     dashboard.add_argument("--port", type=int, default=0)
 
 

@@ -6,7 +6,7 @@ from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
 from .team import _record_valid, _actor_valid, _role_data, task_proof_valid
-from . import display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers, work_progress
+from . import display_details, display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers, work_progress
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи",
@@ -205,23 +205,39 @@ def project(store, state):
                           **display_feed.attempts(state.get("taskHistory", {}).get(task["id"]))))
     estimate_tasks = [dict(t, status="pending") if t["status"] == "completed" and not current.get(t["id"]) else t
                       for t in tasks]
+    gate_details, gate_reports = display_details.gates(store, state, gates, current)
+    current_assessment = gate_details["acceptance"]["evidenceCurrent"]
+    if not current_assessment:
+        remaining["checks"], remaining["unmapped"] = [], []
+    requirement_progress = display_details.requirements(state, tasks, gate_details, gate_reports)
+    for row in rows:
+        row["progress"] = requirement_progress[row["id"]]
+    for task in tasks:
+        task["requirementsDetails"] = [dict(row) for row in rows if row["id"] in task["requirements"]]
+        task["criteriaDetails"] = display_details.criteria(store, state, task)
     mode = check_modes.current(state)
     stage_now = display_stage(state, gates)
     feed = display_feed.tail(store)
-    return {"version": state["version"], "checkMode": mode, "checkModeLabel": MODE_LABELS[mode], "title": state["title"], "run": state["run"],
+    view = {"version": state["version"], "checkMode": mode, "checkModeLabel": MODE_LABELS[mode], "title": state["title"], "run": state["run"],
             "status": status, "label": LABELS.get(status, "Проект изменён; приёмка устарела"),
             "stage": state["stage"], "displayStage": stage_now,
             "updatedAt": state["updatedAt"], "observedAt": observed, "gates": gates,
+            "gateDetails": gate_details, "waveDetails": display_details.waves(store, state, tasks),
             "verified": verified(store, state), "checkModeHistory": check_modes.history_view(store, state), "requirements": rows, "tasks": tasks,
             "remaining": remaining, "remainingAssessed": current_assessment, "decisions": state["notes"],
             "executionPolicy": execution_obligations.enabled(state),
             "phaseAuthorship": phase_receipts.summary(store, state),
             "elapsedSeconds": elapsed(state, observed), "finishedAt": state.get("finishedAt"),
-            "estimate": estimate(estimate_tasks, status, observed), "activity": state.get("activity"),
+            "estimate": estimate(estimate_tasks, status, observed, projected=True), "activity": state.get("activity"),
             "waiting": state.get("waiting"), "events": display_feed.events(feed),
             "currentWork": display_feed.current_work(state, stage_now, feed),
             "workProgress": work_progress.view(state, observed),
             "runDirectory": "runs/" + state["run"]}
+    from . import autonomy
+    autonomy_view = autonomy.view(state)
+    if autonomy_view is not None:
+        view["autonomy"] = autonomy_view
+    return view
 
 
 def publish(store, state):

@@ -103,8 +103,8 @@ test('real stage build is mapped to the supplied stage strip',async()=>{
  const f=await fixture();assert.equal(f.text('stageName'),'Задачи и волны');assert.match(f.text('stageText'),/6 из 7/);
 });
 test('current task and elapsed time update independently of polling',async()=>{
- const f=await fixture();assert.match(f.text('currentActivity'),/Форма/);assert.equal(f.text('active-time-T01'),'30 с');
- f.advance(2000);assert.equal(f.text('active-time-T01'),'32 с');assert.equal(f.text('runElapsed'),'2 мин 02 с');
+ const f=await fixture();assert.match(f.text('currentActivity'),/T01/);assert.match(f.text('waves'),/Форма/);assert.equal(f.text('time-T01'),'30 с');
+ f.advance(2000);assert.equal(f.text('time-T01'),'32 с');assert.equal(f.text('runElapsed'),'2 мин 02 с');
 });
 test('pause freezes task and run clocks',async()=>{
  const d=sample('paused');d.estimate={reason:'paused'};const f=await fixture('',d);f.advance(4000);
@@ -156,8 +156,8 @@ test('current work names the recorded critic phase',async()=>{
 test('phase clocks advance with the task clock and freeze on pause or lost connection',async()=>{
  const d=sample();d.tasks[0].phaseTiming={phase:'repair',elapsedSeconds:8,activeSince:d.observedAt};
  const f=await fixture('',d);assert.equal(f.text('phase-time-T01'),'8 с');
- assert.match(f.text('currentActivity'),/Сейчас: Правка/);assert.match(f.text('currentActivity'),/Вся задача/);
- f.advance(2000);assert.equal(f.text('phase-time-T01'),'10 с');assert.equal(f.text('active-phase-time-T01'),'10 с');
+ assert.match(f.text('currentActivity'),/Правка/);assert.match(f.text('waves'),/Вся задача/);
+ f.advance(2000);assert.equal(f.text('phase-time-T01'),'10 с');assert.equal(f.text('phase-time-T01'),'10 с');
  const paused=sample('paused');paused.tasks[0].phaseTiming={phase:'repair',elapsedSeconds:8,activeSince:paused.observedAt};
  const p=await fixture('',paused);p.advance(2000);assert.equal(p.text('phase-time-T01'),'8 с');
  await f.fail();f.advance(2000);assert.equal(f.text('phase-time-T01'),'8 с');assert.match(f.text('waves'),/Фаза на момент снимка/);
@@ -169,7 +169,7 @@ test('phase row reflects supplied states: repair may be skipped, second review i
   {id:'repair',label:'Правка',status:'skipped'},
   {id:'critic_2',label:'Второй критик',status:'done'},
   {id:'task_acceptance',label:'Приёмка задачи',status:'done'}];
- const f=await fixture('',d);const row=f.el('waves').children[0].children[1].children[0].children[1].children[2];
+ const f=await fixture('',d);const row=f.el('task-T01').children[0].children[1].children[0];
  assert.equal(row.attributes.role,'list');assert.equal(row.children.length,5);
  assert.equal(row.children[2].attributes['aria-label'],'Правка — не требуется');
  assert.equal(row.children[3].attributes['aria-label'],'Второй критик — завершено');
@@ -206,13 +206,13 @@ test('demo illustrates repair and second review as examples only',async()=>{
  assert.match(f.text('waves'),/Правка/);assert.match(f.text('waves'),/Второй критик/);
  assert.match(f.text('waves'),/Препятствие/);assert.match(f.text('waves'),/Ожидает/);
  assert.equal(f.text('phase-time-T03'),'1 мин 30 с');
- const t02=f.el('waves').children[1].children[1].children[0].children[1].children[2];
+ const t02=f.el('task-T02').children[0].children[1].children[0];
  assert.equal(t02.children[2].attributes['aria-label'],'Правка — не требуется');
  assert.equal(t02.children[3].attributes['aria-label'],'Второй критик — не требуется');
  const accepted=await fixture('?demo&status=accepted');
  let skipped=0,reviewed=0;
- for(const wave of accepted.el('waves').children)for(const task of wave.children[1].children){
-  const steps=task.children[1].children[2];
+ for(const wave of accepted.el('waves').children)for(const task of wave.children[3].children){
+  const steps=task.children[0].children[1].children[0];
   const repairSkipped=steps.children[2].attributes['aria-label']==='Правка — не требуется';
   assert.equal(steps.children[3].attributes['aria-label'],repairSkipped?'Второй критик — не требуется':'Второй критик — завершено');
   assert.equal(steps.children[4].attributes['aria-label'],'Приёмка задачи — завершено');
@@ -449,13 +449,12 @@ test('preparation stage names the real work and the age of the last journal acti
  const f=await fixture('',d);const text=f.text('currentActivity');
  assert.match(text,/Независимая сверка брифа/);assert.match(text,/план сохранён/);
  assert.doesNotMatch(text,/Ожидает запуска/);
- assert.match(text,/Последнее действие в журнале: 3 мин назад/);
- f.advance(10000);assert.match(f.text('last-action'),/4 мин назад/);
+ assert.equal(f.el('last-action'),null);assert.equal(f.el('journalNotice').hidden,true);
 });
 test('legacy status without currentWork on a preparation stage does not claim a task is waiting to start',async()=>{
  const d=sample();d.stage='brief';d.displayStage='brief';d.tasks[0].status='pending';
  const f=await fixture('',d);const text=f.text('currentActivity');
- assert.doesNotMatch(text,/Ожидает запуска/);assert.match(text,/Задачи ждут завершения подготовки/);
+ assert.doesNotMatch(text,/Ожидает запуска/);assert.match(text,/Бриф/);
  assert.equal(f.el('last-action'),null);
 });
 test('a new attempt shows the previous one and labels the clock as all attempts',async()=>{
@@ -463,7 +462,7 @@ test('a new attempt shows the previous one and labels the clock as all attempts'
  d.tasks[0].attemptNote='Попытка 2 · прошлая: критик ×2, блок → новая по словам владельца';
  const f=await fixture('',d);
  assert.match(f.text('waves'),/Попытка 2 · прошлая: критик ×2, блок/);
- assert.match(f.text('currentActivity'),/Всего по всем попыткам/);
+ assert.match(f.text('waves'),/Всего по всем попыткам/);
  assert.match(f.text('waves'),/Всего по всем попыткам/);
  const old=await fixture('',sample());assert.doesNotMatch(old.text('waves'),/Всего по всем попыткам/);
 });
@@ -519,4 +518,74 @@ test('reported work and task assignment stay text-only for untrusted labels',asy
  d.tasks[0].assignment={roleLabel:'<script>bad()</script>',runtime:'codex',model:'<b>model</b>'};
  const f=await fixture('',d);assert.match(f.text('currentActivity'),/<img src=x onerror=bad\(\)>/);
  assert.match(f.text('waves'),/<script>bad\(\)<\/script>/);
+});
+
+test('section order puts checks and stages above the two-clock summary and wave details',()=>{
+ const stages=html.indexOf('<section class="card stages-card">'),clocks=html.indexOf('<section class="card activity-card"'),waves=html.indexOf('<section class="card waves-card"');
+ assert.ok(html.indexOf('id="gates"')<stages&&stages<clocks&&clocks<waves&&waves<html.indexOf('id="requirements"'));
+ const timeCard=html.slice(clocks,html.indexOf('</section>',clocks));
+ assert.match(timeCard,/id="runElapsed"/);assert.match(timeCard,/id="eta"/);assert.doesNotMatch(timeCard,/currentActivity|Сейчас выполняется/);
+ assert.match(html,/\.task-summary\{display:grid/);assert.match(html,/@media\(max-width:480px\)/);
+});
+
+test('gate details distinguish missing active failed and stale proof without inventing a pass',async()=>{
+ const d=sample();d.gates={coverage:false,plan:false,acceptance:false};
+ d.gateDetails={coverage:{status:'running',completed:1,total:3,reason:'recorded_work'},plan:{status:'failed',completed:1,total:2,reason:'checked_report'},acceptance:{status:'stale',completed:0,total:2,reason:'basis_changed'}};
+ const f=await fixture('',d);assert.match(f.text('gates'),/Выполняется/);assert.match(f.text('gates'),/Есть замечания/);assert.match(f.text('gates'),/Нужна повторная проверка/);assert.match(f.text('gates'),/1 \/ 3/);assert.doesNotMatch(f.text('gates'),/✓/);
+ d.gateDetails.coverage.status='passed';await f.update(d);assert.doesNotMatch(f.text('gates'),/✓/);
+ d.gates.coverage=true;await f.update(d);assert.match(f.text('gates'),/✓/);await f.fail();assert.doesNotMatch(f.text('gates'),/✓/);
+});
+
+test('requirements reveal partial work and distinct final acceptance inside task cards',async()=>{
+ const d=sample();const p={status:'partial',completed:1,total:2,counts:{completed:1,queued:1},acceptance:{status:'pending'}};
+ d.requirements[0].progress=p;d.tasks[0].requirementsDetails=[{...d.requirements[0]}];
+ d.tasks[0].criteriaDetails=[{text:'Письмо доставлено',status:'passed',source:'checked_report'},{text:'Повтор не создаёт дубль',status:'pending',source:'task_state'}];
+ const f=await fixture('',d);assert.match(f.text('requirements'),/Частично выполнено/);assert.match(f.text('waves'),/Отправка формы/);assert.match(f.text('waves'),/1 \/ 2/);assert.match(f.text('waves'),/Письмо доставлено/);assert.match(f.text('waves'),/По сохранённому отчёту проверки/);assert.doesNotMatch(f.text('requirements'),/Принято по брифу/);
+ p.acceptance.status='passed';await f.update(d);assert.match(f.text('requirements'),/Принято по брифу/);
+});
+
+test('expanded task requirements survive polling and wave review appears separately',async()=>{
+ const d=sample();d.waveDetails=[{wave:1,review:{status:'failed',reason:'checked_checkpoint'}}];
+ const f=await fixture('',d),task=f.el('task-T01');assert.equal(task.tag,'details');assert.equal(task.open,false);
+ task.open=true;task.events.toggle();await f.update(d);assert.equal(f.el('task-T01').open,true);assert.match(f.text('waves'),/Сверка волны: Есть замечания/);
+});
+
+test('planning ETA is visibly an assumption before completed samples exist',async()=>{
+ const d=sample();d.estimate={reason:'estimate',basis:'plan_assumption',confidence:'low',sampleCount:0,lowerSeconds:600,upperSeconds:1800};
+ const f=await fixture('',d);assert.equal(f.text('eta'),'≈ 10–30 мин');assert.match(f.text('etaNote'),/Предварительный ориентир по плану/);
+ f.el('language').change('en');assert.match(f.text('etaNote'),/Preliminary estimate/);
+});
+
+test('healthy polling is distinguished from a journal with no new events',async()=>{
+ const d=sample();d.updatedAt='2026-10-19T11:50:00Z';const f=await fixture('',d);
+ assert.equal(f.el('journalNotice').hidden,false);assert.match(f.text('journalNotice'),/Соединение работает/);
+ d.updatedAt=d.observedAt;await f.update(d);assert.equal(f.el('journalNotice').hidden,true);
+});
+
+test('malformed nested payload never replaces the last good snapshot',async()=>{
+ for(const mutate of [d=>d.decisions=[null],d=>d.tasks[0].criteriaDetails=[null],d=>d.waveDetails=[null],d=>d.requirements[0].progress={status:'partial',completed:5,total:2}]){
+  const f=await fixture(),bad=sample();bad.title='BAD CANDIDATE';mutate(bad);await f.update(bad);
+  assert.equal(f.text('title'),'Тестовый проект');assert.equal(f.text('label'),'Состояние не подтверждено');assert.doesNotMatch(f.text('gates'),/✓/);
+ }
+});
+
+test('a compatible viewer identifies both its own version and the unchanged project runtime',async()=>{
+ const d=sample();d.dashboardVersion='0.3.2';d.version='0.3.0';d.viewerMode='compatible-view';
+ d.autonomy={mayAsk:false,briefingClosedAt:d.observedAt};
+ const f=await fixture('',d);assert.equal(f.text('version'),'0.3.2 · проект 0.3.0');assert.equal(f.el('autonomyNote').hidden,false);assert.match(f.text('autonomyNote'),/самостоятельно/);
+});
+
+test('worker verification before a critic is explicitly provisional and not a green pass',async()=>{
+ const d=sample();d.tasks[0].criteriaDetails=[{text:'Проверить вывод',status:'reported',source:'checked_report',checkedBy:'worker',provisional:true}];
+ const f=await fixture('',d);assert.match(f.text('waves'),/Проверено исполнителем/);assert.match(f.text('waves'),/Независимая проверка ещё впереди/);
+ const criteria=f.el('task-T01').children[1].children.at(-1);assert.equal(criteria.children[1].children[1].className,'status-chip reported');
+});
+test('a historical wave checkpoint does not look like a fresh review of current code',async()=>{
+ const d=sample();d.waveDetails=[{wave:1,review:{status:'passed',reason:'accepted_checkpoint',basisCurrent:false}}];
+ const f=await fixture('',d);assert.match(f.text('waves'),/Пройдена на границе волны/);
+ assert.equal(f.el('waves').children[0].children[2].children[1].className,'status-chip historical');
+});
+test('conditional ETA separates estimated work from unknown blocked waiting',async()=>{
+ const d=sample();d.estimate={reason:'estimate',basis:'mixed',sampleCount:2,confidence:'low',lowerSeconds:600,upperSeconds:1800,waitingForBlockers:true};
+ const f=await fixture('',d);assert.match(f.text('eta'),/10–30 мин работы \+ ожидание/);assert.match(f.text('etaNote'),/Время ожидания снятия блокеров неизвестно/);assert.match(f.text('etaNote'),/разных классов/);
 });

@@ -15,7 +15,7 @@ from aispa_core.workflow import Workflow
 from aispa_core import check_modes, project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 from aispa_core.cli_output import emit
 from aispa_core import phase_receipts, dashboard_host, work_progress
-from aispa_core import project_documents
+from aispa_core import autonomy, project_documents
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -167,9 +167,9 @@ def parser():
 BATCH_LIMIT = 25
 # Each step is an ordinary command with its own lock and journal event; these
 # change the package, run a server, repair the journal or create a run.
-# Resume returns control to the host for its mandatory visible dashboard action.
+# Resume and seal return control for mandatory dashboard/briefing host actions.
 BATCH_DENIED = frozenset({"update-check", "update-prepare", "update-apply", "update-rollback", "serve",
-                          "dashboard", "init", "resume", "batch"})
+                          "dashboard", "init", "resume", "seal", "batch"})
 BATCH_JOURNAL_READS = frozenset({"journal-inspect", "journal-context"})
 
 
@@ -254,8 +254,8 @@ def execute(args):
         print(json.dumps(value, ensure_ascii=False, indent=2))
         return 0
     if args.action == "dashboard" and args.operation != "archive":
-        if args.operation == "start":
-            value = dashboard_server.start(store, port=args.port)
+        if args.operation in ("start", "refresh-view"):
+            value = dashboard_server.start(store, port=args.port, refresh_view=args.operation == "refresh-view")
             value = {**value, "requiredHostActions": dashboard_host.open_request(value)}
         elif args.operation == "stop":
             value = dashboard_server.stop(store)
@@ -292,7 +292,8 @@ def execute(args):
                                    "adaptiveCritique": True, "phaseReceipts": True,
                                    "executionObligations": True, "finalWaveReuse": True,
                                    "errorBoundaryChecks": True, "taskTiers": True,
-                                   "leanControl": True, "projectDocuments": True}
+                                   "leanControl": True, "projectDocuments": True,
+                                   "firstBriefingClosure": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
                 check_modes.initialize(state, args.check)
@@ -319,7 +320,8 @@ def execute(args):
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
             project_context.refresh(store, state)
-            output = {**publish(store, state), "requiredHostActions": dashboard_host.start_request()}
+            output = {**publish(store, state), "autonomy": autonomy.view(state),
+                      "requiredHostActions": dashboard_host.start_request()}
             emit(store, output, compact_mode=args.compact)
             return 0
         state = store.load()
@@ -341,6 +343,7 @@ def execute(args):
             raise Invalid("Восстановление ещё не сверено: journal-context, journal-verify, journal-reconcile")
         ok = True
         receipt = None
+        first_briefing_closure = False
         action = args.action
         if action == "progress":
             receipt = flow.progress_begin(args.phase) if args.progress_action == "begin" else flow.progress_end()
@@ -402,7 +405,9 @@ def execute(args):
             flow.running()
             receipt = knowledge.record(store, state, json.loads(flow.read_input(args.file)))
             flow.save("project-knowledge-recorded")
-        elif action in ("seal", "finish", "resume"):
+        elif action == "seal":
+            first_briefing_closure = flow.seal()
+        elif action in ("finish", "resume"):
             getattr(flow, action)()
         elif action == "scope":
             flow.scope(args.id, args.decision, args.brief, args.quote)
@@ -579,6 +584,11 @@ def execute(args):
             "counts": {name: sum(t["status"] == name for t in state["tasks"])
                        for name in ("pending", "running", "blocked", "completed")},
             "contextIndex": str(store.home / "context/INDEX.md")}
+        autonomy_contract = autonomy.view(state)
+        if autonomy_contract is not None:
+            output["autonomy"] = autonomy_contract
+        if first_briefing_closure:
+            output["requiredHostActions"] = autonomy.start_request(state)
         if action == "resume" and ok:
             output["requiredHostActions"] = dashboard_host.start_request()
         emit(store, output, compact_mode=args.compact)

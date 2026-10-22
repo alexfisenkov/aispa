@@ -48,7 +48,7 @@ jobs:
           test_project_documents test_project_documents_cli test_project_file_map
           test_ideas test_planning test_workflow test_cli_output
           test_check_modes_e2e.FastModeE2E
-      - name: Dashboard startup and lifecycle regressions
+      - name: Dashboard, autonomy and lifecycle regressions
         if: inputs.scope == 'dashboard'
         env:
           PYTHONPATH: tests
@@ -58,6 +58,8 @@ jobs:
           test_lean_control.BatchCliTests test_runtime_evidence test_store
           test_project_documents_cli test_work_progress test_dashboard_activity
           test_phase_progress test_dashboard_liveness test_timing test_workflow
+          test_autonomy test_display_details test_dashboard_reader_cache
+          test_preparation_workflow test_packets test_project_context test_team test_cli
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan

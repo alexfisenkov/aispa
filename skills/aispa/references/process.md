@@ -75,7 +75,7 @@ progress.md, memory.md, requirements.json и source-map.json. Журнал и
 `batch --file steps.json` выполняет список до 25 шагов-argv (без `--root` и
 `--compact`) по очереди; у каждого шага своё событие журнала и краткая квитанция,
 на первой ошибке пакет останавливается. Запрещены init, update-*, serve,
-dashboard, resume, journal-recover и вложенный batch. Подходит для шагов, которые не
+dashboard, resume, seal, journal-recover и вложенный batch. Подходит для шагов, которые не
 зависят от ответа друг друга.
 
 ## 2. Изучение проекта и память между запусками

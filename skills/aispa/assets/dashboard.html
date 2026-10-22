@@ -174,6 +174,49 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 :root[data-theme="dark"] .stage.past i{background:#B9BBC1}
 :root[data-theme="dark"] .gate-mark.no{color:#171717}
 @media(max-width:650px){.history-event{grid-template-columns:minmax(0,1fr)}.hdr-r{width:100%}.hdr-r .source{flex:1 1 100%}}
+
+/* Recorded progress: stable horizontal task rows, details on demand. */
+:root{--success:#166534;--success-bg:#DCFCE7;--warning:#854D0E;--warning-bg:#FEF3C7;--danger:#991B1B;--danger-bg:#FEE2E2;--active:#1D4ED8;--active-bg:#DBEAFE}
+.hero-row{display:grid;grid-template-columns:minmax(0,1fr)}
+.hero{min-height:240px}.gates{padding:22px 26px}.gate-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.gate{align-items:flex-start;min-width:0}.gate .gate-info{display:grid;gap:5px}.gate small{font-size:12px;line-height:1.4;color:var(--muted)}
+.gate-mark.passed,.phase-step.done{color:var(--success);background:var(--success-bg);border-color:var(--success)}
+.gate-mark.running,.phase-step.current{color:var(--active);background:var(--active-bg);border-color:var(--active)}
+.gate-mark.failed,.phase-step.blocked{color:var(--danger);background:var(--danger-bg);border-color:var(--danger)}
+.gate-mark.stale,.phase-step.stale,.phase-step.repairing{color:var(--warning);background:var(--warning-bg);border-color:var(--warning)}
+.stage-activity{font-size:14px;line-height:1.5;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+.stage-activity .activity-title{font-size:14px}.stage-activity .active-task{padding:0;border:0;gap:12px}
+.activity-card{display:block;padding:22px 26px}.time-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:28px;border:0;padding:0}
+.time-summary>div+div{border-left:1px solid var(--line);padding-left:28px}.time-summary strong{font-size:clamp(20px,2.5vw,28px)}
+.waves-board{display:grid;gap:24px}.wave{gap:12px;padding-top:20px;border-top:1px solid var(--line)}.wave:first-child{padding-top:0;border-top:0}
+.wave-meta{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:12px;color:var(--muted)}
+.wave-review{padding:5px 9px;border-radius:8px;border:1px solid var(--line)}
+.meter{height:6px;border-radius:99px;overflow:hidden;background:var(--line)}.meter>i{display:block;height:100%;background:var(--success);border-radius:inherit}
+.tasks{gap:10px}.task{display:block;padding:0;background:var(--paper);border:1px solid var(--line);overflow:hidden}
+.task summary{cursor:pointer;list-style:none;padding:16px;min-height:60px}.task summary::-webkit-details-marker{display:none}
+.task summary:focus-visible{outline:2px solid var(--active);outline-offset:-3px;border-radius:14px}
+.task-summary{display:grid;grid-template-columns:38px minmax(0,1fr) minmax(150px,auto);gap:12px;align-items:start}
+.task summary .task-body{gap:6px}.task-right{min-width:0;gap:6px;max-width:240px}.task-state{white-space:normal;text-align:right;justify-content:flex-end}
+.task-time{white-space:normal;overflow-wrap:anywhere;line-height:1.5}.task-summary .task-id{padding-top:3px}
+.task-steps{margin:12px 0 0 50px}.phase-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:5px;margin-top:0}
+.phase-step{display:flex;align-items:center;justify-content:center;text-align:center;min-height:32px;border-width:1px;line-height:1.35}
+.task-toggle{display:block;margin-top:10px;color:var(--muted);font-size:12px}.task-toggle::before{content:'▸ ';}.task[open] .task-toggle::before{content:'▾ ';}
+.task-detail{display:grid;gap:16px;padding:16px;border-top:1px solid var(--line);background:var(--white)}
+.task-detail h3{margin:0 0 8px;font-size:13px;font-weight:600;color:var(--muted)}
+.detail-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;padding:9px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.5}
+.detail-row:first-of-type{border-top:0}.detail-row>div{min-width:0;overflow-wrap:anywhere}.detail-row small{display:block;color:var(--muted);margin-top:4px}
+.status-chip{display:inline-flex;gap:5px;align-items:center;border-radius:8px;padding:4px 8px;font-size:12px;line-height:1.4;border:1px solid var(--line);color:var(--muted);max-width:220px;white-space:normal;overflow-wrap:anywhere}
+.status-chip.passed,.status-chip.completed,.status-chip.accepted,.tag.completed,.tag.accepted{background:var(--success-bg);color:var(--success);border-color:var(--success)}
+.status-chip.failed,.status-chip.blocked,.tag.blocked{background:var(--danger-bg);color:var(--danger);border-color:var(--danger)}
+.status-chip.repair,.status-chip.stale,.tag.repair,.tag.stale{background:var(--warning-bg);color:var(--warning);border-color:var(--warning)}
+.status-chip.reported,.status-chip.running,.status-chip.implementation,.status-chip.review,.status-chip.in_progress,.tag.implementation,.tag.review{background:var(--active-bg);color:var(--active);border-color:var(--active)}
+.task.running{border-left:4px solid var(--active)}.task.repair{border-left-color:var(--warning)}.task.blocked{border-left:4px solid var(--danger);background:var(--paper)}
+.task.completed:not(.proof-stale){border-left:4px solid var(--success)}.task.completed .dot{background:var(--success)}.task.blocked .dot{background:var(--danger)}.task.repair .dot{background:var(--warning)}
+.sync-notice{padding:12px 15px;border-radius:12px;border:1px solid var(--warning);color:var(--warning);background:var(--warning-bg);font-size:13px;line-height:1.5}
+:root[data-theme="dark"]{--success:#86EFAC;--success-bg:#123523;--warning:#FDE68A;--warning-bg:#3D3217;--danger:#FCA5A5;--danger-bg:#431C22;--active:#93C5FD;--active-bg:#192E50}
+@media(max-width:800px){.gate-list{grid-template-columns:minmax(0,1fr)}.task-summary{grid-template-columns:30px minmax(0,1fr) minmax(120px,auto);gap:10px}.task-steps{margin-left:40px}}
+@media(max-width:480px){.task-summary{grid-template-columns:26px minmax(0,1fr)}.task-right{grid-column:2;justify-items:start;margin:0;max-width:100%}.task-state{text-align:left;justify-content:flex-start;margin:0}.task-steps{margin-left:0}.time-summary{gap:12px}.time-summary>div+div{padding-left:12px}.detail-row{grid-template-columns:minmax(0,1fr)}.stages-card,.activity-card,.gates{padding:18px}}
+
 </style>
 </head>
 <body>
@@ -222,42 +265,40 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
   </div>
   <div class="card gates">
     <h2 class="eyebrow" data-i18n="checks">Проверки</h2>
-    <div id="gates" style="display:grid;gap:10px"></div>
+    <div id="gates" class="gate-list"></div>
     <div class="note" data-i18n="gateNote">Изменение брифа, плана или кода делает связанные проверки устаревшими.</div>
   </div>
+</section>
+
+<section class="card stages-card">
+  <div class="row-head"><h2 data-i18n="stageHeading">Этап</h2><span id="stageText"></span></div>
+  <div class="stages" id="stages"></div>
+  <div id="currentActivity" class="stage-activity" aria-live="polite"></div>
+  <div id="autonomyNote" class="note" hidden></div>
 </section>
 
 <section class="card waiting-card" id="waitingPanel" hidden aria-live="polite">
   <span class="eyebrow" id="waitingKind"></span><b id="waitingNote"></b><span class="note" id="waitingSince"></span>
 </section>
 
-<section class="card activity-card" aria-label="Текущая работа и время" data-aria-i18n="activityAria">
-  <div class="activity-list"><h2 class="eyebrow" data-i18n="now">Сейчас выполняется</h2><div id="currentActivity" class="activity-list"></div></div>
+<section class="card activity-card" aria-label="Время работы" data-aria-i18n="activityAria">
   <div class="time-summary">
   <div><span class="sub" data-i18n="runTime">Время прогона · без отмеченных пауз</span><strong id="runElapsed">—</strong></div>
     <div><span class="sub" data-i18n="estimate">Примерно до завершения</span><strong id="eta">Пока нет оценки</strong><span class="note" id="etaNote"></span></div>
   </div>
 </section>
 
-<details class="card history" id="modeChangesPanel" hidden>
-  <summary><h2 data-i18n="modeChanges">Смены режима проверки</h2><span class="note" id="modeChangesCount"></span></summary>
-  <div class="history-list" id="modeChanges"></div>
-</details>
 
-<details class="card history" id="historyPanel" hidden>
-  <summary><h2 data-i18n="history">История</h2><span class="note" id="historyCount"></span></summary>
-  <div class="history-list" id="events"></div>
-</details>
+
+
 
 <section class="card waves-card" aria-label="Задачи по волнам" data-aria-i18n="wavesAria">
   <div style="display:grid;gap:6px"><h2 class="h2" data-i18n="waves">Задачи по волнам</h2><span class="sub" id="wavesNote" data-i18n="wavesNote">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
-  <div id="waves" style="display:grid;gap:20px"></div>
+  <div id="journalNotice" class="sync-notice" hidden></div>
+  <div id="waves" class="waves-board"></div>
 </section>
 
-<section class="card stages-card">
-  <div class="row-head"><h2 data-i18n="stageHeading">Этап</h2><span id="stageText"></span></div>
-  <div class="stages" id="stages"></div>
-</section>
+
 
 <section class="card">
   <div class="req-head">
@@ -282,6 +323,16 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
     <div id="decisions" style="position:relative"></div>
   </div>
 </section>
+
+<details class="card history" id="modeChangesPanel" hidden>
+  <summary><h2 data-i18n="modeChanges">Смены режима проверки</h2><span class="note" id="modeChangesCount"></span></summary>
+  <div class="history-list" id="modeChanges"></div>
+</details>
+
+<details class="card history" id="historyPanel" hidden>
+  <summary><h2 data-i18n="history">История</h2><span class="note" id="historyCount"></span></summary>
+  <div class="history-list" id="events"></div>
+</details>
 
 <footer>
   <span data-i18n="footer">Экран только отображает результат. Право назвать работу готовой определяет движок.</span>
@@ -339,7 +390,7 @@ var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['
  decisions:['Решения агента','Agent decisions'],decisionsNote:['Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.','If you disagree with a decision, run AISpa again and state what to change.'],
  footer:['Экран только отображает результат. Право назвать работу готовой определяет движок.','This view only displays the result. The engine determines when work is complete.'],
  gateNote:['Изменение брифа, плана или кода делает связанные проверки устаревшими.','Changing the brief, plan or code makes related checks stale.'],
- activityAria:['Текущая работа и время','Current work and time'],wavesAria:['Задачи по волнам','Tasks by wave']};
+ activityAria:['Время работы','Work time'],wavesAria:['Задачи по волнам','Tasks by wave']};
 var EN={
  'Сроки исполнения':'Execution deadlines','Сроки прошлых прогонов':'Earlier execution deadlines',
  'Финальная передача':'Final handoff','Завершение прогона':'Run completion',
@@ -452,6 +503,26 @@ Object.assign(EN,{
  'Самостоятельные решения пока не записаны.':'No agent decisions recorded yet.','Описание не указано':'No description',
  'Причина блокера не указана':'No blocker reason recorded','Исключено':'Excluded',
  'Исключено по решению владельца':'Excluded by owner decision'});
+Object.assign(EN,{
+ 'Бриф готов · агент работает самостоятельно':'Brief complete · agent is working autonomously',
+ 'Проверено исполнителем':'Checked by the worker','Независимая проверка ещё впереди':'Independent review is still pending',
+ 'Проверка исполнителя по маршруту задачи':'Worker verification under the task policy',
+ 'Пройдена на границе волны':'Passed at the wave checkpoint',
+ 'Часть оценки по измерениям, часть — по плану. Скорость разных классов задач не смешивается.':'Partly measured, partly planned. Different task classes are not mixed.',
+ 'работы + ожидание':'of work + waiting','Время ожидания снятия блокеров неизвестно и в оценку не входит.':'Time waiting for blockers is unknown and excluded from the estimate.','проект':'project',
+ 'Отчёт ещё не записан':'No report recorded yet','Проверка выполняется':'Review in progress',
+ 'Проверено по отчёту':'Confirmed by the report','Исходные данные изменились':'Inputs have changed',
+ 'Подтверждение устарело или недоступно':'Evidence is stale or unavailable',
+ 'Предварительный ориентир по плану; уточняется по ходу работы.':'Preliminary estimate based on the plan; refined as work proceeds.',
+ 'Требования и критерии задачи':'Task requirements and criteria','Требования в задаче':'Requirements in this task',
+ 'Критерии результата':'Result criteria','По сохранённому отчёту проверки':'From a recorded verification report',
+ 'Отдельная проверка критерия ещё не записана':'No individual criterion verification recorded yet',
+ 'Соединение работает; текущий результат агента ещё не записан.':'The connection works; the agent has not recorded a current result yet.',
+ 'Нет в плане':'Not planned','В очереди':'Queued','На проверке':'Under review','На ремонте':'Being repaired',
+ 'Заблокировано':'Blocked','Частично выполнено':'Partially completed','Принято по брифу':'Accepted against the brief',
+ 'Исключено из текущей работы':'Excluded from current scope','Пройдено':'Passed','Есть замечания':'Findings remain',
+ 'Выполняется':'In progress','Не требуется':'Not required','Задачи волны выполнены':'Completed tasks in this wave'
+});
 var locale='ru',theme='system';
 function tr(value){return locale==='en'&&EN[value]?EN[value]:value}
 function stored(key){try{return localStorage.getItem(key)}catch(error){return null}}
@@ -459,7 +530,7 @@ function savePref(key,value){try{localStorage.setItem(key,value)}catch(error){}}
 var params=new URLSearchParams(location.search),archiveData=typeof window!=='undefined'?window.AISPA_ARCHIVE:null;
 var archiveMode=!!(archiveData&&archiveData.archive===true),demoMode=params.has('demo')&&!archiveMode;
 var previewStatus=demoMode?params.get('status'):null;
-var filter='all',last=null,source='loading',receivedAt=0,inFlight=false,tabButtons={};
+var filter='all',last=null,source='loading',receivedAt=0,inFlight=false,tabButtons={},taskExpanded={};
 function $(id){return document.getElementById(id)}
 function h(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
 function applyTheme(){var mode=theme;
@@ -518,7 +589,7 @@ function phaseSteps(t){if(!Array.isArray(t.phaseSteps)||!t.phaseSteps.length)ret
  t.phaseSteps.forEach(function(step){if(!step||!PHASE_STATUS[step.status])return;
   var state=PHASE_STATUS[step.status],name=tr(step.label||PHASE_LABEL[step.id]||step.id||'Этап');
   var item=h('span','phase-step '+step.status,state[0]+' '+name);item.setAttribute('role','listitem');
-  item.setAttribute('aria-label',name+' — '+tr(state[1]));row.append(item)});
+  item.setAttribute('aria-label',name+' — '+tr(state[1]));if(step.id==='repair'&&step.status==='current')item.className+=' repairing';row.append(item)});
  return row.children.length?row:null}
 var FILTERS={all:['Все',function(){return true}],core:['Ядро',function(r){return r.core&&active(r)}],
  additions:['Добавления',isAdd],open:['Не завершено',function(r){return active(r)&&r.implementation!=='implemented'}]};
@@ -549,7 +620,12 @@ function etaText(d){
  if(messages[reason])return messages[reason].map(tr);
  if(reason!=='estimate'||!Number.isFinite(e.lowerSeconds)||!Number.isFinite(e.upperSeconds))return [tr('Пока нет оценки'),tr('Движок ещё не накопил данные.')];
  var low=Math.max(1,Math.ceil((e.lowerSeconds-delta())/60)),high=Math.max(low,Math.ceil((e.upperSeconds-delta())/60));
- return ['≈ '+low+'–'+high+' '+(locale==='en'?'min':'мин'),locale==='en'?'Based on '+e.sampleCount+' completed tasks, waves and an acceptance reserve. This is an estimate.':'По '+e.sampleCount+' завершённым задачам, с учётом волн и резерва на приёмку. Это ориентир.'];
+ var range='≈ '+low+'–'+high+' '+(locale==='en'?'min':'мин');
+ var note=e.basis==='plan_assumption'?tr('Предварительный ориентир по плану; уточняется по ходу работы.'):
+  e.basis==='mixed'?tr('Часть оценки по измерениям, часть — по плану. Скорость разных классов задач не смешивается.'):
+  locale==='en'?'Based on '+e.sampleCount+' completed tasks of the same classes, waves and an acceptance reserve. This is an estimate.':'По '+e.sampleCount+' завершённым задачам соответствующих классов, с учётом волн и резерва на приёмку. Это ориентир.';
+ if(e.waitingForBlockers){range+=' '+tr('работы + ожидание');note+=' '+tr('Время ожидания снятия блокеров неизвестно и в оценку не входит.');}
+ return [range,note];
 }
 function tick(){
  if(!last)return;
@@ -566,7 +642,7 @@ function tick(){
  var wp=document.getElementById('work-progress-time');if(wp&&d.workProgress){var work=d.workProgress;
   wp.textContent=duration(work.elapsedSeconds+(work.activeSince&&d.status==='running'?delta():0));}
  var la=document.getElementById('last-action'),agoNow=lastActionText(d);if(la&&agoNow)la.textContent=agoNow;
- var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];
+ var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];journalNotice(d);
 }
 function assignmentText(t){var a=t.assignment;if(!a||typeof a.roleLabel!=='string')return null;
  return tr(source==='archive'||source==='offline'?'Назначение на момент снимка: ':'Назначен: ')+tr(a.roleLabel)+(a.runtime?' · '+a.runtime:'')+(a.model?' · '+a.model:'');}
@@ -584,41 +660,23 @@ function renderWorkProgress(box,d){var work=d.workProgress;if(!work||work.finish
  var wt=h('span','mono task-time');wt.id='work-progress-time';wr.append(wb,wt);box.append(wr);return true;}
 function renderActivity(d,status){
  var box=$('currentActivity');box.replaceChildren();
- if(!connected()){box.append(h('div','activity-title',tr('Последний подтверждённый снимок')));return;}
- if(source==='archive'){box.append(h('div','activity-title',tr('Состояние на дату снимка')));return;}
- if(status!=='running'){box.append(h('div','activity-title',tr(SHORT[status]||UNKNOWN)+sourceSuffix()));
-  if(status==='paused'||status==='blocked')renderWorkProgress(box,d);return;}
- var activityLabels={'verification':'Выполняется проверка кода','clean-verification':'Проверка в чистом клоне'};
- var knownActivity=d.activity&&activityLabels[d.activity.kind];
- if(knownActivity){
-  var check=h('div','active-task');check.append(h('b',null,tr(knownActivity)+(d.activity.task?' · '+d.activity.task:'')));
-  var clock=h('span','mono task-time');clock.id='verification-time';check.append(clock);box.append(check);
+ if(!connected()){box.append(h('span',null,tr('Последний подтверждённый снимок')));return;}
+ if(source==='archive'){box.append(h('span',null,tr('Состояние на дату снимка')));return;}
+ if(status!=='running')box.append(h('span',null,tr(SHORT[status]||UNKNOWN)));
+ var labels={'verification':'Выполняется проверка кода','clean-verification':'Проверка в чистом клоне'};
+ var known=d.activity&&labels[d.activity.kind];
+ if(known){box.append(h('b',null,tr(known)+(d.activity.task?' · '+d.activity.task:'')));var vc=h('span','mono');vc.id='verification-time';box.append(vc);}
+ var reported=renderWorkProgress(box,d),running=d.tasks.filter(function(t){return t.status==='running'});
+ if(!known&&!reported&&status==='running'){
+  if(running.length){box.append(h('b',null,locale==='en'?'Tasks in progress: '+running.length:'В работе задач: '+running.length));
+   if(running.length===1)box.append(h('span',null,running[0].id+' · '+(running[0].phaseStale?tr('Проверки устарели'):phaseName(running[0])||tr('В работе'))));
+  }else{var stage=STAGES.find(function(x){return x[0]===(d.displayStage||d.stage)}),cw=d.currentWork||{};
+   box.append(h('span',null,tr(cw.title||(stage?stage[1]:'Текущий этап не определён'))));if(cw.note)box.append(h('span',null,tr(cw.note)));}
  }
- var reportedWork=renderWorkProgress(box,d);
- var running=d.tasks.filter(function(t){return t.status==='running'});
- running.forEach(function(t){var row=h('div','active-task'),text=h('div');
-  text.append(h('b',null,t.title||t.id),h('small','sub',t.id+' · '+tr('волна')+' '+t.wave));
-  if(t.phaseStale)text.append(h('span','task-phase',tr('Проверки устарели · требуется повторная проверка')));
-  else if(phaseName(t)){var phase=h('span','task-phase',tr(connected()?'Сейчас: ':'На момент снимка: ')+phaseName(t));
-   if(t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){var clock=h('span','mono');clock.id='active-phase-time-'+t.id;phase.append(clock)}text.append(phase)}
-  var right=h('div','task-right'),time=h('span','mono task-time');time.id='active-time-'+t.id;
-  var assignment=assignmentText(t);if(assignment)text.append(h('small','sub',assignment));
-  if(t.attemptNote)text.append(h('span','task-phase',t.attemptNote));
-  right.append(h('span','sub',wholeTaskLabel(t)),time);row.append(text,right);box.append(row);});
- if(!running.length&&!knownActivity&&!reportedWork){
-  var next=d.tasks.find(function(t){return t.status==='pending'&&t.dependsOn&&t.dependsOn.every(function(id){
-   return d.tasks.some(function(other){return other.id===id&&other.status==='completed'})})});
-  var stage=STAGES.find(function(x){return x[0]===(d.displayStage||d.stage)}),cw=d.currentWork||{};
-  var preparing=(d.displayStage||d.stage)!=='build'&&(d.displayStage||d.stage)!=='acceptance';
-  box.append(h('div','activity-title',tr(cw.title||(stage?stage[1]:'Текущий этап не определён'))));
-  if(cw.note)box.append(h('div','sub',tr(cw.note)));
-  else if(next&&preparing)box.append(h('div','sub',tr('Задачи ждут завершения подготовки')));
-  else if(next)box.append(h('div','sub',tr('Ожидает запуска: ')+next.title));
-  else if(d.tasks.some(function(t){return t.status==='blocked'}))box.append(h('div','sub',tr('Незавершённые задачи заблокированы. Причины перечислены ниже.')));
-  else if(d.tasks.length&&d.tasks.every(function(t){return t.status==='completed'}))box.append(h('div','sub',tr('Задачи реализованы. Подготовка итоговой проверки.')));
- }
- var ago=lastActionText(d);if(ago){var line=h('div','sub',ago);line.id='last-action';box.append(line)}
+ var autonomy=$('autonomyNote');autonomy.hidden=!(d.autonomy&&d.autonomy.mayAsk===false&&d.autonomy.briefingClosedAt);
+ if(!autonomy.hidden)autonomy.textContent=tr('Бриф готов · агент работает самостоятельно');
 }
+
 function renderWaiting(d){
  var panel=$('waitingPanel'),value=d.waiting;
  var item=typeof value==='string'?{kind:d.status==='paused'?'paused':'waiting',note:value}:value;
@@ -669,9 +727,57 @@ function remainingItem(value,key,reqs,tasks){
   tr(value.status==='failed'?'Срок не соблюдён':'Ожидает подтверждения')+' · '+fmt(value.deadline)};
  return {id:value.id||value.requirement||value.task||'',text:[value.criterion,value.text||value.note||value.reason||tr('Описание не указано')].filter(Boolean).join(' — ')};
 }
+var PROGRESS_TEXT={unplanned:'Нет в плане',queued:'В очереди',implementation:'Реализация',review:'На проверке',repair:'На ремонте',blocked:'Заблокировано',partial:'Частично выполнено',completed:'Выполнение проверено',stale:'Нужна повторная проверка',excluded:'Исключено из текущей работы',accepted:'Принято по брифу',reported:'Проверено исполнителем',pending:'Ожидает',running:'Выполняется',passed:'Пройдено',failed:'Есть замечания',in_progress:'В работе',skipped:'Не требуется'};
+function chip(status,label){return h('span','status-chip '+status,tr(label||PROGRESS_TEXT[status]||UNKNOWN))}
+function taskProgressStatus(t){if(t.phaseStale||t.status==='completed'&&t.proofCurrent===false)return 'stale';
+ if(t.status==='completed')return t.proofCurrent===true?'completed':'partial';if(t.status==='blocked')return 'blocked';
+ if(t.status==='running')return t.phase==='repair'?'repair':/^critic_|task_acceptance/.test(t.phase||'')?'review':'implementation';return 'queued';}
+function requirementProgress(r,tasks){if(r.progress)return r.progress;
+ var holders=tasks.filter(function(t){return (t.requirements||[]).includes(r.id)}),counts={},complete=0;
+ holders.forEach(function(t){var status=taskProgressStatus(t);counts[status]=(counts[status]||0)+1;if(status==='completed')complete++});
+ var status=!active(r)?'excluded':!holders.length?'unplanned':r.implementation==='needs_check'||counts.stale?'stale':complete===holders.length?'completed':
+  counts.repair?'repair':counts.review?'review':counts.implementation?'implementation':counts.blocked?'blocked':complete?'partial':'queued';
+ return {status:status,completed:complete,total:holders.length,counts:counts,taskIds:holders.map(function(t){return t.id}),acceptance:{status:'pending'}};}
+function reqStatus(p){return p.acceptance&&p.acceptance.status==='passed'?'accepted':p.status}
+function reqProgressText(p){return (locale==='en'?'Tasks completed: ':'Выполнено задач: ')+p.completed+' / '+p.total}
+function meter(done,total,label){var el=h('div','meter'),bar=h('i');var value=total?Math.max(0,Math.min(100,done/total*100)):0;
+ el.setAttribute('role','progressbar');el.setAttribute('aria-label',label);el.setAttribute('aria-valuemin','0');el.setAttribute('aria-valuemax',String(total||1));el.setAttribute('aria-valuenow',String(done));bar.style.width=value+'%';el.append(bar);return el;}
+function renderTask(t,d){
+ var row=h('details','task '+t.status+(t.phase==='repair'?' repair':'')+(t.phaseStale||t.status==='completed'&&t.proofCurrent===false?' proof-stale':''));row.id='task-'+t.id;
+ row.open=taskExpanded[t.id]===true;row.addEventListener('toggle',function(){taskExpanded[t.id]=row.open});
+ var summary=h('summary'),line=h('div','task-summary'),body=h('div','task-body'),right=h('div','task-right');
+ body.append(h('b',null,t.title||t.id),h('small',null,tr('Требования: ')+(t.requirements||[]).join(', ')));
+ var assignment=assignmentText(t);if(assignment)body.append(h('small',null,assignment));
+ var state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));
+ var time=h('span','mono task-time');time.id='time-'+t.id;right.append(state,h('span','task-time',wholeTaskLabel(t)),time);
+ if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
+  var clock=h('span','mono task-time');clock.id='phase-time-'+t.id;right.append(h('span','task-time',tr(source==='archive'?'Фаза на дату снимка: ':source==='offline'?'Фаза на момент снимка: ':'Интервал этапа: ')+phaseName(t)),clock);}
+ line.append(h('span','task-id mono',t.id),body,right);summary.append(line);
+ var steps=phaseSteps(t);if(steps){var strip=h('div','task-steps');strip.append(steps);summary.append(strip);}
+ summary.append(h('span','task-toggle',tr('Требования и критерии задачи')));row.append(summary);
+ var detail=h('div','task-detail');
+ if(TIER[t.tier])detail.append(h('span','note',tr(TIER[t.tier][0])+' · '+tr(t.tier==='heavy'&&t.reviewPolicy==='lean'?'PASS критика закрывает задачу':TIER[t.tier][1])));
+ if(t.tierReason)detail.append(h('span','note',t.tierReason));if(t.attemptNote)detail.append(h('span','note',t.attemptNote));
+ if(t.assignment&&t.assignment.assignedAt)detail.append(h('span','note',tr('Назначение: ')+fmt(t.assignment.assignedAt)));
+ if(t.deferred)detail.append(chip('blocked','Отложено в остатки'));if(t.note)detail.append(h('div','note',t.note));
+ var reqs=Array.isArray(t.requirementsDetails)?t.requirementsDetails:d.requirements.filter(function(r){return t.requirements.includes(r.id)});
+ var reqBox=h('div');reqBox.append(h('h3',null,tr('Требования в задаче')));
+ reqs.forEach(function(r){var p=requirementProgress(r,d.tasks),item=h('div','detail-row'),text=h('div');text.append(h('b',null,r.id+' · '+r.text));
+  text.append(h('small',null,reqProgressText(p)+(r.core?' · '+tr('Обязательное ядро'):'')));item.append(text,chip(reqStatus(p)));reqBox.append(item)});
+ if(!reqs.length)reqBox.append(h('span','note',tr('Без привязки к требованиям')));detail.append(reqBox);
+ var criteria=Array.isArray(t.criteriaDetails)?t.criteriaDetails:(t.criteria||[]).map(function(text){return {text:text,status:'pending',source:'task_state'}});
+ if(criteria.length){var cb=h('div');cb.append(h('h3',null,tr('Критерии результата')));criteria.forEach(function(c){var cr=h('div','detail-row'),ct=h('div');
+  ct.append(h('span',null,c.text));ct.append(h('small',null,tr(c.provisional?'Независимая проверка ещё впереди':c.checkedBy==='worker'?'Проверка исполнителя по маршруту задачи':c.source==='checked_report'?'По сохранённому отчёту проверки':'Отдельная проверка критерия ещё не записана')));
+  cr.append(ct,chip(c.status));cb.append(cr)});detail.append(cb);}
+ row.append(detail);return row;
+}
+function journalNotice(d){var node=$('journalNotice'),age=(new Date(d.observedAt)-new Date(d.updatedAt))/1000+delta();
+ var show=source==='live'&&d.status==='running'&&Number.isFinite(age)&&age>180;node.hidden=!show;
+ if(show)node.textContent=(locale==='en'?'No new journal events for ':'Новых событий нет уже ')+agoText(age).replace(/ назад$/,'')+'. '+tr('Соединение работает; текущий результат агента ещё не записан.');}
 function render(d){
  var status=viewStatus(d),reqs=d.requirements,tasks=d.tasks,rem=d.remaining||{};
- $('title').textContent=d.title||tr('Без названия');$('version').textContent=versionLabel(d.version);
+ $('title').textContent=d.title||tr('Без названия');$('version').textContent=versionLabel(d.dashboardVersion||d.version);
+ if(d.dashboardVersion&&d.dashboardVersion!==d.version)$('version').textContent+=' · '+tr('проект')+' '+d.version;
  $('label').textContent=source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
   tr(LABELS[status]||UNKNOWN)+(source==='archive'||source==='demo'?sourceSuffix():'');
  $('hint').textContent=source==='archive'?tr('Это историческое состояние. Текущий статус проекта здесь не проверяется.'):
@@ -683,11 +789,14 @@ function render(d){
  if(d.checkMode)$('checkModeName').textContent=tr(d.checkModeLabel||d.checkMode);
  $('updatedAt').textContent=fmt(d.updatedAt);$('observedAt').textContent=fmt(d.observedAt);
  var gates=$('gates');gates.replaceChildren();
- GATES.forEach(function(g){var ok=connected()&&d.gates&&d.gates[g[0]]===true,row=h('div','gate');
-  row.append(h('div','gate-mark '+(ok?'ok':'no'),ok?'✓':'!'));var t=h('div');
-  t.append(h('b',null,tr(g[1])),h('span',null,ok?(source==='archive'?tr('На дату снимка')+' · ':
-   source==='demo'?tr('пример')+' · ':'')+tr(g[2]):
-   tr(connected()?'Не подтверждено или устарело':'Нет актуального подтверждения')));row.append(t);gates.append(row)});
+ GATES.forEach(function(g){var ok=connected()&&d.gates&&d.gates[g[0]]===true,detail=d.gateDetails&&d.gateDetails[g[0]],state=ok?'passed':detail&&detail.status||'pending';
+  if(!connected())state='stale';if(state==='passed'&&!ok)state='stale';var row=h('div','gate');
+  row.append(h('div','gate-mark '+state+(ok?' ok':''),ok?'✓':state==='running'?'◷':state==='pending'?'○':'!'));var text=h('div','gate-info');
+  text.append(h('b',null,tr(g[1])),h('span',null,tr(PROGRESS_TEXT[state]||UNKNOWN)+(sourceSuffix())));
+  if(detail){if(detail.total>0)text.append(h('small',null,(locale==='en'?'Checks: ':'Проверено: ')+detail.completed+' / '+detail.total));
+   if(detail.reason){var reasons={no_report:'Отчёт ещё не записан',recorded_work:'Проверка выполняется',checked_report:'Проверено по отчёту',basis_changed:'Исходные данные изменились',evidence_not_current:'Подтверждение устарело или недоступно'};text.append(h('small',null,tr(reasons[detail.reason]||'Подтверждение устарело или недоступно')));}}
+  else text.append(h('small',null,tr(ok?g[2]:connected()?'Не подтверждено или устарело':'Нет актуального подтверждения')));
+  row.append(text);gates.append(row)});
  var idx=STAGES.findIndex(function(x){return x[0]===(d.displayStage||d.stage)}),done=connected()&&finalStatus(status);
  $('stageName').textContent=idx>=0?tr(STAGES[idx][1]):tr('Не определён');
  $('stageText').textContent=idx>=0?(locale==='en'?'Step '+(idx+1)+' of '+STAGES.length:'Шаг '+(idx+1)+' из '+STAGES.length)+' · '+tr(STAGES[idx][1]):tr('Этап не определён');
@@ -701,11 +810,12 @@ function render(d){
   b.setAttribute('aria-pressed',String(filter===k));b.replaceChildren(document.createTextNode(tr(FILTERS[k][0])+' '),h('span',null,reqs.filter(FILTERS[k][1]).length));});
  var list=$('requirements');list.replaceChildren();var rows=reqs.filter(FILTERS[filter][1]);
  if(!rows.length)list.append(h('div','empty',tr('В этом фильтре требований нет.')));
- rows.forEach(function(r){var off=SCOPE[r.scope],impl=r.implementation,row=h('div','req'),id=h('div','req-id mono');id.append(h('span',null,r.id));
+ rows.forEach(function(r){var off=SCOPE[r.scope],impl=r.implementation,p=requirementProgress(r,tasks),rs=reqStatus(p),row=h('div','req'),id=h('div','req-id mono');id.append(h('span',null,r.id));
   if(r.core&&active(r)){var cd=h('span','chrome-dot');cd.style.width=cd.style.height='14px';cd.title=tr('Обязательное ядро');id.append(cd)}
   var body=h('div','req-body'),meta=[r.kind==='constraint'?tr('Общее ограничение'):isAdd(r)?tr('Добавление агента')+(r.parent?' · '+tr('к')+' '+r.parent:''):tr('Исходный заказ')];
   if(r.core&&active(r))meta.push(tr('ядро'));body.append(h('b',null,r.text),h('small',null,meta.join(' · ')));
-  var tag=h('span','tag '+(off?'off':IMPL[impl]?impl:'unplanned'));tag.append(h('span','dot'),document.createTextNode(tr(off||IMPL[impl]||UNKNOWN)));
+  if(p.total)body.append(h('small',null,reqProgressText(p)));
+  var tag=h('span','tag '+(off?'off':rs));tag.append(h('span','dot'),document.createTextNode(tr(off||PROGRESS_TEXT[rs]||IMPL[impl]||UNKNOWN)));
   row.append(id,body,tag);list.append(row)});
  var wv=$('waves');wv.replaceChildren();
  if(!tasks.length)wv.append(h('div','note',tr('План задач ещё не подготовлен.')));
@@ -715,24 +825,11 @@ function render(d){
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,tr('Волна')+' '+n));
   hd.append(l,h('span',null,(hasProof?(hasLight?(locale==='en'?accepted+' of '+ts.length+' completed and verified':accepted+' из '+ts.length+' выполнено и проверено'):(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято')):
    (locale==='en'?c+' of '+ts.length+' completed':c+' из '+ts.length+' завершено'))+sourceSuffix()));var box=h('div','tasks');
-  ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')+(t.status==='completed'&&t.proofCurrent===false?' proof-stale':'')),b=h('div','task-body');
-   b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?tr('Требования: ')+t.requirements.join(', '):tr('Без привязки к требованиям')));
-   var assignment=assignmentText(t);if(assignment)b.append(h('small',null,assignment));
-   if(t.assignment&&t.assignment.assignedAt)b.append(h('small',null,tr('Назначение: ')+fmt(t.assignment.assignedAt)));
-   if(t.attemptNote)b.append(h('small',null,t.attemptNote));
-   var steps=phaseSteps(t);if(steps)b.append(steps);
-   if(TIER[t.tier]){
-    b.append(h('small',null,tr(TIER[t.tier][0])+' · '+tr(t.tier==='heavy'&&t.reviewPolicy==='lean'?'PASS критика закрывает задачу':TIER[t.tier][1])));
-    if(t.tierReason)b.append(h('small',null,t.tierReason));
-   }
-   if(t.deferred)b.append(h('small',null,tr('Отложено в остатки')));
-   var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));
-   var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,h('span','task-time',wholeTaskLabel(t)),clock);
-   if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
-    var pclock=h('span','mono task-time');pclock.id='phase-time-'+t.id;
-    right.append(h('span','task-time',tr(source==='archive'?'Фаза на дату снимка: ':
-     connected()?'Интервал этапа: ':'Фаза на момент снимка: ')+phaseName(t)),pclock)}
-   row.append(h('span','task-id mono',t.id),b,right);box.append(row)});w.append(hd,box);wv.append(w)});
+  var wd=Array.isArray(d.waveDetails)?d.waveDetails.find(function(x){return x.wave===n}):null;
+  var meta=h('div','wave-meta');meta.append(h('span',null,locale==='en'?'Parallel tasks within this wave':'Задачи этой волны могут выполняться параллельно'));
+  if(wd&&wd.review){var review=wd.review,historical=review.status==='passed'&&(review.reason==='accepted_checkpoint'||review.basisCurrent===false);meta.append(chip(historical?'historical':review.status,(locale==='en'?'Wave review: ':'Сверка волны: ')+tr(historical?'Пройдена на границе волны':PROGRESS_TEXT[review.status]||UNKNOWN)));}
+  ts.forEach(function(t){box.append(renderTask(t,d))});w.append(hd,meter(accepted,ts.length,tr('Задачи волны выполнены')),meta,box);wv.append(w)});
+ journalNotice(d);
  var rb=$('remaining');rb.replaceChildren();var any=false;
  REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;
   var group=h('div','rem-group');group.append(h('span',null,tr(k[1])));items.forEach(function(value){var it=remainingItem(value,k[0],reqs,tasks),row=h('div','rem');
@@ -745,11 +842,25 @@ function render(d){
  var db=$('decisions');db.replaceChildren();
  if(!d.decisions.length)db.append(h('div','sub',tr('Самостоятельные решения пока не записаны.')));
  d.decisions.forEach(function(x,i){var r=h('div','dec');r.append(h('span','mono',pad(i+1)),h('b',null,typeof x==='string'?x:x.text||tr('Описание не указано')));db.append(r)});
- tick();
+ if(d===last)tick();
 }
-function valid(d){return d&&typeof d.status==='string'&&Array.isArray(d.requirements)&&Array.isArray(d.tasks)&&Array.isArray(d.decisions)&&
- d.requirements.every(function(r){return r&&typeof r.id==='string'&&typeof r.text==='string'})&&
- d.tasks.every(function(t){return t&&typeof t.id==='string'&&Array.isArray(t.requirements)});}
+function object(x){return x!==null&&typeof x==='object'&&!Array.isArray(x)}
+function strings(x){return Array.isArray(x)&&x.every(function(v){return typeof v==='string'})}
+function optionalObject(x){return x==null||object(x)}
+function goodProgress(x){return optionalObject(x)&&(x==null||typeof x.status==='string'&&Number.isFinite(x.completed)&&Number.isFinite(x.total)&&x.completed>=0&&x.total>=x.completed&&optionalObject(x.acceptance))}
+function goodRequirement(r){return object(r)&&typeof r.id==='string'&&typeof r.text==='string'&&goodProgress(r.progress)}
+function valid(d){return object(d)&&typeof d.status==='string'&&Array.isArray(d.requirements)&&d.requirements.every(goodRequirement)&&
+ Array.isArray(d.tasks)&&d.tasks.every(function(t){return object(t)&&typeof t.id==='string'&&strings(t.requirements)&&
+  (t.title===undefined||typeof t.title==='string')&&(t.criteria===undefined||strings(t.criteria))&&optionalObject(t.assignment)&&optionalObject(t.phaseTiming)&&
+  (t.phaseSteps===undefined||Array.isArray(t.phaseSteps)&&t.phaseSteps.every(function(p){return object(p)&&typeof p.id==='string'&&typeof p.status==='string'}))&&
+  (t.requirementsDetails===undefined||Array.isArray(t.requirementsDetails)&&t.requirementsDetails.every(goodRequirement))&&
+  (t.criteriaDetails===undefined||Array.isArray(t.criteriaDetails)&&t.criteriaDetails.every(function(c){return object(c)&&typeof c.text==='string'&&typeof c.status==='string'}));})&&
+ Array.isArray(d.decisions)&&d.decisions.every(function(x){return typeof x==='string'||object(x)&&typeof x.text==='string'})&&
+ optionalObject(d.gates)&&optionalObject(d.gateDetails)&&(!d.gateDetails||Object.values(d.gateDetails).every(function(g){return object(g)&&typeof g.status==='string'}))&&
+ optionalObject(d.currentWork)&&optionalObject(d.workProgress)&&optionalObject(d.autonomy)&&optionalObject(d.activity)&&optionalObject(d.estimate)&&optionalObject(d.remaining)&&
+ (!d.remaining||Object.values(d.remaining).every(function(rows){return !Array.isArray(rows)||rows.every(function(x){return typeof x==='string'||object(x)})}))&&
+ (d.waveDetails===undefined||Array.isArray(d.waveDetails)&&d.waveDetails.every(function(w){return object(w)&&optionalObject(w.review)}));}
+
 function archiveDate(value){
  if(typeof value!=='string')return null;
  var m=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$/.exec(value);
@@ -803,7 +914,8 @@ async function refresh(){
  if(demoMode){source='demo';last=makeDemo(previewStatus);receivedAt=performance.now();renderSource();render(last);return;}
  if(inFlight)return;inFlight=true;var controller=new AbortController(),timer=setTimeout(function(){controller.abort()},10000);
  try{var response=await fetch('status.json',{cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error('HTTP '+response.status);
-  var d=await response.json();if(!valid(d))throw new Error('shape');last=d;source='live';receivedAt=performance.now();renderSource();render(d);
+  var d=await response.json();if(!valid(d))throw new Error('shape');
+  if(last&&d.run&&last.run!==d.run)taskExpanded={};source='live';render(d);last=d;receivedAt=performance.now();renderSource();tick();
  }catch(error){source=last?'offline':'none';renderSource();if(last)render(last);else renderEmpty();}
  finally{clearTimeout(timer);inFlight=false;}
 }
@@ -812,7 +924,7 @@ function demoSteps(states){return Object.keys(PHASE_LABEL).map(function(id,i){re
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.2.0',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.3.2',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[

@@ -8,7 +8,7 @@ import copy
 import json
 import uuid
 
-from . import timing, repairs, participants, integration, test_intent, review_policy, task_tiers, check_modes
+from . import autonomy, timing, repairs, participants, integration, test_intent, review_policy, task_tiers, check_modes
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -555,6 +555,7 @@ class TaskPipeline:
         if deferred or "deferredDependencies" in attempt:
             attempt["deferredDependencies"] = deferred
         context = {"schema": 1, "project": self.s["title"], "run": self.s["run"], "task": tid,
+                   **({"autonomy": autonomy.view(self.s)} if autonomy.enabled(self.s) else {}),
                    "reviewPolicy": review_policy.mode(attempt),
                    **{key: attempt[key] for key in task_tiers.FIELDS if key in attempt},
                    "attempt": attempt["id"], "contract": attempt["contract"], "title": task["title"],

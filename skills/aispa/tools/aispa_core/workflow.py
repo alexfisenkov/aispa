@@ -11,7 +11,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
                         validate_plan, verified, task_basis, task_verified, task_closure)
 from .store import Invalid, timestamp
 from . import timing, phase_receipts, execution_obligations
-from . import project_documents
+from . import autonomy, project_documents
 from .team import TaskPipeline, task_proof_valid
 from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
 
@@ -130,7 +130,10 @@ class Workflow:
         self.s["core"] = sorted(core)
         self.s["sealed"] = True
         self.s["stage"] = "spec"
-        self.save("brief-sealed")
+        at = timestamp()
+        first_closure = autonomy.close_briefing(self.s, at)
+        self.save("brief-sealed", at)
+        return first_closure
 
     def spec(self, path):
         self.running()
@@ -328,6 +331,7 @@ class Workflow:
     def wait(self, note):
         self.running()
         require(not self.s.get("sealed") and not self.s.get("tasks"), "Вопросы допустимы только при подготовке брифа")
+        autonomy.require_questions_allowed(self.s)
         require(note.strip() and not SECRET.search(note), "Нужно безопасное описание ожидаемого ответа")
         at = timestamp()
         timing.stop(self.s, at)
