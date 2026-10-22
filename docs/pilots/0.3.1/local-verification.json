@@ -1,0 +1,66 @@
+{
+  "version": "0.3.1",
+  "environment": "macOS / Python3.14 / Node",
+  "python": {
+    "tests": 139,
+    "exitCode": 0,
+    "result": "PASS",
+    "seconds": 99.148,
+    "modules": [
+      "test_dashboard_host",
+      "test_dashboard_server",
+      "test_cli_output",
+      "test_lean_control.BatchCliTests",
+      "test_runtime_evidence",
+      "test_store",
+      "test_project_documents_cli",
+      "test_work_progress",
+      "test_dashboard_activity",
+      "test_phase_progress",
+      "test_dashboard_liveness",
+      "test_timing",
+      "test_workflow"
+    ]
+  },
+  "javascript": {
+    "tests": 53,
+    "exitCode": 0,
+    "result": "PASS"
+  },
+  "ui": {
+    "surface": "Codex embedded browser",
+    "nativeTool": "CUA",
+    "visible": true,
+    "data": "synthetic library fixtures; no model workers",
+    "policy": "legacy task fixture with task acceptor; current lean policy covered by regression tests",
+    "observed": [
+      "assignment without invented start",
+      "implementation with elapsed clocks",
+      "first critic",
+      "repair after non-PASS",
+      "second critic after repair",
+      "task acceptor",
+      "reported project progress",
+      "actual clean-verify command and ticking timer"
+    ],
+    "readBacks": {
+      "visible-dashboard.png": "2e4b7120a8e101aa175f79fc3d58319dd1aca1b4a506f1817507da8d14f36ff2",
+      "second-critic-task.txt": "ecdb8005522d9821372396b3f7851b28b01597409d79f7b77714b33cd4c450f3",
+      "visible-dashboard.txt": "2dd6c72d5b2dcb84f61b663058a6ff2e871c3e6312912376a8a2f47840525530",
+      "repair-task.txt": "f6c0f9d9ab7b28f6f2939ceb31b35dd6300ce2b0a1285dc2e416114afa5aef5d",
+      "assigned-task.txt": "2510004b0c9f515678e59a4c47264f6dd6857220592a51312a95f8111032c8f3",
+      "clean-clone-live.png": "6c611d10c828c986421ee406d8acb0ddb4e2359e070b7e7ba1e0a349eeff7e8e",
+      "project-progress.txt": "35e01b38cef6d6577012eb90e96520fe8bdc3ce6d407a7267cdb6ba141b4a369",
+      "acceptor-task.txt": "bf5c3acfa4053965285f3ee9572d2ee4861c0c9c44f773c5e6b03f1f7e97c637",
+      "implementation-task.txt": "e39c4a97132120022fc2773ec954d1500a2b7c70c270b055d792dca13bd7a43c",
+      "critic-task.txt": "446732e47f4d224a88a952b90b2073f824b6f008040dce2d9133f372ba373b19",
+      "clean-clone-live.txt": "ddad1092181708e16dfb6a971b4020b413316f6d0f08be952f5ce3863df530d5"
+    }
+  },
+  "fullModelRuns": 0,
+  "notVerified": [
+    "other clients embedded UI",
+    "Windows native UI",
+    "model compliance with every instruction"
+  ]
+}

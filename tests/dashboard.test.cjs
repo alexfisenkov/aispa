@@ -472,3 +472,51 @@ test('missing estimate data explains when it will appear',async()=>{
  const d=sample();d.estimate={reason:'insufficient_data',sampleCount:1};
  const one=await fixture('',d);assert.match(one.text('etaNote'),/после второй/);
 });
+
+test('assigned pending worker is visible without claiming implementation or inventing a clock',async()=>{
+ const d=sample();d.tasks[0].status='pending';d.tasks[0].elapsedSeconds=null;delete d.tasks[0].activeSince;
+ d.tasks[0].assignment={role:'worker',roleLabel:'Исполнитель',runtime:'codex',model:'fixture-model',assignedAt:d.observedAt,status:'assigned'};
+ const f=await fixture('',d);assert.match(f.text('waves'),/Исполнитель назначен/);
+ assert.match(f.text('waves'),/Назначен: Исполнитель · codex · fixture-model/);
+ assert.equal(f.text('time-T01'),'Старт реализации не отмечен');
+ f.advance(5000);assert.equal(f.text('time-T01'),'Старт реализации не отмечен');
+ d.tasks[0].status='running';d.tasks[0].elapsedSeconds=0;d.tasks[0].activeSince=d.observedAt;
+ d.tasks[0].phaseLabel='Реализация';d.tasks[0].phaseTiming={phase:'implementation',elapsedSeconds:0,activeSince:d.observedAt};
+ await f.update(d);f.advance(3000);assert.equal(f.text('time-T01'),'3 с');
+ assert.equal(f.text('phase-time-T01'),'3 с');assert.match(f.text('waves'),/Реализация/);
+});
+
+test('clean-clone verification remains visible and timed with no running tasks',async()=>{
+ const d=sample();d.tasks=[];d.activity={kind:'clean-verification',startedAt:'2026-10-19T11:59:50Z'};
+ const f=await fixture('',d);assert.match(f.text('currentActivity'),/Проверка в чистом клоне/);
+ assert.equal(f.text('verification-time'),'10 с');f.advance(2000);assert.equal(f.text('verification-time'),'12 с');
+ await f.fail();f.advance(10000);assert.doesNotMatch(f.text('currentActivity'),/Проверка в чистом клоне/);
+ const en=await fixture('',d);en.el('language').change('en');assert.match(en.text('currentActivity'),/Verification in a clean clone/);
+});
+
+test('unknown activity cannot hide current preparation and invalid timestamps cannot invent a clock',async()=>{
+ const d=sample();d.tasks=[];d.displayStage='spec';d.activity={kind:'future-kind'};
+ const f=await fixture('',d);assert.match(f.text('currentActivity'),/Спецификация/);
+ d.activity={kind:'clean-verification',startedAt:'invalid'};await f.update(d);
+ assert.equal(f.text('verification-time'),'Время не записано');
+});
+
+test('reported preparation interval runs only from explicit progress and stops on end or pause',async()=>{
+ const d=sample();d.tasks=[];d.workProgress={phase:'discovery',label:'Изучение проекта',startedAt:d.observedAt,activeSince:d.observedAt,elapsedSeconds:10};
+ const f=await fixture('',d);assert.match(f.text('currentActivity'),/Изучение проекта/);
+ assert.match(f.text('currentActivity'),/Начало этапа отмечено агентом/);
+ f.advance(2000);assert.equal(f.text('work-progress-time'),'12 с');
+ d.status='paused';d.workProgress.elapsedSeconds=12;delete d.workProgress.activeSince;await f.update(d);
+ assert.equal(f.text('work-progress-time'),'12 с');f.advance(4000);assert.equal(f.text('work-progress-time'),'12 с');assert.match(f.text('currentActivity'),/Пауза/);
+ d.status='running';d.workProgress.activeSince=d.observedAt;await f.update(d);f.advance(1000);
+ assert.equal(f.text('work-progress-time'),'13 с');
+ d.workProgress.finishedAt=d.observedAt;delete d.workProgress.activeSince;await f.update(d);
+ assert.equal(f.el('work-progress-time'),null);
+});
+
+test('reported work and task assignment stay text-only for untrusted labels',async()=>{
+ const d=sample();d.workProgress={phase:'discovery',label:'<img src=x onerror=bad()>',elapsedSeconds:0,activeSince:d.observedAt};
+ d.tasks[0].assignment={roleLabel:'<script>bad()</script>',runtime:'codex',model:'<b>model</b>'};
+ const f=await fixture('',d);assert.match(f.text('currentActivity'),/<img src=x onerror=bad\(\)>/);
+ assert.match(f.text('waves'),/<script>bad\(\)<\/script>/);
+});

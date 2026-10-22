@@ -43,7 +43,7 @@ class FeedTests(unittest.TestCase):
             work = feed.current_work(state, "brief", rows(event, "native-usage-recorded"))
             self.assertEqual(work["title"], title)
             self.assertEqual(work["lastAction"], feed.EVENT_LABELS[event])
-            self.assertEqual(work["lastActionAt"], "2026-10-22T13:01:00+00:00")
+            self.assertEqual(work["lastActionAt"], "2026-10-22T13:00:00+00:00")
             self.assertIsNone(work["note"])
 
     def test_brief_with_saved_plan_explains_pending_tasks(self):

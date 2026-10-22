@@ -1,10 +1,12 @@
 """Read-only projection. A view never decides whether a requirement is accepted."""
-from .contracts import basis, gate_valid, task_basis, verified
+from datetime import datetime
+
+from .contracts import basis, gate_valid, task_basis, task_contract, verified
 from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
-from .team import _record_valid, task_proof_valid
-from . import display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers
+from .team import _record_valid, _actor_valid, _role_data, task_proof_valid
+from . import display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers, work_progress
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи",
@@ -22,6 +24,59 @@ def _record_intact(store, record):
         return isinstance(record, dict) and _record_valid(store, record)
     except (Invalid, KeyError, OSError, TypeError, ValueError):
         return False
+
+
+PHASE_ROLES = {"implementation": "worker", "critic_1": "critic1", "repair": "worker",
+               "critic_2": "critic2", "task_acceptance": "acceptor"}
+
+
+def _public_actor_text(value):
+    return value if isinstance(value, str) and value and len(value) <= 160 and not any(ord(c) < 32 for c in value) else None
+
+
+def _assignment(store, state, task, phase_stale):
+    """Current-role assignment, not proof that a model is executing right now."""
+    if task.get("status") == "completed":
+        return None
+    role = PHASE_ROLES.get(task.get("phase") or "implementation")
+    if role is None:
+        return None
+    try:
+        attempt = (state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]
+        if not _actor_valid(store, state, attempt, role):
+            return None
+        _role_data(store, attempt, role)
+        if attempt.get("contract") != task_contract(state, task["id"]):
+            return None
+        actor = state["actors"][attempt["actors"][role]]
+        if actor.get("task") != task["id"]:
+            return None
+        assigned_at = actor.get("at")
+        try:
+            datetime.fromisoformat(assigned_at)
+        except (TypeError, ValueError):
+            assigned_at = None
+        waiting = state.get("waiting")
+        if phase_stale:
+            status = "stale"
+        elif task.get("status") == "blocked" or state.get("status") == "blocked":
+            status = "blocked"
+        elif state.get("status") == "paused" or isinstance(waiting, dict) and waiting.get("kind") == "owner_question":
+            status = "paused"
+        elif state.get("status") != "running" or attempt.get("terminal"):
+            status = "inactive"
+        elif task.get("status") == "pending":
+            status = "assigned"
+        elif task.get("status") == "running":
+            status = "running"
+        else:
+            status = "inactive"
+        return {"role": role, "roleLabel": display_feed.ROLE_LABELS[role],
+                "runtime": _public_actor_text(actor.get("runtime")), "model": _public_actor_text(actor.get("model")),
+                "assignedAt": assigned_at, "status": status}
+    except (Invalid, KeyError, OSError, TypeError, ValueError, AttributeError):
+        # Legacy records and malformed/missing actor proofs never gain a live badge.
+        return None
 
 
 def _phase_steps(store, state, task, proof_current):
@@ -142,6 +197,7 @@ def project(store, state):
                           phaseLabel=PHASES.get(task.get("phase"), "Реализация"),
                           phaseTiming=None if phase_stale else phase_view(task, observed),
                           phaseSteps=steps, phaseStale=phase_stale,
+                          assignment=_assignment(store, state, task, phase_stale),
                           proofCurrent=current.get(task["id"], False),
                           maximumCriticRounds=0 if light else 2,
                           reviewPolicy=review_policy.mode((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]),
@@ -164,6 +220,7 @@ def project(store, state):
             "estimate": estimate(estimate_tasks, status, observed), "activity": state.get("activity"),
             "waiting": state.get("waiting"), "events": display_feed.events(feed),
             "currentWork": display_feed.current_work(state, stage_now, feed),
+            "workProgress": work_progress.view(state, observed),
             "runDirectory": "runs/" + state["run"]}
 
 

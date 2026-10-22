@@ -2,7 +2,10 @@
 
 Everything here is computed from the journal tail and state only; nothing is invented.
 """
+from .work_progress import LABELS as WORK_PHASE_LABELS
+
 EVENT_LABELS = {
+    "work-progress-began": "Начат этап работы", "work-progress-ended": "Завершён интервал работы",
     "init": "Начало прогона", "runtime-pinned": "Среда выполнения зафиксирована",
     "brief-added": "Бриф сохранён", "brief-sealed": "Бриф зафиксирован",
     "brief-extract-recorded": "Записана выжимка брифа", "brief-review-recorded": "Записана независимая сверка брифа",
@@ -14,7 +17,7 @@ EVENT_LABELS = {
     "interfaces-recorded": "Интерфейсы записаны", "coverage-reviewed": "Проверено покрытие требований",
     "plan-validated": "План проверен", "team-prepared": "Команда подготовлена",
     "team-specialized": "Роли команды уточнены", "task-cards-refreshed": "Карточки задач обновлены",
-    "participant-assigned": "Назначен участник", "actor-assigned": "Назначен исполнитель",
+    "participant-assigned": "Назначен участник", "actor-assigned": "Назначен участник задачи",
     "knowledge-writer-assigned": "Назначен хранитель знаний",
     "task-started": "Началась задача", "task-submitted": "Задача передана критикам",
     "task-critic-1": "Критик · круг 1", "task-critic-2": "Критик · круг 2",
@@ -33,6 +36,14 @@ EVENT_LABELS = {
     "clean-verification-recorded": "Результат проверки в чистой копии записан",
     "test-intent-recorded": "Записан замысел тестов", "blind-observations-recorded": "Записаны слепые наблюдения",
     "idea-reviewed": "Идея рассмотрена", "run-paused": "Работа приостановлена", "run-resumed": "Работа продолжена",
+    "run-blocked": "Работа заблокирована", "run-cancelled": "Прогон отменён",
+    "recovery-blocked": "Восстановление журнала требует исправления",
+    "project-document-bound": "Сопоставлен исходный документ проекта",
+    "inherited-obligation-keep": "Сохранено обязательство прошлого прогона",
+    "inherited-obligation-map": "Обязательство прошлого прогона связано с требованием",
+    "inherited-obligation-resolve": "Закрыто обязательство прошлого прогона",
+    "inherited-obligation-drop": "Обязательство прошлого прогона отменено по решению владельца",
+    "inherited-obligation-defer": "Обязательство прошлого прогона отложено по решению владельца",
     "recovery-reconciled": "Восстановление журнала проверено",
     "recovery-verification-executed": "Проверка восстановления выполнена",
     "project-context-initialized": "Контекст проекта создан", "project-context-adapted": "Контекст проекта обновлён",
@@ -44,8 +55,18 @@ EVENT_LABELS = {
 }
 # Frequent bookkeeping events: kept in the feed, but never counted as "what the agent is doing".
 NOISE = {"native-usage-recorded", "native-usage-imported", "execution-recorded", "verification-started",
-         "verification-executed", "participant-assigned", "actor-assigned", "document-metadata-registered",
+         "verification-executed", "document-metadata-registered",
          "document-metadata-refreshed"}
+ROLE_LABELS = {"worker": "Исполнитель", "critic1": "Критик · круг 1", "critic2": "Критик · круг 2",
+               "acceptor": "Приёмщик задачи", "coordinator": "Координатор", "idea": "Разбор идеи",
+               "source-reader": "Читатель источников", "brief-analyst": "Аналитик брифа",
+               "brief-reviewer": "Проверяющий бриф", "branch-reviewer": "Проверяющий всю ветку",
+               "integration-reviewer": "Проверяющий проект", "recovery-reviewer": "Проверяющий восстановление",
+               "discovery": "Исследователь проекта", "coverage": "Проверяющий покрытие брифа",
+               "planner": "Планировщик", "blind": "Итоговый независимый приёмщик",
+               "knowledge-writer": "Хранитель знаний"}
+DOCUMENT_ROLE_LABELS = {"interview": "Интервью", "intent": "Замысел проекта", "spec": "Спецификация",
+                        "plan": "План", "index": "Карта проекта"}
 FEED_ROWS = 16
 BRIEF_WORK = {
     "brief-added": "Разбор нового сообщения владельца",
@@ -74,6 +95,24 @@ def _target(target):
     return " · " + target if target and len(target) <= 32 and target.replace("-", "").isalnum() else ""
 
 
+def _event_text(row):
+    name, target = row["name"], row["target"]
+    if name == "actor-assigned":
+        task, _separator, role = target.partition(":")
+        label = "Назначение: " + ROLE_LABELS[role] if role in ("worker", "critic1", "critic2", "acceptor") else _label(name)
+        return label + _target(task)
+    if name == "participant-assigned":
+        return "Назначение: " + ROLE_LABELS[target] if target in ROLE_LABELS else _label(name)
+    if name in ("work-progress-began", "work-progress-ended"):
+        return _label(name) + (" · " + WORK_PHASE_LABELS[target] if target in WORK_PHASE_LABELS else "")
+    if name == "project-document-bound":
+        return _label(name) + (" · " + DOCUMENT_ROLE_LABELS[target] if target in DOCUMENT_ROLE_LABELS else "")
+    if name == "tasks-reset" and target:
+        targets = [item for item in target.split(",") if _target(item)]
+        return _label(name) + (" · " + ", ".join(targets[:8]) if targets else "") + (" …" if len(targets) > 8 else "")
+    return _label(name) + _target(target)
+
+
 def tail(store):
     return [{"name": row["event"].partition(":")[0], "target": row["event"].partition(":")[2], "at": row["at"]}
             for row in store.read_journal().get("eventTail", [])]
@@ -89,7 +128,7 @@ def events(rows):
             grouped[-1]["at"] = row["at"]
             continue
         grouped.append({"key": key, "type": row["name"], "at": row["at"], "count": 1,
-                        "text": _label(row["name"]) + _target(row["target"])})
+                        "text": _event_text(row)})
     result = []
     for item in grouped[-FEED_ROWS:]:
         text = item["text"] + (" ×%d" % item["count"] if item["count"] > 1 else "")
@@ -100,8 +139,7 @@ def events(rows):
 def current_work(state, stage, rows):
     """What the agent is doing now, derived from the stage and the last meaningful event."""
     significant = [row for row in rows if row["name"] not in NOISE]
-    last_any = rows[-1] if rows else None
-    last = significant[-1] if significant else last_any
+    last = significant[-1] if significant else None
     title, note = None, None
     pending_tasks = [t for t in state["tasks"] if t["status"] != "completed"]
     if stage in ("brief", "requirements"):
@@ -117,8 +155,8 @@ def current_work(state, stage, rows):
         if not pending_tasks and state["tasks"]:
             title = "Задачи реализованы; подготовка итоговой проверки"
     return {"title": title, "note": note,
-            "lastActionAt": last_any["at"] if last_any else None,
-            "lastAction": _label(last["name"]) if last else None}
+            "lastActionAt": last["at"] if last else None,
+            "lastAction": _event_text(last) if last else None}
 
 
 def _outcome(attempt):

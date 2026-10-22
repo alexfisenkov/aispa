@@ -1,0 +1,135 @@
+Browser tab: 11, Title: "AISpa — состояние", URL: "http://127.0.0.1:59794/dashboard.html".
+1 AXWebArea AISpa — состояние, URL: 127.0.0.1:59794/dashboard.html
+	2 container
+		3 link Description: AI мастерская AISpa — Telegram-канал, новая вкладка, Value: t.me/masterskaya_video
+		132 text 0.3.1
+		133 text Живые данные · локальный сервер
+		6 container
+			7 text Язык
+			8 pop up button (collapsed, settable) Description: Язык, Value: RU, ID: language, Secondary Actions: Expand
+				9 menu
+					10 (selected) RU
+					11 EN
+		12 container
+			13 text Тема
+			14 pop up button (collapsed, settable) Description: Тема, Value: Система, ID: theme, Secondary Actions: Expand
+				15 menu
+					16 (selected) Value: Система, ID: themeSystem
+					17 Value: Светлая, ID: themeLight
+					18 Value: Тёмная, ID: themeDark
+		19 button Обновить →, ID: refresh
+			20 text Обновить
+			21 text →
+		22 container
+			134 text AISPA · ПРОВЕРКА ЭТАПОВ (СИНТЕТИЧЕСКАЯ)
+			135 text В работе
+			136 text В работе
+			137 text Агент выполняет задачи. Промежуточный результат не является приёмкой.
+			27 text Последняя запись агента
+			138 text 22.10.2026, 22:01
+			29 text Актуальность проверена
+			139 text 22.10.2026, 22:01
+			31 text Текущий этап
+			140 text Задачи и волны
+			33 container checkModeBox
+				34 text Режим проверки
+				141 text Сбалансированно
+		36 heading ПРОВЕРКИ, Value: 2
+			37 text ПРОВЕРКИ
+		38 container gates
+			142 text ✓
+			143 text Покрытие
+			144 text Бриф отражён в спецификации ✓
+			145 text План
+			146 text Каждое требование есть в задачах !
+			147 text Приёмка
+			148 text Не подтверждено или устарело
+		46 text Изменение брифа, плана или кода делает связанные проверки устаревшими.
+		47 container Текущая работа и время
+			48 heading СЕЙЧАС ВЫПОЛНЯЕТСЯ, Value: 2
+				49 text СЕЙЧАС ВЫПОЛНЯЕТСЯ
+			50 container currentActivity
+				149 text Общий обзор версии
+				150 text Начало этапа отмечено агентом
+				151 text 7 с
+				152 text Последнее действие в журнале: только что · Начат этап работы · Общий обзор версии
+			54 text Время прогона · без отмеченных пауз
+			153 text 3 мин 11 с
+			56 text Примерно до завершения
+			154 text Осталась итоговая проверка
+			155 text Задачи реализованы; длительность приёмки пока неизвестна.
+		59 button (collapsed) История 16, Secondary Actions: Expand
+			60 heading История, Value: 2
+				61 text История
+			156 text 16
+		63 container Задачи по волнам
+			64 heading Задачи по волнам, Value: 2
+				65 text Задачи по волнам
+			157 text После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.
+			67 container waves
+				158 text 1
+				159 text Волна 1
+				160 text 1 из 1 задач принято T01
+				161 text Команда
+				162 text Требования: R01
+				163 content list Этапы задачи
+					164 container Реализация — завершено
+						165 text ✓ Реализация
+					166 container Критик · круг 1 — заблокирована
+						167 text ! Критик · круг 1
+					168 container Исправление — завершено
+						169 text ✓ Исправление
+					170 container Критик · круг 2 — завершено
+						171 text ✓ Критик · круг 2
+					172 container Приёмщик задачи — завершено
+						173 text ✓ Приёмщик задачи
+				174 text Тяжёлая задача · Стандартный маршрут проверки
+				175 text Задача принята Вся задача
+				176 text 2 мин 27 с
+				177 text Интервал этапа: Приёмщик задачи
+				178 text 17 с
+		89 heading Этап, Value: 2
+			90 text Этап
+		179 text Шаг 6 из 7 · Задачи и волны
+		92 container stages
+			180 text 01
+			181 text Бриф
+			182 text 02
+			183 text Требования и ядро
+			184 text 03
+			185 text Спецификация
+			186 text 04
+			187 text Сверка покрытия
+			188 text 05
+			189 text План
+			190 text 06
+			191 text Задачи и волны
+			192 text 07
+			193 text Приёмка
+		107 heading Требования, Value: 2
+			108 text Требования
+		109 text «Реализовано по задачам» ещё не означает, что требование принято.
+		110 container tabs
+			111 checkbox Все 1, Value: 1
+			112 checkbox Ядро 1, Value: 0
+			113 checkbox Добавления 0, Value: 0
+			114 checkbox Не завершено 0, Value: 0
+		115 container requirements
+			194 text R01
+			195 text Команда готовности
+			196 text Исходный заказ · ядро
+			197 text Реализовано по задачам
+		120 text обязательное ядро Отмена и перенос — только по записанному решению владельца.
+		121 heading Остатки, Value: 2
+			122 text Остатки
+		123 text Остаются обязательствами и сохраняются в учёте.
+		198 text Итоги ещё не подведены.
+		125 container
+			126 heading Решения агента, Value: 2
+				127 text Решения агента
+			128 text Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.
+			199 text Самостоятельные решения пока не записаны.
+		130 text Экран только отображает результат. Право назвать работу готовой определяет движок.
+		131 text Состояние обновляется каждые 5 с · таймеры каждую секунду
+
+The focused UI element is 19 button Обновить →, ID: refresh

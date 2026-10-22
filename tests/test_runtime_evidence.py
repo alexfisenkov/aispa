@@ -116,6 +116,32 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.assertEqual((self.store.run / "events.jsonl").read_bytes(), terminal)
         self.assertEqual(self.store.create("new", "New adapter run")["version"], VERSION)
 
+    def test_030_active_run_requires_pinned_runtime_and_terminal_can_start_031(self):
+        with patch("aispa_core.store.VERSION", "0.3.0"):
+            state = self.store.create("old-dashboard", "Pinned dashboard fixture")
+            self.assertEqual(self.store.load()["version"], "0.3.0")
+        old_run = self.store.run
+        before = (old_run / "events.jsonl").read_bytes()
+        for handoff in (False, True):
+            with self.subTest(active_handoff=handoff), self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+                self.store.load(handoff_only=handoff)
+        self.assertEqual((old_run / "events.jsonl").read_bytes(), before)
+        # Only the old engine may stop its active journal; this fixture models
+        # that version identity without installing or running another model.
+        with patch("aispa_core.store.VERSION", "0.3.0"):
+            state = self.store.load()
+            state["status"] = "cancelled"
+            self.store.append(state, "synthetic-pinned-030-stop")
+        terminal = (old_run / "events.jsonl").read_bytes()
+        with self.assertRaisesRegex(Invalid, "закреплённым runtime"):
+            self.store.load()
+        self.assertEqual(self.store.load(handoff_only=True)["version"], "0.3.0")
+        self.assertEqual((old_run / "events.jsonl").read_bytes(), terminal)
+        current = self.store.create("new-dashboard", "Current dashboard contract")
+        self.assertEqual(current["version"], VERSION)
+        self.assertNotEqual(current["run"], state["run"])
+        self.assertEqual((old_run / "events.jsonl").read_bytes(), terminal)
+
 
 if __name__ == "__main__":
     unittest.main()
