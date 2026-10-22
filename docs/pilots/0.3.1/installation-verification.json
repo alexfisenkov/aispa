@@ -1,0 +1,39 @@
+{
+  "version": "0.3.1",
+  "source": "Published Release assets, prepare/apply with retained backups",
+  "installations": [
+    {
+      "installation": "shared",
+      "version": "0.3.1",
+      "filesMatched": 86,
+      "shaSizeModeMatched": true,
+      "backupVerified": true,
+      "updateCheck": "current"
+    },
+    {
+      "installation": "claude",
+      "version": "0.3.1",
+      "filesMatched": 86,
+      "shaSizeModeMatched": true,
+      "backupVerified": true,
+      "updateCheck": "current"
+    },
+    {
+      "installation": "cursor",
+      "version": "0.3.1",
+      "filesMatched": 86,
+      "shaSizeModeMatched": true,
+      "backupVerified": true,
+      "updateCheck": "current"
+    },
+    {
+      "installation": "antigravity",
+      "version": "0.3.1",
+      "filesMatched": 86,
+      "shaSizeModeMatched": true,
+      "backupVerified": true,
+      "updateCheck": "current"
+    }
+  ],
+  "pinnedActiveRunsUnchanged": true
+}
