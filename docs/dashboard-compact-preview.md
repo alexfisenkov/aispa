@@ -62,7 +62,14 @@ python3 -B tools/preview_dashboard_compare.py --before 68225daa2dd2a0619562d0bf8
 Независимый review: технические и визуальные замечания исправлены и
 перепроверены. Последнее замечание к свежести Python-квитанции закрыто
 финальным адресным запуском после правок; [вердикты](previews/dashboard-compact/review.json).
-Финальный CI ещё ожидается. Владелец дизайн ещё не утвердил.
+[Финальный CI](https://github.com/alexfisenkov/aispa/actions/runs/39839191200)
+прошёл: шесть jobs — macOS/Linux/Windows × Python 3.11/3.13.
+Точный проверенный commit: `48082c663f52ecb899759bb653ef12499d6ec107`.
+Последующая запись результатов меняет только документацию и снимки.
+[Черновик PR №9](https://github.com/alexfisenkov/aispa/pull/9) оставлен открытым;
+владелец дизайн ещё не утвердил.
+
+![Было и стало рядом](previews/dashboard-compact/comparison-final.jpg)
 Команды: `node --test tests/dashboard.test.cjs` и
 `PYTHONPATH=tests python3 -B -m unittest test_dashboard_compare test_label_release_compat -v`.
 Финальный адресный CI scope — `dashboard-preview`; полных модельных прогонов нет.

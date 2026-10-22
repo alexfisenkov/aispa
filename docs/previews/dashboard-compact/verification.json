@@ -42,7 +42,8 @@
       "after-desktop-final.jpg": "1a7742e4a0d741a8a612d6bf05a62c2d50db969b1f02f79b7dc2a38d57e7cc41",
       "after-mobile-final.jpg": "7d6ad6cb2309537cee01831e4319fca5bbc04167756c414c6f24f2d4e017bbb2",
       "after-mobile-expanded-final.jpg": "037e97a2742f6f318753575b2f46e051ca6a1725cd5104c274350fedb11d8ab3",
-      "after-dark-en-final.jpg": "6ea6195eaa7dd771113f08cf80ab70b66c833683766e9a72b28a1de2215a7181"
+      "after-dark-en-final.jpg": "6ea6195eaa7dd771113f08cf80ab70b66c833683766e9a72b28a1de2215a7181",
+      "comparison-final.jpg": "b0d9e0606e0823f650f79c096819b89245efe5a66abee27cc3ace537ea8e9240"
     },
     "mobile": {
       "clientWidth": 390,
@@ -84,7 +85,43 @@
       }
     ]
   },
-  "ci": "pending",
+  "ci": {
+    "headSha": "48082c663f52ecb899759bb653ef12499d6ec107",
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "python (windows-latest, 3.11)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417357"
+      },
+      {
+        "name": "python (macos-latest, 3.13)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417585"
+      },
+      {
+        "name": "python (macos-latest, 3.11)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417727"
+      },
+      {
+        "name": "python (windows-latest, 3.13)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417755"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.13)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417792"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.11)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417943"
+      }
+    ]
+  },
   "fullModelProjectRuns": 0,
   "released": false,
   "mergedToMain": false,
