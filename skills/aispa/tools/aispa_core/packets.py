@@ -48,31 +48,44 @@ def routing(state, task, role, attempt=None, store=None):
     strong = (role != "worker" or task.get("risk", "normal") != "low" or foundation
               or bool((attempt or {}).get("authorization")) or inherited_retry
               or bool((attempt or {}).get("repairPlan")))
-    light = task_tiers.is_light(attempt if attempt is not None else task)
-    if light:
-        require(role == "worker", "У light нет роли критика или приёмщика")
-        return {"tier": "standard", "advisory": True, "taskTier": "light",
-                "tierReason": (attempt or task).get("tierReason"),
+    subject = attempt if attempt is not None else task
+    if task_tiers.worker_only(subject):
+        light = task_tiers.is_light(subject)
+        require(role == "worker", "У light и standard нет роли критика или приёмщика")
+        return {"tier": "strong" if strong and not light else "standard", "advisory": True, "taskTier": subject["tier"],
+                "tierReason": subject.get("tierReason"),
                 "selection": "Use only host-exposed models permitted by project rules",
-                "reason": "Explicit bounded low-risk change; semantic safety still requires final review",
+                "reason": ("Explicit bounded low-risk change; semantic safety still requires final review" if light else
+                           "Ordinary non-foundation code; the whole-version review replaces a per-task critic"),
                 "reviewPolicy": "verified_completion", "criticRounds": 0,
                 "minimumCriticRounds": 0, "maximumCriticRounds": 0, "actualCriticRounds": 0,
                 "taskRoleSlots": {"minimum": 1, "maximum": 1},
-                "perTaskReview": "skipped_light", "projectReviewSeparate": True,
+                "perTaskReview": "skipped_light" if light else "skipped_standard", "projectReviewSeparate": True,
                 "reviewRule": "Current verification and worker evidence complete implementation; independent project review and final acceptance remain mandatory."}
     policy = review_policy.mode(attempt) if attempt is not None else review_policy.selected(state)
+    conditional = policy in (review_policy.ADAPTIVE, review_policy.LEAN)
+    slots = {review_policy.LEAN: {"minimum": 2, "maximum": 3}, review_policy.ADAPTIVE: {"minimum": 3, "maximum": 4}}
+    rules = {review_policy.LEAN: "First PASS completes the task: the critic also checks closure criteria, constraints and the trace to the owner's words. WARN/BLOCK/FAIL requires repair and one fresh critic2 whose PASS completes the task. No third round, no separate task acceptor.",
+             review_policy.ADAPTIVE: "First PASS goes to a separate acceptor; WARN/BLOCK/FAIL requires repair and one fresh critic2. No third round."}
     return {"tier": "strong" if strong else "standard", "advisory": True,
             "reason": "Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation",
             "selection": "Use only models exposed by the host and permitted by project rules; otherwise keep the current model",
             "report": "Save the full structured report to a file; return its path and at most 25 lines of conclusions",
             "reviewPolicy": policy,
-            "criticRounds": None if policy == review_policy.ADAPTIVE else 2,
-            "minimumCriticRounds": 1 if policy == review_policy.ADAPTIVE else 2,
+            "criticRounds": None if conditional else 2,
+            "minimumCriticRounds": 1 if conditional else 2,
             "maximumCriticRounds": 2,
             "actualCriticRounds": len(attempt.get("rounds", [])) if attempt is not None else None,
-            "taskRoleSlots": {"minimum": 3, "maximum": 4} if policy == review_policy.ADAPTIVE else {"minimum": 4, "maximum": 4},
+            "taskRoleSlots": slots.get(policy, {"minimum": 4, "maximum": 4}),
             "roleSlotNote": "Base role slots for one attempt, not a native-start cap. Excludes preparation, actor replacements and newly authorized attempts; actual cost requires native usage.",
-            "reviewRule": "First PASS goes to a separate acceptor; WARN/BLOCK/FAIL requires repair and one fresh critic2. No third round." if policy == review_policy.ADAPTIVE else "Two independent critics, then a separate acceptor."}
+            "reviewRule": rules.get(policy, "Two independent critics, then a separate acceptor.")}
+
+
+LEAN_CRITIC_READING = ("Lean critic: first read the role card, every file in zoneChanges in full (for the final task "
+    "zoneChangesScope is branch: the whole diff, including standard tasks that no critic has read), the test intent, "
+    "expectedChecks and the exact owner quotes in traceRequirements. Fields listed in onDemand are reference "
+    "material: open them for a specific check or suspected drift, not wholesale. Every expectedCheck and every "
+    "trace row stays mandatory; metadata never replaces evidence.")
 
 
 def _brief_packet(store, state):
@@ -197,8 +210,8 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                       reviewPolicy=review_policy.mode(current),
                       taskTier=current.get("tier", "heavy"), tierReason=current.get("tierReason", ""),
                       verifiedCompletion=current.get("verifiedCompletion"),
-                      maximumCriticRounds=0 if task_tiers.is_light(current) else 2, actualCriticRounds=len(current["rounds"]),
-                      perTaskReview="skipped_light" if task_tiers.is_light(current) else "required",
+                      maximumCriticRounds=0 if task_tiers.worker_only(current) else 2, actualCriticRounds=len(current["rounds"]),
+                      perTaskReview=("skipped_" + current["tier"]) if task_tiers.worker_only(current) else "required",
                       testIntent=current.get("testIntent"),
                       testSourceChanges=test_intent.source_changes(store, state, task_id),
                       repairPlan=current.get("repairPlan"),
@@ -210,6 +223,19 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                       inheritedProofs=pipeline.inherited_proofs(task_id),
                       neighbors=[{"id": t["id"], "zones": t["zones"], "status": t["status"]}
                                  for t in state["tasks"] if t["id"] != task_id])
+        if role and role.startswith("critic") and review_policy.lean(current):
+            from . import integration
+            # Read what changed first; the rest stays addressable for a finding.
+            final = task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview")
+            # The final critic is the only independent reader of standard code:
+            # every changed file of the branch is mandatory reading for it.
+            packet["zoneChanges"] = (integration.context(store, state, task_id)["changes"] if final
+                                     else integration.zone_changes(store, state, task["zones"]))
+            packet["zoneChangesScope"] = "branch" if final else "task"
+            packet["onDemand"] = [key for key in ("briefs", "spec", "discovery", "deliveryPlan", "briefMap",
+                                                  "featureScenarios", "interfaceContract", "knowledgeHints",
+                                                  "projectContext", "carryover") if key in packet]
+            packet["documentReadingRule"] = LEAN_CRITIC_READING
         if role:
             packet["routing"] = routing(state, task, role, current, store)
             packet["expectedChecks"] = [{"requirement": rid, "criterion": criterion}
@@ -226,7 +252,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         from . import integration
         packet["branchReview"] = integration.context(store, state, task_id)
         packet["branchReviewAxes"] = list(integration.AXES)
-        if task_tiers.is_light(state["taskHistory"][task_id][-1]):
+        if task_tiers.worker_only(state["taskHistory"][task_id][-1]):
             packet["projectReviewRole"] = "integration-reviewer"
             packet["projectReviewSeparate"] = True
     if kind == "task" and state.get("ownerReferences"):

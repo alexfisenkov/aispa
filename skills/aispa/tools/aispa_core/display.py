@@ -53,7 +53,7 @@ def _phase_steps(store, state, task, proof_current):
     """Show receipts from this attempt; the order alone never implies PASS."""
     attempt = (state.get("taskHistory", {}).get(task["id"]) or [None])[-1]
     phase = task.get("phase")
-    if attempt and task_tiers.is_light(attempt):
+    if attempt and task_tiers.worker_only(attempt):
         completed = attempt.get("verifiedCompletion")
         status = ("done" if proof_current else "stale") if completed else ("current" if task["status"] == "running" else "pending")
         if task["status"] == "blocked":
@@ -78,6 +78,10 @@ def _phase_steps(store, state, task, proof_current):
             result["repair"] = "skipped"
             if review_policy.adaptive(attempt) and not second:
                 result["critic_2"] = "skipped"
+        if review_policy.lean(attempt):
+            # The passing critic closes the task; no separate acceptor step exists.
+            result["task_acceptance"] = "skipped"
+            receipts["task_acceptance"] = None
         latest = acceptance or second or repair or first or submitted
         # A newer repair legitimately has a different basis from critic 1.
         # Compare only the latest candidate with today's code.
@@ -147,11 +151,12 @@ def project(store, state):
         steps = _phase_steps(store, state, task, current.get(task["id"], False))
         phase_stale = any(step["status"] == "stale" for step in steps)
         attempt = (state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]
-        light = task_tiers.is_light(attempt)
+        light = task_tiers.worker_only(attempt)
+        accepted = attempt.get("acceptance") or {}
         tasks.append(dict(task, tier=attempt.get("tier", "heavy"), tierReason=attempt.get("tierReason", ""),
                           plannedTier=task.get("tier", "heavy"),
-                          completionKind="verified_completion" if attempt.get("verifiedCompletion") else ("task_acceptance" if attempt.get("acceptance") else None),
-                          perTaskReview="skipped_light" if light else "required",
+                          completionKind="verified_completion" if attempt.get("verifiedCompletion") else (accepted.get("completionKind", "task_acceptance") if accepted else None),
+                          perTaskReview=("skipped_" + attempt["tier"]) if light else "required",
                           elapsedSeconds=elapsed(task, observed),
                           phaseLabel=PHASES.get(task.get("phase"), "Реализация"),
                           phaseTiming=None if phase_stale else phase_view(task, observed),

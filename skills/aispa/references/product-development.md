@@ -6,8 +6,9 @@
 Команды ниже передаются закреплённому `tools/aispa.py --root <проект>`.
 
 В alpha.10 до `seal` действует отдельная независимая карта полного исходного
-текста, а после spec — восемь сценариев каждой функции и контракт её
-интерфейсов. Этот маршрут описан в [фазе продукта](../phases/02-product.md),
+текста, а после spec — сценарии каждой функции (по глубине: strict — main, error;
+balanced — main, empty, error, persistence; deep и закреплённые прежние прогоны —
+все восемь) и контракт её интерфейсов. Этот маршрут описан в [фазе продукта](../phases/02-product.md),
 [фазе плана](../phases/03-plan.md) и [контрактах](contracts.md). Идея,
 сценарии и интерфейсы связаны источниками, но не подменяют друг друга.
 Новые policy применяются только к новым `init`, старые runtime не мигрируют.
@@ -235,12 +236,14 @@ requirements, zones и readZones — точные объединения исх�
 
 Новый план и запуск задач требуют актуального planReview. Ни переименование,
 ни объединение не сбрасывает использованные попытки и раунды критики.
-В adaptive поле `taskRoleStarts` равно null при диапазоне; при совпадении
+В lean и adaptive поле `taskRoleStarts` равно null при диапазоне; при совпадении
 минимума и максимума оно содержит точную плановую оценку, не реальный usage.
 `taskRoleSlots` содержит
-`minimum: light + 3 × heavy`, `maximum: light + 4 × heavy`; у plan review это
-`taskRoleSlotsBefore/After`. Общий обзор light-финала учитывается отдельно.
-Классификация — [task-tiers.md](task-tiers.md). У heavy первый PASS ведёт к отдельному acceptor,
+`minimum: (light + standard) + 2 × heavy`, `maximum: (light + standard) + 3 × heavy`
+в lean и `3 × heavy` / `4 × heavy` в adaptive; у plan review это
+`taskRoleSlotsBefore/After`. Общий обзор light- или standard-финала учитывается отдельно.
+Классификация — [task-tiers.md](task-tiers.md). У heavy lean первый PASS критика
+закрывает задачу (в закреплённом adaptive ведёт к отдельному acceptor),
 WARN/BLOCK/FAIL — к ремонту и свежему critic2. Предел — два раунда.
 Legacy сохраняет четыре ролевых места. Это оценка назначений, не фактическое
 число native-запусков или измерение токенов; замена исполнителя ремонта

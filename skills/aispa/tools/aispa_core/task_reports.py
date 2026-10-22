@@ -21,7 +21,7 @@ def template(pipeline, tid, role):
     require(role in ROLES, "Неизвестная роль шаблона")
     store, state = pipeline.store, pipeline.s
     _task, attempt = pipeline._live(tid, allow_blocked=role == "worker")
-    require(role in task_tiers.roles(attempt), "Лёгкой задаче доступен только отчёт исполнителя")
+    require(role in task_tiers.roles(attempt), "Роль не предусмотрена классом задачи и политикой проверки")
     require(_actor_valid(store, state, attempt, role),
             "Сначала назначьте actor с действующей карточкой для " + role)
     rounds = attempt["rounds"]
@@ -64,13 +64,13 @@ def template(pipeline, tid, role):
         final = acceptance_chain(store, state, tid, attempt)
         require(candidate == final["basis"], "После последнего критика изменён результат")
         report.update(previousReport=final["report"]["sha256"],
-                      inheritedProofs=pipeline.inherited_proofs(tid),
-                      trace=[{"requirement": req["id"], "brief": req["brief"], "quote": req["quote"],
-                              "result": "not_tested", "note": "", "artifact": ""}
-                             for req in pipeline.trace_requirements(tid)])
+                      inheritedProofs=pipeline.inherited_proofs(tid), trace=_trace(pipeline, tid))
     if role.startswith("critic"):
         # None is intentional: an empty list would pre-assess "no findings".
         report["findings"] = None
+        if review_policy.lean(attempt):
+            # The lean critic also closes the task: same trace as the former acceptor.
+            report.update(inheritedProofs=pipeline.inherited_proofs(tid), trace=_trace(pipeline, tid))
         if state.get("policy", {}).get("integrationReview") and tid == state.get("integrationTask"):
             branch = integration.context(store, state, tid)
             report["branchReview"] = {
@@ -80,6 +80,12 @@ def template(pipeline, tid, role):
                 "note": "", "evidence": "",
             }
     return report
+
+
+def _trace(pipeline, tid):
+    return [{"requirement": req["id"], "brief": req["brief"], "quote": req["quote"],
+             "result": "not_tested", "note": "", "artifact": ""}
+            for req in pipeline.trace_requirements(tid)]
 
 
 def _write_draft(store, report, kind):

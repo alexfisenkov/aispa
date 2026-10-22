@@ -321,7 +321,8 @@ def _open_reasons(store, state, req, tasks, journal, reports):
                 report_reasons(record["report"], task=task["id"], attempt=attempt["id"],
                                role="critic" + str(record.get("number", "")))
             accepted = attempt.get("acceptance")
-            if accepted:
+            # A lean acceptance reuses the critic report already read above.
+            if accepted and accepted.get("completionKind") != "critic_acceptance":
                 report_reasons(accepted["report"], task=task["id"], attempt=attempt["id"], role="acceptor")
     final = state.get("gates", {}).get("acceptance", {})
     if final.get("report"):

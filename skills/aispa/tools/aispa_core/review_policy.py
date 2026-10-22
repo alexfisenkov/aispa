@@ -3,22 +3,34 @@ from .contracts import require
 
 LEGACY = "two_rounds"
 ADAPTIVE = "adaptive"
+# The lean contract keeps the adaptive critic rounds; a passing critic then
+# closes the task itself, carrying the former acceptor's trace and closure.
+LEAN = "lean"
+POLICIES = (LEGACY, ADAPTIVE, LEAN)
 VERDICTS = ("PASS", "WARN", "BLOCK", "FAIL")
 
 
 def selected(state):
-    return ADAPTIVE if state.get("policy", {}).get("adaptiveCritique") is True else LEGACY
+    policy = state.get("policy", {})
+    if policy.get("adaptiveCritique") is not True:
+        return LEGACY
+    return LEAN if policy.get("leanControl") is True else ADAPTIVE
 
 
 def mode(attempt):
     # Historical attempts without this field retain the original contract.
     value = attempt.get("reviewPolicy", LEGACY)
-    require(value in (LEGACY, ADAPTIVE), "Неизвестная политика критики попытки")
+    require(value in POLICIES, "Неизвестная политика критики попытки")
     return value
 
 
 def adaptive(attempt):
-    return mode(attempt) == ADAPTIVE
+    """Conditional second round: true for both adaptive and lean attempts."""
+    return mode(attempt) in (ADAPTIVE, LEAN)
+
+
+def lean(attempt):
+    return mode(attempt) == LEAN
 
 
 def required_ids(record):

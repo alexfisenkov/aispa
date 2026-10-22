@@ -14,6 +14,16 @@ from .store import Invalid, canonical_zone, confined, digest, file_hash
 SCHEMA = 1
 DIMENSIONS = ("first", "main", "empty", "error", "retry", "access", "persistence", "effects")
 DEPTHS = ("strict", "balanced", "deep")
+# Lean runs scale the mandatory scenario dimensions with the chosen depth.
+LEAN_REQUIRED = {"strict": ("main", "error"), "balanced": ("main", "empty", "error", "persistence"),
+                 "deep": DIMENSIONS}
+
+
+def required_dimensions(state, depth=None):
+    depth = depth or state.get("depth", "balanced")
+    if state.get("policy", {}).get("leanControl") is True:
+        return LEAN_REQUIRED.get(depth, DIMENSIONS)
+    return DIMENSIONS
 MAX_REPORT_CHARS = 512000
 MAX_FEATURES = 256
 MAX_INTERFACES = 256
@@ -95,7 +105,7 @@ def _features(store, state, report):
     for row in rows:
         _need(isinstance(row, dict) and set(row) ==
               {"requirement", "changeKind", "sourceQuote", "specQuote", "dimensions"},
-              "карточке функции нужны источник, спецификация и восемь сценариев")
+              "карточке функции нужны источник, спецификация и сценарии по глубине")
         rid = row["requirement"]
         _need(isinstance(rid, str) and rid in expected and rid not in seen,
               "неизвестная, повторная или неактивная функция")
@@ -114,8 +124,9 @@ def _features(store, state, report):
         _need(_text(row["specQuote"], "цитата спецификации", 3000) in spec,
               "сценарии не привязаны к действующей спецификации")
         dimensions = row["dimensions"]
-        _need(isinstance(dimensions, list) and len(dimensions) == len(DIMENSIONS),
-              "для каждой функции нужны восемь измерений")
+        required = set(required_dimensions(state, report["depth"]))
+        _need(isinstance(dimensions, list) and len(required) <= len(dimensions) <= len(DIMENSIONS),
+              "для каждой функции нужны обязательные измерения выбранной глубины")
         checked = set()
         for cell in dimensions:
             _need(isinstance(cell, dict) and set(cell) ==
@@ -133,7 +144,7 @@ def _features(store, state, report):
                   "контрпример должен быть текстом")
             if report["depth"] == "deep" and cell["status"] == "covered":
                 _text(cell["counterexample"], name + ": контрпример для deep")
-        _need(checked == set(DIMENSIONS), "сценарии функции неполны")
+        _need(required <= checked, "сценарии функции неполны")
     _need(seen == set(expected), "не все действующие функции получили сценарии")
     _size(report)
 

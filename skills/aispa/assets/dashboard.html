@@ -310,6 +310,8 @@ var SCOPE={dropped:'Снято по решению владельца',deferred:
 var TASK={completed:'Реализовано',running:'В работе',pending:'Ожидает',blocked:'Препятствие'};
 var PHASE_STATUS={pending:['○','ожидает'],current:['●','в работе'],done:['✓','завершено'],
  skipped:['–','не требуется'],blocked:['!','заблокирована'],stale:['?','нужна повторная проверка']};
+var TIER={light:['Лёгкая задача','Без отдельных критиков · общая приёмка проекта'],
+ standard:['Обычная задача','Без критика задачи · общий обзор версии'],heavy:['Тяжёлая задача','Стандартный маршрут проверки']};
 var PHASE_LABEL={implementation:'Реализация',critic_1:'Первый критик',repair:'Правка',critic_2:'Второй критик',task_acceptance:'Приёмка задачи'};
 var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
  ['acceptance','Приёмка','Независимая проверка ядра']];
@@ -366,7 +368,9 @@ var EN={
  'Не подтверждено или устарело':'Unconfirmed or stale','Нет актуального подтверждения':'No current confirmation',
  'Состояние недоступно':'State unavailable','Нет данных':'No data','Пока нет оценки':'No estimate yet',
  'Задача принята':'Task accepted','Выполнение проверено':'Completion verified',
- 'Лёгкая задача':'Light task','Тяжёлая задача':'Heavy task',
+ 'Лёгкая задача':'Light task','Тяжёлая задача':'Heavy task','Обычная задача':'Standard task',
+ 'Без критика задачи · общий обзор версии':'No task reviewer · whole-version review',
+ 'PASS критика закрывает задачу':'A passing critic closes the task',
  'Без отдельных критиков · общая приёмка проекта':'No task reviewers · project-level acceptance',
  'Стандартный маршрут проверки':'Standard review route',
  'Версия':'Version','Предварительная версия':'Prerelease','Проверки устарели':'Checks are stale',
@@ -634,7 +638,7 @@ function render(d){
  var wv=$('waves');wv.replaceChildren();
  if(!tasks.length)wv.append(h('div','note',tr('План задач ещё не подготовлен.')));
  waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
-  var hasLight=ts.some(function(t){return t.tier==='light'||t.completionKind==='verified_completion'});
+  var hasLight=ts.some(function(t){return t.tier==='light'||t.tier==='standard'||t.completionKind==='verified_completion'});
   var hasProof=ts.some(function(t){return typeof t.proofCurrent==='boolean'}),accepted=ts.filter(function(t){return t.status==='completed'&&t.proofCurrent===true}).length;
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,tr('Волна')+' '+n));
   hd.append(l,h('span',null,(hasProof?(hasLight?(locale==='en'?accepted+' of '+ts.length+' completed and verified':accepted+' из '+ts.length+' выполнено и проверено'):(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято')):
@@ -642,8 +646,8 @@ function render(d){
   ts.forEach(function(t){var row=h('div','task '+(TASK[t.status]?t.status:'pending')+(t.status==='completed'&&t.proofCurrent===false?' proof-stale':'')),b=h('div','task-body');
    b.append(h('b',null,t.title||t.id),h('small',null,(t.requirements||[]).length?tr('Требования: ')+t.requirements.join(', '):tr('Без привязки к требованиям')));
    var steps=phaseSteps(t);if(steps)b.append(steps);
-   if(t.tier==='light'||t.tier==='heavy'){
-    b.append(h('small',null,tr(t.tier==='light'?'Лёгкая задача':'Тяжёлая задача')+' · '+tr(t.tier==='light'?'Без отдельных критиков · общая приёмка проекта':'Стандартный маршрут проверки')));
+   if(TIER[t.tier]){
+    b.append(h('small',null,tr(TIER[t.tier][0])+' · '+tr(t.tier==='heavy'&&t.reviewPolicy==='lean'?'PASS критика закрывает задачу':TIER[t.tier][1])));
     if(t.tierReason)b.append(h('small',null,t.tierReason));
    }
    var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));

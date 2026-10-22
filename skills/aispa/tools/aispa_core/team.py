@@ -12,7 +12,8 @@ from . import timing, repairs, participants, integration, test_intent, review_po
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
-from .store import Invalid, digest, timestamp
+from .portable import match_name
+from .store import Invalid, canonical_zone, digest, timestamp
 
 ROLES = ("worker", "critic1", "critic2", "acceptor")
 LENSES = {
@@ -21,6 +22,8 @@ LENSES = {
     "critic2": ["Независимо перепроверены результат и замечания первого раунда"],
     "acceptor": ["Результат задачи соответствует исходному запросу и ограничениям"],
 }
+# A lean critic also answers the former acceptor's question; drift is filed here.
+ACCEPTANCE_LENS = LENSES["acceptor"][0]
 
 
 def _json(text):
@@ -108,10 +111,10 @@ def _history_valid(store, state, tid):
         if not auth or not _sealed_valid(store, auth) or auth.get("previousAttempt") != previous["id"]:
             return False
         if auth.get("kind") == "tier-escalation":
-            if (not task_tiers.is_light(previous) or task_tiers.is_light(attempt)
+            if (not task_tiers.worker_only(previous) or task_tiers.worker_only(attempt)
                     or previous.get("rounds") or previous.get("acceptance")
                     or not nonempty(auth.get("reason"))
-                    or auth.get("previousTier") != "light" or auth.get("nextTier") != "heavy"):
+                    or auth.get("previousTier") != previous.get("tier") or auth.get("nextTier") != "heavy"):
                 return False
             continue
         index, source = briefs.get(auth.get("brief"), (0, None))
@@ -120,6 +123,14 @@ def _history_valid(store, state, tid):
                 or not nonempty(auth.get("quote")) or auth["quote"] not in store.text(source)):
             return False
     return True
+
+
+def _inside(path, zones):
+    # Real Git paths are only case-folded like zones (Windows), never rejected
+    # for reserved names; declared zones are fully canonicalised.
+    name = match_name(path)
+    return any(zone in ("", ".") or name == zone or name.startswith(zone + "/")
+               for zone in (canonical_zone(z) for z in zones))
 
 
 def _writer_valid(store, state, attempt, aid):
@@ -146,7 +157,7 @@ def _record_valid(store, record):
 
 def _proof_ref(state, tid):
     attempt = _latest(state, tid)
-    acceptance = attempt.get("verifiedCompletion") if task_tiers.is_light(attempt) else attempt.get("acceptance")
+    acceptance = attempt.get("verifiedCompletion") if task_tiers.worker_only(attempt) else attempt.get("acceptance")
     acceptance = acceptance or {}
     return {"task": tid, "attempt": attempt["id"], "report": acceptance.get("report", {}).get("sha256")}
 
@@ -166,9 +177,9 @@ def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
     require(len(rounds) == expected_count and final.get("passed") is True,
             "До приёмки нужен PASS последнего обязательного критика")
     roles = ["worker", "critic1"] + (["critic2"] if len(rounds) == 2 else [])
-    if require_acceptor:
+    if require_acceptor and not review_policy.lean(attempt):
         roles.append("acceptor")
-    for role in ROLES:
+    for role in task_tiers.roles(attempt):
         _role_data(store, attempt, role)
     require(all(_actor_valid(store, state, attempt, role) for role in roles),
             "Повреждена независимая команда задачи")
@@ -271,11 +282,13 @@ def _historical_one(store, state, tid):
     attempt = _latest(state, tid)
     if not _history_valid(store, state, tid):
         return None
-    if task_tiers.is_light(attempt):
+    if task_tiers.worker_only(attempt):
         return _historical_light(store, state, task, attempt)
     accepted = attempt.get("acceptance")
     if attempt.get("terminal") or not accepted or not accepted.get("passed"):
         return None
+    if review_policy.lean(attempt):
+        return _historical_lean(store, state, task, attempt, accepted)
     cards = {role: _role_data(store, attempt, role) for role in ROLES}
     final = acceptance_chain(store, state, tid, attempt)
     if (not _record_valid(store, accepted) or accepted.get("actor") != attempt["actors"]["acceptor"]
@@ -304,6 +317,52 @@ def _historical_one(store, state, tid):
     if not isinstance(inherited, list) or len(inherited) != len(closure_ids) or {p["task"] for p in inherited} != closure_ids:
         return None
     return inherited
+
+
+def _closure_expected(card, tid):
+    expected = {(t["id"], c) for t in card["closure"] for c in t["criteria"]}
+    expected |= {(r["id"], c) for r in card["constraints"] for c in r["acceptance"]}
+    return expected | {(tid, c) for c in card["checks"]}
+
+
+def _historical_lean(store, state, task, attempt, accepted):
+    """The final passing critic is the task acceptance; nothing else signs it."""
+    tid = task["id"]
+    final = acceptance_chain(store, state, tid, attempt, require_acceptor=False)
+    role = "critic" + str(final["number"])
+    if (not _sealed_valid(store, accepted) or accepted.get("completionKind") != "critic_acceptance"
+            or accepted.get("round") != final["number"] or accepted.get("attempt") != attempt["id"]
+            or any(accepted.get(key) != final.get(key) for key in ("actor", "basis", "report", "verification", "artifacts"))
+            or accepted.get("verdict") != "PASS" or final.get("verdict") != "PASS"):
+        return None
+    if not _record_valid(store, accepted) or accepted["actor"] != attempt["actors"][role]:
+        return None
+    if state.get("policy", {}).get("testIntent") and accepted.get("testIntent") != attempt.get("testIntent"):
+        return None
+    card = _role_data(store, attempt, role)
+    report = _json(store.text(accepted["report"]))
+    if (not all(row.get("result") == "aligned" for row in report.get("trace", []))
+            or {row.get("requirement") for row in report.get("trace", [])}
+            != {r["id"] for r in _card_sources(card)}):
+        return None
+    if task.get("proof") != {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}:
+        return None
+    coverage = {(row["requirement"], row["criterion"]) for row in accepted.get("coverage", [])}
+    if coverage != _closure_expected(card, tid):
+        return None
+    inherited = accepted.get("inheritedProofs")
+    closure_ids = {t["id"] for t in card["closure"]} - {tid}
+    if (not isinstance(inherited, list) or len(inherited) != len(closure_ids)
+            or {p["task"] for p in inherited} != closure_ids
+            or not isinstance(report.get("inheritedProofs"), list)
+            or sorted(report["inheritedProofs"], key=lambda r: json.dumps(r, sort_keys=True))
+            != sorted(inherited, key=lambda r: json.dumps(r, sort_keys=True))):
+        return None
+    return inherited
+
+
+def _card_sources(card):
+    return card.get("sources", [])
 
 
 def historical_proof_valid(store, state, tid):
@@ -345,12 +404,12 @@ def direct_proof_current(store, state, tid):
             repaired = bool(attempt.get("rounds") and not attempt["rounds"][0]["passed"] and attempt.get("repair"))
             if not test_intent.valid(store, state, tid, allow_source_changes=repaired):
                 return False
-            receipt = attempt.get("verifiedCompletion") if task_tiers.is_light(attempt) else attempt.get("acceptance")
+            receipt = attempt.get("verifiedCompletion") if task_tiers.worker_only(attempt) else attempt.get("acceptance")
             accepted = _json(store.text(receipt["report"]))
             if accepted.get("testSourceChanges", []) != test_intent.source_changes(store, state, tid):
                 return False
         return (attempt["contract"] == task_contract(state, tid)
-                and (attempt.get("verifiedCompletion") if task_tiers.is_light(attempt) else attempt["acceptance"])["basis"] == task_basis(store, state, tid)
+                and (attempt.get("verifiedCompletion") if task_tiers.worker_only(attempt) else attempt["acceptance"])["basis"] == task_basis(store, state, tid)
                 and task_verified(store, state, tid))
     except (Invalid, KeyError, TypeError, ValueError, OSError):
         return False
@@ -372,7 +431,7 @@ def task_proof_valid(store, state, tid, allowed_task_ids=None):
             if tid not in closure or not direct_proof_current(store, state, descendant):
                 continue
             descendant_attempt = _latest(state, descendant)
-            if task_tiers.is_light(descendant_attempt):
+            if task_tiers.worker_only(descendant_attempt):
                 continue  # A worker receipt never re-attests changed ancestor code.
             accepted = descendant_attempt["acceptance"]
             if _proof_ref(state, tid) not in accepted["inheritedProofs"]:
@@ -456,7 +515,8 @@ class TaskPipeline:
             checks = override.get("checks", [])
             require(nonempty(specialization) and isinstance(checks, list) and all(nonempty(c) for c in checks),
                     "Роли нужны специализация и строковые проверки")
-            all_checks = list(dict.fromkeys(task["criteria"] + LENSES[role] + checks))
+            lenses = LENSES[role] + (LENSES["acceptor"] if review_policy.lean(attempt) and role.startswith("critic") else [])
+            all_checks = list(dict.fromkeys(task["criteria"] + lenses + checks))
             if self.s.get("policy", {}).get("testIntent") and role.startswith("critic"):
                 all_checks.append("Тестовый контракт и изменения тестов действительно проверяют критерии задачи")
             if self.s.get("policy", {}).get("errorBoundaryChecks") and role != "worker":
@@ -465,7 +525,7 @@ class TaskPipeline:
                 all_checks += ["Вся ветка: " + axis for axis in integration.AXES]
             card = {**context, "role": role, "specialization": specialization, "checks": all_checks,
                     "routing": routing(self.s, task, role, attempt, self.store), "discovery": self.s.get("discovery"),
-                    "freshContext": role != "worker", "maximumCriticRounds": 0 if task_tiers.is_light(attempt) else 2}
+                    "freshContext": role != "worker", "maximumCriticRounds": 0 if task_tiers.worker_only(attempt) else 2}
             artifact = _artifact_json(self.store, "roles", card)
             attempt["roles"][role] = {**artifact, "checks": all_checks, "specialization": specialization}
 
@@ -510,7 +570,7 @@ class TaskPipeline:
         runtime, native_id, session = runtime.strip().casefold(), native_id.strip(), session.strip()
         require(type(fresh) is bool and (role == "worker" or fresh), "Проверяющему нужен новый независимый контекст")
         attempt = self._attempt(tid)
-        require(role in task_tiers.roles(attempt), "Лёгкая задача не создаёт критиков или приёмщика")
+        require(role in task_tiers.roles(attempt), "Роль не предусмотрена классом задачи и политикой проверки")
         require(not attempt["terminal"] and not attempt["acceptance"] and not attempt.get("verifiedCompletion"), "Попытка уже завершена")
         if role == "critic2" and review_policy.adaptive(attempt):
             require(review_policy.second_allowed(attempt), "Второй критик назначается только после первого WARN/BLOCK/FAIL")
@@ -572,9 +632,9 @@ class TaskPipeline:
         attempt = self._attempt(tid)
         card = _role_data(self.store, attempt, role)
         expected = {(tid, criterion) for criterion in card["checks"]}
-        if role == "worker" and task_tiers.is_light(attempt):
+        if role == "worker" and task_tiers.worker_only(attempt):
             expected |= {(r["id"], c) for r in active(self.s) if r["kind"] == "constraint" for c in r["acceptance"]}
-        if role == "acceptor":
+        if role == "acceptor" or role.startswith("critic") and review_policy.lean(attempt):
             expected |= {(task["id"], c) for task in task_closure(self.s, tid) for c in task["criteria"]}
             expected |= {(r["id"], c) for r in active(self.s) if r["kind"] == "constraint" for c in r["acceptance"]}
         return expected
@@ -636,7 +696,7 @@ class TaskPipeline:
                 "До сдачи нужен сохранённый тестовый контракт: реальный RED→GREEN либо адресное обоснование неприменимости")
         text, report, artifacts, failures = self._read(tid, "worker", path)
         require(not failures and not report["unmapped"], "Исполнитель ещё не подтвердил все проверки")
-        if task_tiers.is_light(attempt):
+        if task_tiers.worker_only(attempt):
             findings = self._findings(report, self.expected_checks(tid, "worker")) if "findings" in report else []
             require(report.get("verdict", "PASS") == "PASS"
                     and not report.get("branchReview")
@@ -734,6 +794,15 @@ class TaskPipeline:
             found, unresolved = self._resolutions(report, first)
             artifacts.extend(found)
             extra.update(previousReport=first["report"]["sha256"], repairReceipt=repair["report"]["sha256"] if repair else None)
+        inherited = None
+        if review_policy.lean(attempt):
+            inherited = self._inherited_report(tid, report)
+            found, aligned = self._trace(tid, report)
+            artifacts.extend(found)
+            if not aligned:
+                require(any(f["severity"] in ("blocking", "warning") and f["criterion"] == ACCEPTANCE_LENS for f in findings),
+                        "Расхождение trace требует обязательного замечания по соответствию исходному запросу")
+                failures.append({"criterion": ACCEPTANCE_LENS})
         passed = not failures and not report["unmapped"] and not unresolved and not review_policy.required_ids(report)
         if review_policy.adaptive(attempt):
             required_findings = [f for f in findings if f["severity"] in ("blocking", "warning")]
@@ -745,6 +814,8 @@ class TaskPipeline:
             extra["verdict"] = review_policy.verdict(report, clean=passed, critic=not unresolved)
             passed = extra["verdict"] == "PASS"
         attempt["rounds"].append(self._record(tid, role, text, report, artifacts, passed=passed, **extra))
+        if passed and review_policy.lean(attempt):
+            return self._critic_acceptance(tid, task, attempt, number, inherited)
         if number == 1:
             task["phase"] = ("task_acceptance" if review_policy.adaptive(attempt) else "critic_2") if passed else "repair"
             self.host.save("task-critic-1:" + tid)
@@ -756,6 +827,34 @@ class TaskPipeline:
             task["phase"] = "critic_2"
             self.host.block(tid, "Второй критик не принял задачу; третий раунд автоматически не разрешён")
         return passed
+
+    def _inherited_report(self, tid, report):
+        inherited = self.inherited_proofs(tid)
+        reported = report.get("inheritedProofs")
+        require(isinstance(reported, list) and all(isinstance(row, dict) for row in reported)
+                and sorted(reported, key=lambda r: r.get("task", "")) == sorted(inherited, key=lambda r: r["task"]),
+                "Нужны точные ссылки на принятые доказательства всех зависимостей")
+        require(all(historical_proof_valid(self.store, self.s, ref["task"]) for ref in inherited),
+                "Повреждена цепочка приёмки зависимости")
+        return inherited
+
+    def _critic_acceptance(self, tid, task, attempt, number, inherited):
+        """Lean: the passing critic's sealed round becomes the task acceptance."""
+        final = attempt["rounds"][-1]
+        role = "critic" + str(number)
+        accepted = _seal(self.store, {
+            **{key: copy.deepcopy(final[key]) for key in ("actor", "basis", "report", "artifacts", "verification",
+                                                          "testIntent") if key in final},
+            "passed": True, "verdict": "PASS", "completionKind": "critic_acceptance", "round": number,
+            "attempt": attempt["id"], "inheritedProofs": inherited,
+            "coverage": [{"requirement": rid, "criterion": c} for rid, c in sorted(self.expected_checks(tid, role))]})
+        attempt["acceptance"] = accepted
+        task.update(status="completed", phase="critic_" + str(number), completionKind="critic_acceptance")
+        task["proof"] = {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}
+        task.pop("note", None)
+        timing.stop(task, timestamp(), completed=True)
+        self.host.save("task-critic-accepted:" + tid)
+        return True
 
     def repair(self, tid, path):
         task, attempt = self._live(tid, allow_blocked=True)
@@ -807,6 +906,7 @@ class TaskPipeline:
 
     def accept(self, tid, path):
         task, attempt = self._live(tid)
+        require(not review_policy.lean(attempt), "В lean задачу закрывает PASS критика; отдельный приёмщик не назначается")
         final = acceptance_chain(self.store, self.s, tid, attempt)
         text, report, artifacts, failures = self._read(tid, "acceptor", path)
         require(report["basis"] == final["basis"], "После последнего критика изменён результат; автоматический дополнительный раунд запрещён")
@@ -854,7 +954,19 @@ class TaskPipeline:
                       and direct_proof_current(self.store, self.s, t["id"])) for z in t["zones"]}
         owned = []
         for row in changes:
-            if row["path"] not in task["zones"] and row["path"] in peers:
+            # Light keeps its exact-file rule; standard tolerates directory peers.
+            peer = _inside(row["path"], peers) if task_tiers.is_standard(attempt) else row["path"] in peers
+            if not _inside(row["path"], task["zones"]) and peer:
+                continue
+            if task_tiers.is_standard(attempt):
+                # Standard owns whole declared zones, still never a sensitive path.
+                require(_inside(row["path"], task["zones"]), "Изменение вышло за зоны standard: " + row["path"])
+                require(not task_tiers.sensitive_path(row["path"]),
+                        "Чувствительный путь требует promote-task: " + row["path"])
+                for value in (row["before"], row["after"]):
+                    require(value is None or value.get("missing") or "sha256" in value,
+                            "Символические ссылки требуют promote-task: " + row["path"])
+                owned.append(row)
                 continue
             require(row["path"] in task["zones"] and task_tiers.safe_zone(row["path"], attempt["changeKind"]),
                     "Изменение вышло за безопасные границы light; выполните promote-task")
@@ -868,11 +980,11 @@ class TaskPipeline:
         """Escalate only a light attempt; never replenish a heavy review budget."""
         self.host.running()
         old = self._attempt(tid)
-        require(task_tiers.enabled(self.s) and task_tiers.is_light(old)
+        require(task_tiers.enabled(self.s) and task_tiers.worker_only(old)
                 and not old.get("rounds") and not old.get("acceptance"),
-                "Повышение доступно только для light без использованной критики")
+                "Повышение доступно только для light или standard без использованной критики")
         require(nonempty(reason) and len(reason) <= 2000, "Объясните обнаруженный риск")
-        auth = _seal(self.store, {"kind": "tier-escalation", "previousTier": "light", "nextTier": "heavy",
+        auth = _seal(self.store, {"kind": "tier-escalation", "previousTier": old["tier"], "nextTier": "heavy",
             "previousAttempt": old["id"], "reason": reason, "at": timestamp()})
         new = self._new(tid, auth)
         new.update(tier="heavy", tierReason=reason)
@@ -918,7 +1030,8 @@ class TaskPipeline:
         require(attempt["contract"] == task_contract(self.s, tid), "Контракт команды устарел")
         for role in task_tiers.roles(attempt):
             _role_data(self.store, attempt, role)
-        if task_tiers.is_light(attempt):
+        if task_tiers.worker_only(attempt) and not attempt.get("lightBaseline"):
+            # A restart never forgets writes made since the attempt began.
             attempt["lightBaseline"] = _artifact_json(self.store, "team-records", {"records": self.store.code_records()})
 
     def reset_guard(self, tid):
@@ -940,14 +1053,14 @@ class TaskPipeline:
         # A retained promotion may still have its original light declaration
         # in the immutable plan; its latest attempt supplies the effective tier.
         heavy_coverage = {rid for task in new_tasks
-                          if not task_tiers.is_light(task) or
+                          if not task_tiers.worker_only(task) or
                           (task["id"] in known and definition(task) == definition(known[task["id"]])
-                           and not task_tiers.is_light((self.s.get("taskHistory", {}).get(task["id"]) or [{}])[-1]))
+                           and not task_tiers.worker_only((self.s.get("taskHistory", {}).get(task["id"]) or [{}])[-1]))
                           for rid in task["requirements"]}
         for tid, history in self.s.get("taskHistory", {}).items():
             consumed = any(attempt["rounds"] for attempt in history)
             if task_tiers.enabled(self.s):
-                consumed = consumed or any(not task_tiers.is_light(a) or a.get("actors") or a.get("submitted") or a.get("verifiedCompletion") for a in history) or known.get(tid, {}).get("startedAt") or known.get(tid, {}).get("status") == "running"
+                consumed = consumed or any(not task_tiers.worker_only(a) or a.get("actors") or a.get("submitted") or a.get("verifiedCompletion") for a in history) or known.get(tid, {}).get("startedAt") or known.get(tid, {}).get("status") == "running"
             latest = history[-1]
             require(_history_valid(self.store, self.s, tid), "Повреждена история разрешений на попытки")
             authorized = latest["contract"] is None and latest.get("authorization") and _sealed_valid(self.store, latest["authorization"])
@@ -967,7 +1080,7 @@ class TaskPipeline:
             if task_tiers.enabled(self.s):
                 obligations = set()
                 for historical in history:
-                    if not task_tiers.is_light(historical) and historical.get("roles"):
+                    if not task_tiers.worker_only(historical) and historical.get("roles"):
                         card = _role_data(self.store, historical, "worker")
                         prior = next((t for t in card["closure"] if t["id"] == tid), None)
                         require(prior is not None, "Историческая heavy-карточка потеряла исходную задачу")
@@ -975,26 +1088,26 @@ class TaskPipeline:
                 require(obligations.intersection(active_ids) <= heavy_coverage,
                         "Активные исторические heavy-требования должны оставаться покрыты heavy-задачей")
             if tid in proposed and task_tiers.enabled(self.s):
-                if task_tiers.is_light(latest):
+                if task_tiers.worker_only(latest):
                     require(all(proposed[tid].get(key) == latest.get(key) for key in task_tiers.FIELDS),
                             "Классификация light заморожена; повышение выполняется через promote-task")
                 # A promotion overrides the original plan declaration without
                 # rewriting its immutable plan-review artifact.
                 escalated = any(a.get("authorization", {}).get("kind") == "tier-escalation" for a in history if a.get("authorization"))
-                require(not task_tiers.is_light(proposed[tid]) or all(task_tiers.is_light(a) for a in history) or
+                require(not task_tiers.worker_only(proposed[tid]) or all(task_tiers.worker_only(a) for a in history) or
                         escalated and tid in known and definition(proposed[tid]) == definition(known[tid]),
                         "Историю heavy нельзя понизить до light")
                 authorization = latest.get("authorization") or {}
                 assigned_history = any(revision.get("actors") or revision.get("writers")
                                        for revision in latest.get("cardHistory", []))
                 promotion_replan = (authorization.get("kind") == "tier-escalation"
-                    and _sealed_valid(self.store, authorization) and not task_tiers.is_light(latest)
+                    and _sealed_valid(self.store, authorization) and not task_tiers.worker_only(latest)
                     and known.get(tid, {}).get("status") == "pending" and not assigned_history
                     and not any(latest.get(key) for key in ("actors", "writers", "actorHistory", "rounds",
                         "submitted", "repair", "acceptance", "verifiedCompletion", "terminal")))
                 if promotion_replan and latest["contract"] != task_contract(next_state, tid):
                     previous, candidate = known[tid], proposed[tid]
-                    require(not task_tiers.is_light(candidate), "После promote-task новый план должен объявлять heavy")
+                    require(not task_tiers.worker_only(candidate), "После promote-task новый план должен объявлять heavy")
                     require(set(candidate["requirements"]) == set(previous["requirements"])
                             and all(set(previous.get(key, [])) <= set(candidate.get(key, []))
                                     for key in ("criteria", "zones", "readZones", "dependsOn")),

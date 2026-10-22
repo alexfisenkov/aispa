@@ -34,7 +34,7 @@ def estimate(tasks, status, at):
         return {"reason": "insufficient_data", "sampleCount": len(samples)}
     typical = median(samples)
     by_tier = {}
-    for tier in ("light", "heavy"):
+    for tier in ("light", "standard", "heavy"):
         values = [elapsed(t, at) for t in tasks if t["status"] == "completed" and t.get("tier", "heavy") == tier]
         values = [value for value in values if value is not None and value > 0]
         if len(values) >= 2:

@@ -280,8 +280,11 @@ class CliTests(unittest.TestCase):
         self.plan_with_review(tasks)
         ctx = self.context("task", "--task", "T01")
         self.call("start", "T01", "--context", ctx["basis"])
-        for role in ("worker", "critic1", "acceptor"):
+        for role in ("worker", "critic1"):
             self.call("assign", "T01", "--role", role, "--runtime", "codex", "--native-id", "synthetic-" + role, "--session", "test-session")
+        # New runs are lean: the passing critic closes the task, no task acceptor.
+        self.call("assign", "T01", "--role", "acceptor", "--runtime", "codex", "--native-id", "synthetic-acceptor",
+                  "--session", "test-session", expected=2)
         task_context = self.context("task", "--task", "T01")
         self.call("usage", "--file", self.input({"actor": task_context["actors"]["worker"],
             "callId": "synthetic-worker-call", "source": "synthetic native usage fixture",
@@ -333,6 +336,11 @@ class CliTests(unittest.TestCase):
                 report["verdict"] = "PASS"
             if role in ("critic1", "critic2"):
                 report["findings"] = []
+                self.assertEqual(len(draft["trace"]), len(ctx["traceRequirements"]))
+                self.assertEqual(ctx["zoneChangesScope"], "branch")  # T01 is the final task
+                report.update(inheritedProofs=ctx["inheritedProofs"],
+                    trace=[{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
+                            "note": "Сопоставлено с брифом", "artifact": ctx["verification"]["output"]["file"]} for r in ctx["traceRequirements"]])
                 report["branchReview"] = fixtures.branch_review(self.root, "T01", ctx["verification"]["output"]["file"])
             if role == "critic2":
                 report.update(previousReport=ctx["rounds"][0]["report"]["sha256"], repairReceipt=None, resolutions=[])
@@ -350,7 +358,8 @@ class CliTests(unittest.TestCase):
         self.call("critic", "T01", "--round", "1", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic1"))))
         self.call("assign", "T01", "--role", "critic2", "--runtime", "codex",
                   "--native-id", "must-not-run", "--session", "test-session", expected=2)
-        self.call("complete", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "acceptor"))))
+        task_view = next(t for t in self.call("status")["tasks"] if t["id"] == "T01")
+        self.assertEqual((task_view["status"], task_view["completionKind"]), ("completed", "critic_acceptance"))
         run = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
         check = self.call("verify", "--purpose", "check", "--", sys.executable, "app.py")["receipt"]
         commands = self.call("commands")
@@ -408,7 +417,7 @@ class CliTests(unittest.TestCase):
         attempt = saved["taskHistory"]["T01"][-1]
         self.assertEqual(len(attempt["rounds"]), 1)
         self.assertNotIn("critic2", attempt["actors"])
-        self.assertEqual(len(saved["actors"]), 3)
+        self.assertEqual(len(saved["actors"]), 2)  # worker and critic1; lean has no task acceptor
         from aispa_core import phase_receipts
         for phase in ("idea", "discovery", "planner"):
             self.assertEqual(phase_receipts.current(saved_store, saved, phase)["actor"], coordinator)

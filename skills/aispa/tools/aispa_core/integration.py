@@ -1,8 +1,9 @@
 """Integrated diff review bound to the final task's frozen review route.
 
 The host chooses a final task before native roles are prepared and keeps the
-ordinary critic / separate-acceptor budget for a heavy final task. A light final
-task needs a separate independent project review after all task proofs exist.
+ordinary critic budget (and, outside lean, separate acceptor) for a heavy final
+task. A light or standard final task needs a separate independent project review
+after all task proofs exist.
 This module validates complete code-tree coverage, immutable source baseline,
 and candidate-specific review.
 It does not run a model or assert that a critic's judgment is true.
@@ -154,6 +155,13 @@ def context(store, state, tid=None):
             "basis": _review_basis(ref, tid, candidate, code, changes)}
 
 
+def zone_changes(store, state, zones):
+    """Changed rows inside the given zones since the run baseline, never bytes."""
+    baseline = _baseline(store, state)
+    rows = _changes(baseline["records"], store.code_records())
+    return [row for row in rows if any(_covers(zone, row["path"]) for zone in zones)]
+
+
 def _evidence(store, name):
     _need(isinstance(name, str) and name.startswith("evidence/"),
           "доказательство должно лежать в evidence/ прогона")
@@ -302,12 +310,12 @@ def _project_actor(store, state, actor=None, *, optional=False):
 
 
 def _project_ready(store, state):
-    from .task_tiers import is_light
+    from .task_tiers import worker_only
     from .team import direct_proof_current, task_proof_valid
     tid = state.get("integrationTask")
     _need(choose_task(store, state, state["tasks"]) == tid, "итоговая задача изменена")
     attempt = (state.get("taskHistory", {}).get(tid) or [{}])[-1]
-    _need(is_light(attempt), "отдельное общее ревью предназначено для лёгкой итоговой задачи")
+    _need(worker_only(attempt), "отдельное общее ревью предназначено для итоговой задачи light или standard")
     _need(direct_proof_current(store, state, tid), "нет текущего доказательства итоговой задачи")
     _need(all(task.get("status") == "completed" and task_proof_valid(store, state, task["id"])
               for task in state["tasks"]), "до общего ревью нужны текущие доказательства всех задач")
@@ -438,10 +446,10 @@ def proof_valid(store, state):
         tid = state["integrationTask"]
         _need(choose_task(store, state, state["tasks"]) == tid, "итоговая задача изменена")
         from .team import direct_proof_current, acceptance_chain
-        from .task_tiers import is_light
+        from .task_tiers import worker_only
         _need(direct_proof_current(store, state, tid), "нет текущего доказательства итоговой задачи")
         attempt = state["taskHistory"][tid][-1]
-        if is_light(attempt):
+        if worker_only(attempt):
             return _project_proof(store, state, tid, attempt)
         final = acceptance_chain(store, state, tid, attempt)
         view = context(store, state, tid)

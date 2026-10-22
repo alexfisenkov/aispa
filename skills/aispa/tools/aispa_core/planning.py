@@ -19,10 +19,28 @@ def _role_estimate(state, tasks):
         tasks = list(tasks)
         count = len(tasks)
         if task_tiers.enabled(state):
-            light = sum(task_tiers.is_light(t) for t in tasks)
-            return {"minimum": light + (count - light) * (3 if review_policy.selected(state) == review_policy.ADAPTIVE else 4),
-                    "maximum": light + (count - light) * 4}
-    return {"minimum": count * 3, "maximum": count * 4} if review_policy.selected(state) == review_policy.ADAPTIVE else count * 4
+            light = sum(task_tiers.worker_only(t) for t in tasks)
+            low, high = _heavy_slots(state)
+            return {"minimum": light + (count - light) * low, "maximum": light + (count - light) * high}
+    if review_policy.selected(state) == review_policy.LEGACY:
+        return count * 4
+    low, high = _heavy_slots(state)
+    return {"minimum": count * low, "maximum": count * high}
+
+
+def _heavy_slots(state):
+    """Worker, critic1, conditional critic2, and a separate acceptor unless lean."""
+    policy = review_policy.selected(state)
+    return {review_policy.LEAN: (2, 3), review_policy.ADAPTIVE: (3, 4)}.get(policy, (4, 4))
+
+
+def _critic_rounds(state):
+    if task_tiers.enabled(state):
+        rounds = {"light": 0, "heavy": {"minimum": 1, "maximum": 2}}
+        if task_tiers.standard_enabled(state):
+            rounds["standard"] = 0
+        return rounds
+    return {"minimum": 1, "maximum": 2} if review_policy.selected(state) != review_policy.LEGACY else 2
 
 
 def _role_starts(state, tasks):
@@ -63,17 +81,16 @@ def analyze(store, state, raw):
     return {"basis": digest({"run": state["run"], "scope": basis(store, state, "coverage"), "draft": definitions}),
             "draft": definitions, "suggestions": suggestions,
             **({"taskTiers": {t["id"]: {"tier": t["tier"], "tierReason": t["tierReason"],
-                 "taskWorkers": 1, "taskCritics": {"minimum": 0 if task_tiers.is_light(t) else 1, "maximum": 0 if task_tiers.is_light(t) else 2},
-                 "taskAcceptors": 0 if task_tiers.is_light(t) else 1} for t in tasks},
+                 "taskWorkers": 1, "taskCritics": {"minimum": 0 if task_tiers.worker_only(t) else 1, "maximum": 0 if task_tiers.worker_only(t) else 2},
+                 "taskAcceptors": 0 if task_tiers.worker_only(t) or review_policy.selected(state) == review_policy.LEAN else 1} for t in tasks},
                  "projectReviewSeparate": True,
-                 "projectReviewRole": "integration-reviewer when the final frozen attempt is light"} if task_tiers.enabled(state) else {}),
+                 "projectReviewRole": "integration-reviewer when the final frozen attempt is light or standard"} if task_tiers.enabled(state) else {}),
             "taskCount": len(tasks), "taskRoleStarts": _role_starts(state, tasks),
             "taskRoleSlots": _role_estimate(state, tasks), "roleSlotNote": ROLE_SLOT_NOTE,
-            "criticRoundsPerTask": ({"light": 0, "heavy": {"minimum": 1, "maximum": 2}} if task_tiers.enabled(state)
-                                    else {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2),
+            "criticRoundsPerTask": _critic_rounds(state),
             "maximumCriticRoundsPerTask": 2, "actualCriticRounds": None, "estimatedTokens": None,
             "duplicateCriteriaRule": "При совпадении текста критериев объединённых задач сохраните каждый как '<исходный ID>: <текст>'.",
-            "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы: heavy требует критиков и отдельного приёмщика, light — проверенное выполнение без этих ролей. Общее ревью и итоговая приёмка сохраняются. Замена исполнителя ремонта добавляет actor сверх оценки."}
+            "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы: heavy требует критиков и (кроме lean) отдельного приёмщика, light и standard — проверенное выполнение без этих ролей. Общее ревью и итоговая приёмка сохраняются. Замена исполнителя ремонта добавляет actor сверх оценки."}
 
 
 def review(store, state, final, report):
@@ -114,8 +131,10 @@ def review(store, state, final, report):
         require(len(expected_checks) == sum(len(t["criteria"]) for t in selected)
                 and set(target["criteria"]) == expected_checks,
                 "Сохраните каждый исходный критерий; совпадающие тексты подпишите исходным ID задачи")
-        if task_tiers.enabled(state) and task_tiers.is_light(target):
-            require(all(task_tiers.is_light(t) for t in selected), "Укрупнение не может понизить heavy до light")
+        if task_tiers.enabled(state) and task_tiers.worker_only(target):
+            require(all(task_tiers.worker_only(t) for t in selected), "Укрупнение не может понизить heavy до light или standard")
+            require(not task_tiers.is_light(target) or all(task_tiers.is_light(t) for t in selected),
+                    "Укрупнение не может понизить standard до light")
         require(RISK[target["risk"]] >= max(RISK[t["risk"]] for t in selected), "Укрупнение не может понизить риск")
         require(all(not t["riskReason"].strip() or t["riskReason"] in target["riskReason"] for t in selected),
                 "Сохраните исходные объяснения рисков в итоговом riskReason")
@@ -146,8 +165,7 @@ def review(store, state, final, report):
             "taskRoleStartsAfter": _role_starts(state, final.values()),
             "taskRoleSlotsBefore": _role_estimate(state, draft.values()), "taskRoleSlotsAfter": _role_estimate(state, final.values()),
             "roleSlotNote": ROLE_SLOT_NOTE,
-            "criticRoundsPerTask": ({"light": 0, "heavy": {"minimum": 1, "maximum": 2}} if task_tiers.enabled(state)
-                                    else {"minimum": 1, "maximum": 2} if review_policy.selected(state) == review_policy.ADAPTIVE else 2),
+            "criticRoundsPerTask": _critic_rounds(state),
             "maximumCriticRoundsPerTask": 2, "actualCriticRounds": None, "measuredTokenSavings": None,
             **({"deliveryDigest": digest(report["delivery"])} if "delivery" in report else {})}
 

@@ -88,7 +88,7 @@ def template(store, state, kind, *, actor=None):
                      "sourceQuote": (indexed[r["parent"]] if r["kind"] == "addition" else r).get("quote", ""),
                      "specQuote": "", "dimensions": [
                          {"name": name, "status": "not_tested", "scenario": "", "verification": "", "counterexample": ""}
-                         for name in design_contract.DIMENSIONS]}
+                         for name in design_contract.required_dimensions(state)]}
                     for r in indexed.values() if r["kind"] in ("requested", "addition")]}
     require(kind == "interfaces", "Неизвестный шаблон")
     return {"basis": design_contract.interface_basis(state), "interfaces": [],

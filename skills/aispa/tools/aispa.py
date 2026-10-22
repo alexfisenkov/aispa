@@ -145,10 +145,80 @@ def parser():
     close.add_argument("status", choices=("paused", "blocked", "cancelled")); close.add_argument("--note", required=True)
     sub.add_parser("decision").add_argument("text")
     serve = sub.add_parser("serve"); serve.add_argument("--port", type=int, default=0)
+    sub.add_parser("batch").add_argument("--file", required=True)
     return p
 
 
+BATCH_LIMIT = 25
+# Each step is an ordinary command with its own lock and journal event; these
+# change the package, run a server, repair the journal or create a run.
+BATCH_DENIED = frozenset({"update-check", "update-prepare", "update-apply", "update-rollback", "serve",
+                          "dashboard", "init", "batch"})
+BATCH_JOURNAL_READS = frozenset({"journal-inspect", "journal-context"})
+
+
+def batch(args):
+    """Run up to 25 sequential steps in one host call; stop at the first failure."""
+    import contextlib
+    import io
+    try:
+        steps = json.loads(Path(args.file).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise Invalid("batch: нужен JSON-файл со списком шагов") from exc
+    if not (isinstance(steps, list) and 0 < len(steps) <= BATCH_LIMIT and all(
+            isinstance(step, list) and step and all(isinstance(x, str) for x in step) for step in steps)):
+        raise Invalid("batch: нужен список от 1 до %d шагов, каждый — непустой список строк argv" % BATCH_LIMIT)
+    for step in steps:
+        journal_write = step[0].startswith("journal-") and step[0] not in BATCH_JOURNAL_READS
+        if (step[0] in BATCH_DENIED or journal_write or step[0].startswith("-")
+                or {"--root", "--compact", "-h", "--help"} & set(step)):
+            raise Invalid("batch: шаг недопустим в пакете: " + " ".join(step[:2]))
+    import signal
+    results, code, interrupted = [], 0, None
+
+    def terminate(signum, _frame):
+        # Unwind through the step's lock context instead of dying holding it.
+        raise KeyboardInterrupt("signal %d" % signum)
+    previous = signal.signal(signal.SIGTERM, terminate) if hasattr(signal, "SIGTERM") else None
+    for index, step in enumerate(steps):
+        if interrupted:
+            break
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = execute(parser().parse_args(["--root", args.root, "--compact", *step]))
+            except (Invalid, OSError, ValueError) as error:
+                print("AISpa: " + str(error), file=sys.stderr)
+                code = 2
+            except SystemExit as exit_:
+                code = exit_.code if isinstance(exit_.code, int) else 2
+            except KeyboardInterrupt as stop:
+                print("AISpa: пакет прерван: " + str(stop), file=sys.stderr)
+                code, interrupted = 130, str(stop) or "interrupt"
+        text = out.getvalue()
+        try:
+            value = json.loads(text) if text.strip() else None
+        except ValueError:
+            value = text
+        results.append({"step": index + 1, "argv": step, "exit": code, "output": value,
+                        **({"error": err.getvalue().strip()} if err.getvalue().strip() else {})})
+        if code:
+            break
+    if previous is not None:
+        signal.signal(signal.SIGTERM, previous)
+    # A non-zero step may still have written its journal event (critic WARN,
+    # failed verify): "completed" counts zero exits only, never "nothing happened".
+    print(json.dumps({"batch": True, "ok": code == 0, "completed": sum(r["exit"] == 0 for r in results),
+                      "total": len(steps), "stoppedAt": results[-1]["step"] if code else None,
+                      **({"interrupted": interrupted} if interrupted else {}),
+                      "note": "A failed step may have recorded its own journal event; check status before retrying.",
+                      "steps": results}, ensure_ascii=False, indent=2))
+    return 0 if code == 0 else 2
+
+
 def execute(args):
+    if args.action == "batch":
+        return batch(args)
     if args.action.startswith("update-"):
         from aispa_core import updates
         if args.action == "update-check":
@@ -202,7 +272,8 @@ def execute(args):
                                    "integrationReview": True, "testIntent": True,
                                    "adaptiveCritique": True, "phaseReceipts": True,
                                    "executionObligations": True, "finalWaveReuse": True,
-                                   "errorBoundaryChecks": True, "taskTiers": True}
+                                   "errorBoundaryChecks": True, "taskTiers": True,
+                                   "leanControl": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
                 state["runtime"] = args.runtime

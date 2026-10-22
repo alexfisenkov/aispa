@@ -377,3 +377,15 @@ test('light completion is distinct from task and project acceptance',async()=>{
  d.tasks[0].tier='heavy';d.tasks[0].completionKind=null;d.tasks[0].status='running';
  await f.update(d);assert.match(f.text('waves'),/Тяжёлая задача/);assert.doesNotMatch(f.text('waves'),/Без отдельных критиков/);
 });
+test('standard and lean tasks name their review route',async()=>{
+ const d=sample();d.tasks=[{id:'T01',title:'Экран отчёта',requirements:['R01'],wave:1,
+ status:'completed',proofCurrent:true,tier:'standard',tierReason:'Обычный модуль',completionKind:'verified_completion',
+ perTaskReview:'skipped_standard',elapsedSeconds:12,phaseSteps:[]},
+ {id:'T02',title:'Финал',requirements:['R01'],wave:2,status:'completed',proofCurrent:true,tier:'heavy',
+ reviewPolicy:'lean',completionKind:'critic_acceptance',elapsedSeconds:20,phaseSteps:[]}];
+ const f=await fixture('',d);const text=f.text('waves');
+ assert.match(text,/Обычная задача · Без критика задачи · общий обзор версии/);
+ assert.match(text,/Тяжёлая задача · PASS критика закрывает задачу/);assert.match(text,/Задача принята/);
+ f.el('language').change('en');assert.match(f.text('waves'),/Standard task · No task reviewer/);
+ assert.match(f.text('waves'),/A passing critic closes the task/);
+});

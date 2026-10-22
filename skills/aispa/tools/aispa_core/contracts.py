@@ -246,6 +246,8 @@ def validate_plan(state, items):
     require(available <= covered, "В плане потеряны требования: " + ", ".join(sorted(available - covered)))
     graph = dict(state, tasks=list(tasks.values()))
     closures = {tid: task_closure(graph, tid) for tid in tasks}
+    from . import task_tiers
+    task_tiers.validate_plan(tasks, closures)
     common = {canonical_zone(z) for z in COMMON_INPUTS} | {z for t in tasks.values() for z in t["zones"] if common_input(z)}
     readsets = {tid: sorted(common | {z for t in closure for z in t["zones"] + t.get("readZones", [])})
                 for tid, closure in closures.items()}
