@@ -31,6 +31,7 @@ from .portable import executable, is_link, relative_name
 
 REPOSITORY = "alexfisenkov/aispa"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"
+LATEST_RELEASE_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 MAX_FILES = 2048
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
@@ -236,7 +237,10 @@ def _download(url, limit, deadline):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("Истекло время проверки обновления")
-    request = urllib.request.Request(url, headers={"User-Agent": "AISpa-updater", "Accept": "application/vnd.github+json"})
+    headers = {"User-Agent": "AISpa-updater", "Accept": "application/vnd.github+json"}
+    if urllib.parse.urlsplit(url).hostname == "api.github.com":
+        headers["Cache-Control"] = "no-cache"
+    request = urllib.request.Request(url, headers=headers)
     opener = urllib.request.build_opener(_SafeRedirect(), urllib.request.HTTPSHandler(context=_https_context()))
     with opener.open(request, timeout=min(remaining, 5.0)) as response:
         _trusted_url(response.geturl(), redirect=True)
@@ -321,17 +325,48 @@ def _release(releases, current):
 
 def _published_releases(deadline):
     releases = []
-    # GitHub orders by publication, not SemVer. Walk bounded pages so an older
-    # stable release is not hidden behind a full page of newer prereleases.
-    for page in range(1, 6):
-        url = RELEASES_URL if page == 1 else RELEASES_URL + f"&page={page}"
+
+    def page_rows(url):
         batch = _json(_download(url, MAX_METADATA_BYTES, deadline))
         if not isinstance(batch, list) or len(batch) > 100:
             raise Invalid("GitHub вернул неожиданный список выпусков")
+        return batch
+
+    # Keep the bounded SemVer scan, including prereleases. An empty first page
+    # is retried once through explicit pagination; neither response alone proves
+    # that a published stable release is absent.
+    for page in range(1, 6):
+        url = RELEASES_URL if page == 1 else RELEASES_URL + f"&page={page}"
+        batch = page_rows(url)
+        if page == 1 and not batch:
+            batch = page_rows(RELEASES_URL + "&page=1")
         releases.extend(batch)
         if len(batch) < 100:
-            return releases
-    raise Invalid("Список выпусков превышает предел безопасной проверки")
+            break
+    else:
+        raise Invalid("Список выпусков превышает предел безопасной проверки")
+
+    # GitHub's latest is a separate published-release endpoint, not a Git tag
+    # or a branch. Reconcile even nonempty lists, which can be stale as well.
+    try:
+        latest = _json(_download(LATEST_RELEASE_URL, MAX_METADATA_BYTES, deadline))
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        if exc.code != 404:
+            raise
+        return releases  # A repository containing only prereleases has no latest.
+    if (not isinstance(latest, dict) or latest.get("draft") is not False
+            or latest.get("prerelease") is not False or not latest.get("published_at")):
+        raise Invalid("GitHub вернул некорректный последний выпуск")
+    tag = latest.get("tag_name")
+    if not isinstance(tag, str) or not _semver(tag.removeprefix("v"))[3]:
+        raise Invalid("Последний стабильный выпуск не имеет стабильной версии")
+    expected = f"https://github.com/{REPOSITORY}/releases/tag/{urllib.parse.quote(tag, safe='')}"
+    if latest.get("html_url") != expected:
+        raise Invalid("Некорректный адрес последнего выпуска")
+    # Prefer the direct record for this tag (assets may have just been uploaded).
+    # _release still validates the selected assets and chooses maximum SemVer.
+    return [row for row in releases if not isinstance(row, dict) or row.get("tag_name") != tag] + [latest]
 
 
 def check(package, *, timeout=5):

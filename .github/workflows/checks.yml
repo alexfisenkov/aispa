@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, dashboard-fix, labels]
+        options: [full, runtimes, dashboard, dashboard-fix, labels, updates]
 permissions:
   contents: read
 jobs:
@@ -73,10 +73,15 @@ jobs:
         env:
           PYTHONPATH: tests
         run: python -B -m unittest test_label_release_compat -v
+      - name: Release discovery, installation and portable guards
+        if: inputs.scope == 'updates'
+        env:
+          PYTHONPATH: tests
+        run: python -B -m unittest test_updates test_install test_windows_portable_tools -v
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan
         run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests
-        if: inputs.scope != 'runtimes' && matrix.python == '3.13'
+        if: inputs.scope != 'runtimes' && inputs.scope != 'updates' && matrix.python == '3.13'
         run: node --test tests/dashboard.test.cjs

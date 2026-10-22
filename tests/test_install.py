@@ -10,7 +10,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import urllib.error
 import urllib.parse
 import zipfile
 
@@ -77,11 +78,18 @@ class InstallerTests(unittest.TestCase):
 
     @contextlib.contextmanager
     def network(self, releases=None):
+        rows = [self.release] if releases is None else releases
         def clone(tag, commit, destination, timeout):
             self.assertEqual((tag, commit), (self.tag, self.commit))
             (destination / "skills/aispa/tools/aispa_core").mkdir(parents=True)
             (destination / "skills/aispa/tools/aispa_core/updates.py").write_text("# test source\n")
-        with patch.object(install, "_releases", return_value=[self.release] if releases is None else releases), \
+        def fetch_tag(url, limit, timeout):
+            self.assertEqual(url, install.API + "/releases/tags/" + urllib.parse.quote(self.tag, safe=""))
+            matches = [row for row in rows if row["tag_name"] == self.tag]
+            self.assertEqual(len(matches), 1)
+            return json.dumps(matches[0]).encode()
+        with patch.object(install, "_releases", return_value=rows), \
+             patch.object(install, "_fetch", side_effect=fetch_tag), \
              patch.object(install, "_source_commit", return_value=self.commit), \
              patch.object(install, "_clone_verified", side_effect=clone), \
              patch.object(install, "_load_pinned_verifier", return_value=updates), \
@@ -92,6 +100,156 @@ class InstallerTests(unittest.TestCase):
     def preview(self):
         with self.network():
             return install.preview(destination=self.destination, cache_dir=self.cache, tag=self.tag)
+
+    def metadata_network(self, responses):
+        def fetch(url, limit, timeout):
+            self.assertEqual(limit, install.MAX_METADATA_BYTES)
+            response = responses[url]
+            if isinstance(response, Exception):
+                raise response
+            return response if isinstance(response, bytes) else json.dumps(response).encode()
+        return patch.object(install, "_fetch", side_effect=fetch)
+
+    def latest_not_found(self):
+        error = urllib.error.HTTPError(install.LATEST_RELEASE_URL, 404, "Not Found", {}, None)
+        self.addCleanup(error.close)
+        return error
+
+    def test_empty_list_retries_then_finds_published_latest(self):
+        self.configure_release("0.3.4")
+        responses = {install.RELEASES_URL: [], install.RELEASES_URL + "&page=1": [],
+                     install.LATEST_RELEASE_URL: self.release}
+        with self.metadata_network(responses) as fetch:
+            chosen = install._select_release(install._releases(5))
+        self.assertEqual(chosen["version"], "0.3.4")
+        self.assertEqual([call.args[0] for call in fetch.call_args_list], list(responses))
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(self.cache.exists())
+
+    def test_empty_list_retry_preserves_prereleases_when_latest_is_404(self):
+        responses = {install.RELEASES_URL: [], install.RELEASES_URL + "&page=1": [self.release],
+                     install.LATEST_RELEASE_URL: self.latest_not_found()}
+        with self.metadata_network(responses):
+            self.assertEqual(install._releases(5), [self.release])
+        responses[install.RELEASES_URL + "&page=1"] = []
+        with self.metadata_network(responses):
+            self.assertEqual(install._releases(5), [])
+
+    def test_stale_list_is_reconciled_without_losing_semver_order(self):
+        self.configure_release("0.3.3")
+        older = self.release
+        self.configure_release("0.3.4")
+        newer = self.release
+        for listed, latest in ((older, newer), (newer, older)):
+            with self.subTest(listed=listed["tag_name"], latest=latest["tag_name"]), \
+                 self.metadata_network({install.RELEASES_URL: [listed], install.LATEST_RELEASE_URL: latest}):
+                chosen = install._select_release(install._releases(5))
+                self.assertEqual(chosen["version"], "0.3.4")
+
+    def test_latest_replaces_same_tag_with_fresh_asset_metadata(self):
+        self.configure_release("0.3.4")
+        responses = {install.RELEASES_URL: [dict(self.release, assets=[])],
+                     install.LATEST_RELEASE_URL: self.release}
+        with self.metadata_network(responses):
+            rows = install._releases(5)
+        self.assertEqual(rows, [self.release])
+        self.assertEqual(install._select_release(rows)["version"], "0.3.4")
+
+    def test_pagination_retries_only_first_empty_page_and_keeps_page_bound(self):
+        prerelease = self.release
+        self.configure_release("0.3.4")
+        responses = {install.RELEASES_URL: [prerelease] * 100,
+                     install.RELEASES_URL + "&page=2": [], install.LATEST_RELEASE_URL: self.release}
+        with self.metadata_network(responses) as fetch:
+            self.assertEqual(install._select_release(install._releases(5))["version"], "0.3.4")
+        self.assertEqual([call.args[0] for call in fetch.call_args_list], list(responses))
+        responses = {install.RELEASES_URL if page == 1 else install.RELEASES_URL + f"&page={page}":
+                     [prerelease] * 100 for page in range(1, 6)}
+        with self.metadata_network(responses) as fetch, self.assertRaisesRegex(install.InstallError, "Слишком много"):
+            install._releases(5)
+        self.assertEqual(fetch.call_count, 5)
+
+    def test_malformed_list_and_latest_fail_closed(self):
+        self.configure_release("0.3.4")
+        for malformed in ({}, [self.release] * 101, b'{"same":1,"same":2}', b"not json"):
+            with self.subTest(list=malformed if not isinstance(malformed, list) else "oversized"), \
+                 self.metadata_network({install.RELEASES_URL: malformed}), self.assertRaises(install.InstallError):
+                install._releases(5)
+        invalid_latest = [[], {}, dict(self.release, draft=True), dict(self.release, published_at=None),
+                          dict(self.release, prerelease=True), dict(self.release, tag_name="v0.4.0-alpha.1"),
+                          dict(self.release, tag_name="main"), dict(self.release, tag_name=42),
+                          dict(self.release, html_url="https://github.com/other/aispa/releases/tag/v0.3.4"),
+                          b'{"same":1,"same":2}']
+        for latest in invalid_latest:
+            with self.subTest(latest=latest), self.metadata_network({install.RELEASES_URL: [self.release],
+                 install.LATEST_RELEASE_URL: latest}), self.assertRaises(install.InstallError):
+                install._releases(5)
+
+    def test_only_latest_404_is_tolerated_other_http_and_network_errors_propagate(self):
+        self.configure_release("0.3.4")
+        for error in (urllib.error.HTTPError(install.LATEST_RELEASE_URL, code, "failure", {}, None)
+                      for code in (401, 403, 429, 500)):
+            with self.subTest(code=error.code), self.metadata_network({install.RELEASES_URL: [self.release],
+                 install.LATEST_RELEASE_URL: error}), self.assertRaises(urllib.error.HTTPError):
+                install._releases(5)
+        with self.metadata_network({install.RELEASES_URL: self.latest_not_found()}), \
+             self.assertRaises(urllib.error.HTTPError):
+            install._releases(5)
+        with self.metadata_network({install.RELEASES_URL: [self.release],
+             install.LATEST_RELEASE_URL: urllib.error.URLError("offline")}), self.assertRaises(urllib.error.URLError):
+            install._releases(5)
+
+    def test_all_discovery_requests_share_one_deadline(self):
+        responses = {install.RELEASES_URL: [], install.RELEASES_URL + "&page=1": [],
+                     install.LATEST_RELEASE_URL: self.latest_not_found()}
+        with self.metadata_network(responses) as fetch, \
+             patch.object(install.time, "monotonic", side_effect=[100, 100, 101, 102]):
+            self.assertEqual(install._releases(5), [])
+        self.assertEqual([call.args[2] for call in fetch.call_args_list], [5, 4, 3])
+        with self.metadata_network(responses) as fetch, \
+             patch.object(install.time, "monotonic", side_effect=[100, 100, 103]), \
+             self.assertRaisesRegex(install.InstallError, "Истекло время"):
+            install._releases(2)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_api_fetch_revalidates_metadata_without_changing_asset_headers(self):
+        asset_url = f"https://github.com/{install.REPOSITORY}/releases/download/{self.tag}/aispa.zip"
+        for url in (install.RELEASES_URL, asset_url):
+            with self.subTest(url=url):
+                response = Mock(headers={})
+                response.geturl.return_value = url
+                response.read1.return_value = b""
+                opener = Mock()
+                opener.open.return_value = contextlib.nullcontext(response)
+                with patch.object(install.urllib.request, "build_opener", return_value=opener):
+                    self.assertEqual(install._fetch(url, install.MAX_METADATA_BYTES, 5), b"")
+                request = opener.open.call_args.args[0]
+                self.assertEqual(request.get_header("Cache-control"), "no-cache" if url == install.RELEASES_URL else None)
+
+    def test_explicit_tag_fetches_exact_published_release_without_listing(self):
+        self.configure_release("0.3.4-rc.1+build.2")
+        tag_url = install.API + "/releases/tags/" + urllib.parse.quote(self.tag, safe="")
+        with self.metadata_network({tag_url: self.release}) as fetch, \
+             patch.object(install, "_releases", side_effect=AssertionError("list queried")):
+            chosen = install._tag_release(self.tag, 5)
+        self.assertEqual(chosen["tag"], self.tag)
+        fetch.assert_called_once_with(tag_url, install.MAX_METADATA_BYTES, 5)
+        with self.network(), patch.object(install, "_releases", side_effect=AssertionError("list queried")):
+            receipt = install.preview(destination=self.destination, cache_dir=self.cache, tag=self.tag)
+        self.assertEqual(receipt["tag"], self.tag)
+
+    def test_explicit_tag_validation_runs_before_network_and_rejects_wrong_release(self):
+        for tag in ("", "main", "v01.2.3", "v0.3.4/other", "v0.3.4?query", "v" + "1" * 128, 42):
+            with self.subTest(tag=tag), patch.object(install, "_fetch") as fetch, self.assertRaises(install.InstallError):
+                install._tag_release(tag, 5)
+            fetch.assert_not_called()
+        tag_url = install.API + "/releases/tags/" + urllib.parse.quote(self.tag, safe="")
+        for row in ([], dict(self.release, tag_name="v0.3.4"), dict(self.release, draft=True),
+                    dict(self.release, published_at=None), dict(self.release, assets=[])):
+            with self.subTest(row=row), self.metadata_network({tag_url: row}), self.assertRaises(install.InstallError):
+                install._tag_release(self.tag, 5)
+        with self.metadata_network({tag_url: self.latest_not_found()}), self.assertRaises(urllib.error.HTTPError):
+            install._tag_release(self.tag, 5)
 
     def test_real_cli_argv_preview_then_confirmed_install_to_unicode_path(self):
         self.destination = self.root / "проект с пробелом" / ".agents" / "skills" / "aispa"

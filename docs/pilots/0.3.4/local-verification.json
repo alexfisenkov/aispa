@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-10-22T17:23:10.506976+00:00",
+  "command": "PYTHONPATH=tests python3 -B -m unittest test_updates test_install test_windows_portable_tools -v",
+  "exitCode": 0,
+  "provenance": "Test command and exit code observed by the orchestrator; hashes recorded after the run with no subsequent source/test edits.",
+  "baseCommit": "dee8837208cfb98ee1e6047258ee0dac7353d76c",
+  "files": {
+    "skills/aispa/tools/aispa_core/updates.py": "145f7cc3a0b240156061ff00ec7a6ef97a17bef855859567cf93e7ed39779013",
+    "tools/install.py": "0456061c68a68d93d1d61e5995d6033da468cb04472c967f379dfcdc257014cd",
+    "tests/test_updates.py": "82d09c7a26b6d58d5a90e41e5475c128f40a630ec6550cac5c7b9f1bba445aea",
+    "tests/test_install.py": "831226b48a0ff45b3b897a487842e1ef07ffbaaa7c02ab3b52f150444054ec8d",
+    "tests/test_windows_portable_tools.py": "b03736f2f571773b2c6e2c8e56bf5157ab1607e819ea285a675a11a6939a78dd",
+    ".github/workflows/checks.yml": "25a5b3ed99e2145604d0e6ab5a7460a01278e460ee71de7271b84220ba2d7f16"
+  },
+  "logSha256": "27e33b90d6d8ec86f7578101fba4c300209e9c94644cff5797b4b8de2eeb7fd5",
+  "tests": 77,
+  "skipped": 3,
+  "passed": 74
+}

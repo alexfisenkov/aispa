@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import http.client
 import importlib.util
@@ -80,7 +81,15 @@ class UpdateTests(unittest.TestCase):
 
     def network(self, releases):
         self.assets[updates.RELEASES_URL] = json.dumps(releases).encode()
-        return patch.object(updates, "_download", side_effect=lambda url, limit, deadline: self.assets[url])
+        self.assets.setdefault(updates.RELEASES_URL + "&page=1", json.dumps(releases).encode())
+        def download(url, limit, deadline):
+            if url == updates.LATEST_RELEASE_URL and url not in self.assets:
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+            value = self.assets[url]
+            if isinstance(value, Exception):
+                raise value
+            return value
+        return patch.object(updates, "_download", side_effect=download)
 
     def prepare(self):
         with self.network([self.release()]):
@@ -166,6 +175,131 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(updates.check(self.package)["status"], "offline")
         self.assertEqual(updates._snapshot(self.package)[1], before)
         self.assertEqual(list(self.package.parent.iterdir()), [self.package])
+
+    def test_empty_list_finds_latest_and_prepare_uses_same_discovery(self):
+        release = self.release("0.2.0")
+        self.assets[updates.LATEST_RELEASE_URL] = json.dumps(release).encode()
+        before = updates._snapshot(self.package)
+        with self.network([]) as fetch:
+            result = updates.check(self.package)
+            self.assertEqual(result["status"], "available")
+            self.assertEqual(result["release"]["version"], "0.2.0")
+            self.assertEqual([call.args[0] for call in fetch.call_args_list],
+                             [updates.RELEASES_URL, updates.RELEASES_URL + "&page=1", updates.LATEST_RELEASE_URL])
+            self.assertEqual(updates._snapshot(self.package), before)
+            candidate = updates.prepare(self.package)
+        self.assertEqual(candidate["version"], "0.2.0")
+        self.assertEqual(updates._snapshot(self.package), before)
+        receipt = updates.apply(self.package, candidate["candidateId"], confirmed=True)
+        self.assertEqual(updates._version(self.package), "0.2.0")
+        updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual(updates._snapshot(self.package), before)
+
+    def test_empty_first_page_retry_can_recover_prerelease(self):
+        release = self.release()
+        self.assets[updates.RELEASES_URL + "&page=1"] = json.dumps([release]).encode()
+        with self.network([]):
+            result = updates.check(self.package)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["release"]["version"], "0.1.0-alpha.3")
+
+    def test_stale_nonempty_list_is_reconciled_with_latest(self):
+        self.write_package(self.package, self.package_content("0.1.0"))
+        old, latest = self.release("0.1.0"), self.release("0.2.0")
+        self.assets[updates.LATEST_RELEASE_URL] = json.dumps(latest).encode()
+        with self.network([old]):
+            result = updates.check(self.package)
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["release"]["version"], "0.2.0")
+
+    def test_latest_does_not_override_semver_order_or_prerelease_channel(self):
+        latest = self.release("0.2.0")
+        newer_stable, preview = self.release("0.3.0"), self.release("0.4.0-alpha.1")
+        self.assets[updates.LATEST_RELEASE_URL] = json.dumps(latest).encode()
+        with self.network([newer_stable, preview]):
+            self.assertEqual(updates.check(self.package)["release"]["version"], "0.4.0-alpha.1")
+            self.write_package(self.package, self.package_content("0.1.0"))
+            self.assertEqual(updates.check(self.package)["release"]["version"], "0.3.0")
+
+    def test_direct_latest_refreshes_same_tag_assets_without_duplicate_tie(self):
+        latest = self.release("0.2.0")
+        stale = copy.deepcopy(latest)
+        stale["assets"] = []
+        self.assets[updates.LATEST_RELEASE_URL] = json.dumps(latest).encode()
+        with self.network([stale, stale]):
+            self.assertEqual(updates.check(self.package)["status"], "available")
+        latest["assets"] = []
+        self.assets[updates.LATEST_RELEASE_URL] = json.dumps(latest).encode()
+        with self.network([stale]):
+            self.assertEqual(updates.check(self.package)["status"], "invalid_release")
+
+    def test_latest_metadata_is_not_silently_ignored(self):
+        good = self.release("0.2.0")
+        bad_records = [[], None, {},
+                       dict(good, draft=True), dict(good, published_at=None),
+                       dict(good, prerelease=True), dict(good, tag_name="main"),
+                       dict(good, tag_name="v0.2.0-alpha.1"),
+                       dict(good, html_url="https://github.com/other/aispa/releases/tag/v0.2.0")]
+        for bad in bad_records:
+            with self.subTest(value=bad):
+                self.assets[updates.LATEST_RELEASE_URL] = json.dumps(bad).encode()
+                with self.network([good]):
+                    self.assertEqual(updates.check(self.package)["status"], "invalid_release")
+        self.assets[updates.LATEST_RELEASE_URL] = b'{"draft":false,"draft":true}'
+        with self.network([]):
+            self.assertEqual(updates.check(self.package)["status"], "invalid_release")
+
+    def test_latest_errors_never_report_no_release_or_current(self):
+        for error in [urllib.error.HTTPError(updates.LATEST_RELEASE_URL, code, "error", {}, None)
+                      for code in (403, 429, 500)] + [urllib.error.URLError("offline"), TimeoutError()]:
+            with self.subTest(error=error):
+                self.assets[updates.LATEST_RELEASE_URL] = error
+                with self.network([]):
+                    self.assertEqual(updates.check(self.package)["status"], "offline")
+                with self.network([self.release("0.1.0-alpha.1")]):
+                    self.assertEqual(updates.check(self.package)["status"], "offline")
+
+    def test_empty_terminal_page_is_not_retried_and_requests_share_deadline(self):
+        row = self.release()
+        self.assets[updates.RELEASES_URL + "&page=2"] = b'[]'
+        with self.network([row] * 100) as fetch:
+            self.assertEqual(updates.check(self.package)["status"], "available")
+        self.assertEqual([call.args[0] for call in fetch.call_args_list],
+                         [updates.RELEASES_URL, updates.RELEASES_URL + "&page=2", updates.LATEST_RELEASE_URL])
+        self.assertEqual(len({call.args[2] for call in fetch.call_args_list}), 1)
+
+    def test_page_bound_and_malformed_list_remain_errors(self):
+        row = self.release()
+        for page in range(2, 6):
+            self.assets[updates.RELEASES_URL + f"&page={page}"] = json.dumps([row] * 100).encode()
+        with self.network([row] * 100) as fetch:
+            self.assertEqual(updates.check(self.package)["status"], "invalid_release")
+            self.assertEqual(fetch.call_count, 5)
+        for bad in ({}, [row] * 101):
+            with self.network(bad):
+                self.assertEqual(updates.check(self.package)["status"], "invalid_release")
+
+    def test_api_requests_revalidate_cache_and_keep_deadline(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.geturl.return_value = updates.RELEASES_URL
+        response.headers = {}
+        response.read1.side_effect = [b'[]', b'']
+        opener = Mock()
+        opener.open.return_value = response
+        with patch.object(updates.urllib.request, "build_opener", return_value=opener), \
+             patch.object(updates.time, "monotonic", return_value=10):
+            self.assertEqual(updates._download(updates.RELEASES_URL, 100, 12), b'[]')
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.get_header("Cache-control"), "no-cache")
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(opener.open.call_args.kwargs["timeout"], 2)
+        with patch.object(updates.urllib.request, "build_opener") as build, \
+             patch.object(updates.time, "monotonic", return_value=12):
+            with self.assertRaises(TimeoutError):
+                updates._download(updates.LATEST_RELEASE_URL, 100, 12)
+            build.assert_not_called()
 
     def test_selects_newest_semver_not_api_order(self):
         with self.network([self.release("0.1.0-alpha.3"), self.release("0.1.0-alpha.12"), self.release("0.1.0-alpha.2")]):

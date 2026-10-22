@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -29,6 +30,7 @@ REPOSITORY = "alexfisenkov/aispa"
 API = f"https://api.github.com/repos/{REPOSITORY}"
 GIT_URL = f"https://github.com/{REPOSITORY}.git"
 RELEASES_URL = API + "/releases?per_page=100"
+LATEST_RELEASE_URL = API + "/releases/latest"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_FILES = 2048
@@ -115,8 +117,10 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
 def _fetch(url, limit, timeout):
     _trusted_url(url)
     _need(isinstance(timeout, (int, float)) and 0 < timeout <= 120, "Некорректный тайм-аут")
-    request = urllib.request.Request(url, headers={"User-Agent": "AISpa-first-installer",
-                                                  "Accept": "application/vnd.github+json"})
+    headers = {"User-Agent": "AISpa-first-installer", "Accept": "application/vnd.github+json"}
+    if urllib.parse.urlsplit(url).hostname == "api.github.com":
+        headers["Cache-Control"] = "no-cache"
+    request = urllib.request.Request(url, headers=headers)
     opener = urllib.request.build_opener(_SafeRedirect())
     deadline = time.monotonic() + timeout
     with opener.open(request, timeout=min(timeout, 20)) as response:
@@ -155,20 +159,71 @@ def _semver(version):
 
 
 def _releases(timeout):
+    _need(isinstance(timeout, (int, float)) and 0 < timeout <= 120, "Некорректный тайм-аут")
+    deadline = time.monotonic() + timeout
     rows = []
+
+    def metadata(url):
+        remaining = deadline - time.monotonic()
+        _need(remaining > 0, "Истекло время обнаружения выпусков")
+        return _json(_fetch(url, MAX_METADATA_BYTES, remaining))
+
+    def page_rows(url):
+        batch = metadata(url)
+        _need(isinstance(batch, list) and len(batch) <= 100, "Неверный список GitHub Releases")
+        return batch
+
     for page in range(1, 6):
         url = RELEASES_URL if page == 1 else RELEASES_URL + f"&page={page}"
-        batch = _json(_fetch(url, MAX_METADATA_BYTES, timeout))
-        _need(isinstance(batch, list) and len(batch) <= 100, "Неверный список GitHub Releases")
+        batch = page_rows(url)
+        if page == 1 and not batch:
+            batch = page_rows(RELEASES_URL + "&page=1")
         rows.extend(batch)
         if len(batch) < 100:
-            return rows
-    raise InstallError("Слишком много выпусков для безопасного выбора")
+            break
+    else:
+        raise InstallError("Слишком много выпусков для безопасного выбора")
+
+    # A separate published-release endpoint corroborates empty or stale lists;
+    # its record replaces the same tag, while selection still uses SemVer.
+    try:
+        latest = metadata(LATEST_RELEASE_URL)
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        if exc.code != 404:
+            raise
+        return rows
+    _need(isinstance(latest, dict) and latest.get("draft") is False
+          and latest.get("prerelease") is False and latest.get("published_at"),
+          "GitHub вернул некорректный последний выпуск")
+    tag = latest.get("tag_name")
+    _need(isinstance(tag, str) and _semver(tag.removeprefix("v"))[3],
+          "Последний стабильный выпуск не имеет стабильной версии")
+    expected = f"https://github.com/{REPOSITORY}/releases/tag/{urllib.parse.quote(tag, safe='')}"
+    _need(latest.get("html_url") == expected, "Некорректный адрес последнего выпуска")
+    return [row for row in rows if not isinstance(row, dict) or row.get("tag_name") != tag] + [latest]
+
+
+def _validate_tag(tag):
+    _need(isinstance(tag, str) and len(tag) <= 128
+          and re.fullmatch(r"v?[0-9A-Za-z.+-]+", tag), "Некорректный tag")
+    _semver(tag.removeprefix("v"))
+
+
+def _tag_release(tag, timeout):
+    # Explicit versions must be published Releases, not just Git refs. Validate
+    # before network access and never depend on the global list for this route.
+    _validate_tag(tag)
+    url = API + "/releases/tags/" + urllib.parse.quote(tag, safe="")
+    row = _json(_fetch(url, MAX_METADATA_BYTES, timeout))
+    _need(isinstance(row, dict) and row.get("tag_name") == tag,
+          "Опубликованный Release не соответствует запрошенному tag")
+    return _select_release([row], tag)
 
 
 def _select_release(rows, tag=None):
-    _need(tag is None or (isinstance(tag, str) and len(tag) <= 128
-                          and re.fullmatch(r"v?[0-9A-Za-z.+-]+", tag)), "Некорректный tag")
+    if tag is not None:
+        _validate_tag(tag)
     eligible = []
     for row in rows:
         if not isinstance(row, dict) or row.get("draft") is not False or not row.get("published_at"):
@@ -391,7 +446,7 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
                                 destination=destination, home=home)
     _need(isinstance(timeout, (int, float)) and 0 < timeout <= 120, "Тайм-аут должен быть 0–120 секунд")
     _system_ca_bundle()
-    release = _select_release(_releases(timeout), tag)
+    release = _tag_release(tag, timeout) if tag is not None else _select_release(_releases(timeout))
     commit = _source_commit(release["tag"], timeout)
     cache = _cache(cache_dir)
     candidate = Path(tempfile.mkdtemp(prefix="aispa-install-", dir=cache))
