@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, dashboard-fix]
+        options: [full, runtimes, dashboard, dashboard-fix, labels]
 permissions:
   contents: read
 jobs:
@@ -68,6 +68,11 @@ jobs:
           python -B -m unittest -v
           test_workflow.WorkflowTests.test_live_projection_includes_blockers_before_final_delivery
           test_timing
+      - name: Label release compatibility
+        if: inputs.scope == 'labels'
+        env:
+          PYTHONPATH: tests
+        run: python -B -m unittest test_label_release_compat -v
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan

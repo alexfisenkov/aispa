@@ -1,0 +1,41 @@
+{
+  "version": "0.3.3",
+  "checks": [
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--test",
+        "tests/dashboard.test.cjs"
+      ],
+      "exitCode": 0
+    },
+    {
+      "name": "python",
+      "command": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "test_label_release_compat",
+        "test_dashboard_server.DashboardServerTests.test_start_status_stop_and_port_reuse",
+        "-v"
+      ],
+      "exitCode": 0
+    }
+  ],
+  "nodeTests": 69,
+  "pythonTests": 2,
+  "fullModelRuns": 0,
+  "ui": "IAB synthetic completed task after code change; task and requirement retain implemented, check remains stale",
+  "critics": {
+    "tech": "OK round 2",
+    "reality": "OK round 2"
+  },
+  "files": {
+    "preview.png": "74dc0632673abfa4e277555d8068249c9b5ec2ced1ecf2fcfb70f7ca3012dd6a",
+    "node.log": "056fe8d2432bbcd23bd8830fcab18d42f43157355358aef36f9e2930a2e71be0",
+    "preview.txt": "b0a9251f7888bbe6ae1f26b9a9c27c7544b5f26ec5478deeaf24040d931c1e6e",
+    "python.log": "c94e905640436f291ea57a6a0ccc1ed43c4ff2980236639c72f6a21ed0e7354b"
+  }
+}
