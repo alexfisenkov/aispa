@@ -35,6 +35,8 @@ COMMIT = ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "comm
 
 class Scenario(unittest.TestCase):
     """Shared steps; the CLI plumbing is borrowed from test_cli by attribute."""
+    # Whole-run steps (acceptance, clean clone) exceed 20 s on slow Windows CI.
+    cli_timeout = 120
     setUp = test_cli.CliTests.setUp
     tearDown = test_cli.CliTests.tearDown
     git = test_cli.CliTests.git

@@ -45,7 +45,8 @@ class CliTests(unittest.TestCase):
     def call(self, *args, expected=0, cli=None):
         cli = cli or (CLI if args and args[0] == "init" else getattr(self, "cli", CLI))
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
-                           text=True, capture_output=True, timeout=20, encoding="utf-8", env=self.command_env,
+                           text=True, capture_output=True, timeout=getattr(self, "cli_timeout", 20),
+                           encoding="utf-8", env=self.command_env,
                            cwd=getattr(self, "command_cwd", None))
         self.assertEqual(r.returncode, expected, r.stderr + r.stdout)
         if expected:
