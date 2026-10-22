@@ -1,0 +1,108 @@
+{
+  "profile": "runtimes",
+  "modules": [
+    "test_runtime_support",
+    "test_runtime_evidence",
+    "test_install",
+    "test_updates",
+    "test_project_context",
+    "test_portable_context",
+    "test_store",
+    "test_git_snapshot",
+    "test_task_tiers",
+    "test_lean_control",
+    "test_check_modes",
+    "test_context_navigation",
+    "test_discovery",
+    "test_docmeta_integration",
+    "test_packets",
+    "test_team",
+    "test_knowledge",
+    "test_carryover",
+    "test_telemetry",
+    "test_cli",
+    "test_blind",
+    "test_cleanroom",
+    "test_windows_cli",
+    "test_windows_paths",
+    "test_windows_cleanroom",
+    "test_windows_portable_tools"
+  ],
+  "collectedTests": 420,
+  "fullModelRuns": 0,
+  "nativeModelExecution": "not_run",
+  "fullRepositorySuite": "not_run",
+  "repair": {
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "-v",
+      "test_install",
+      "test_runtime_evidence",
+      "test_store",
+      "test_discovery",
+      "test_context_navigation",
+      "test_docmeta_integration",
+      "test_packets"
+    ],
+    "cwd": "tests",
+    "exitCode": 0,
+    "log": "repair-tests.log",
+    "logSha256": "b9e6b298781816d7ab98b23ffa737e31d4603b1b382ebce780eab512ac7a163a",
+    "fullModelRuns": 0
+  },
+  "rulesRegistry": {
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "-v",
+      "test_runtime_evidence",
+      "test_discovery"
+    ],
+    "cwd": "tests",
+    "exitCode": 0,
+    "logSha256": "7fad48674a24dbe95c47e301d8cf3a16f3a7ef489bf5e14ef464b76162a7d054"
+  },
+  "links": {
+    "checked": 155,
+    "missing": [],
+    "exitCode": 0,
+    "method": "changed Markdown local relative links; external URLs and anchors excluded"
+  },
+  "initialRegression": {
+    "tests": 357,
+    "skips": 12,
+    "exitCode": 0,
+    "elapsedSeconds": 96.897,
+    "logSha256": "3e3195ff5369bd83738bdc7fe4d8b60baecd4ca37eebfdc4755f0a27f70b1ff4"
+  },
+  "initialExtraModules": {
+    "tests": 60,
+    "errors": 2,
+    "skips": 1,
+    "exitCode": 1,
+    "reason": "test invocation used tests cwd; namespace imports require project root",
+    "followup": "cli-repair.json"
+  },
+  "cliRepair": {
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "-v",
+      "test_cli.CliTests.test_full_cli_scenario",
+      "test_windows_cli.WindowsCliEncodingTests.test_cli_utf8_with_legacy_pipe_encoding_and_bom_inputs"
+    ],
+    "cwd": ".",
+    "environment": {
+      "PYTHONPATH": "tests"
+    },
+    "exitCode": 0,
+    "logSha256": "3213ee3e4d57889302f8a99dc617d21523d99f68985b5b9214cfe33944efd1ff"
+  }
+}

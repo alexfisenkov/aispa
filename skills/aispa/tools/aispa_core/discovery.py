@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import tomllib
 
-from .store import Invalid, digest
+from .store import Invalid, digest, NATIVE_RULE_INPUTS, native_rule_input
 from .portable import is_link, relative_name
 from . import docmeta
 
@@ -35,7 +35,7 @@ MANIFESTS = {"package.json", "pyproject.toml", "Cargo.toml", "go.mod", "composer
 DOCUMENTS = {"readme.md", "architecture.md", "decisions.md", "contributing.md", "index.md",
              "data-dictionary.md", "glossary.md", "agents.md", "agents.override.md", "claude.md",
              "gemini.md", "testing.md", "conventions.md", "design.md"}
-SAFE_HIDDEN = {".editorconfig"}
+SAFE_HIDDEN = {".editorconfig"} | NATIVE_RULE_INPUTS
 CODE_NAMES = {"main", "app", "index", "server", "cli", "api", "routes", "router", "models",
               "schema", "database", "repository", "service", "store", "__main__", "__init__"}
 CODE_EXTENSIONS = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".swift", ".rb", ".php"}
@@ -71,7 +71,7 @@ def _kind(name, *, explicit=False):
     lower = path.name.lower()
     if any(part.lower() in SKIP_DIRS for part in path.parts[:-1]):
         return None
-    if any(part.startswith(".") for part in path.parts) and name not in SAFE_HIDDEN:
+    if any(part.startswith(".") for part in path.parts) and name not in SAFE_HIDDEN and not native_rule_input(name):
         return None
     if any(SECRET_NAME.search(part) for part in path.parts) or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx", ".keystore", ".sqlite", ".db", ".csv"}:
         return None
@@ -79,7 +79,7 @@ def _kind(name, *, explicit=False):
         return "document" if path.suffix.lower() == ".md" else "code"
     if path.name in MANIFESTS:
         return "manifest"
-    if name in SAFE_HIDDEN:
+    if name in SAFE_HIDDEN or native_rule_input(name):
         return "configuration"
     if lower in DOCUMENTS or (path.parts[0].lower() in {"docs", "doc", "adr"} and path.suffix.lower() == ".md"):
         return "document"

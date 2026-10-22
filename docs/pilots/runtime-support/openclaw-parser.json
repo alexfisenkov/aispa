@@ -1,0 +1,88 @@
+{
+  "checkedAt": "2026-10-22T09:25:31.525609+00:00",
+  "openclawVersion": "2026.7.1-2",
+  "probe": "exact extracted installed pure slash resolver executed in isolated Node VM; no package import",
+  "nativeFunction": "resolveSkillCommandInvocation",
+  "sources": [
+    {
+      "path": "openclaw/dist/chat-commands-CTkzfKoR.js",
+      "sha256": "0a97d6a44195d401415e28c1ceca9246012e22457e79aa1be3facacb08b1b2db",
+      "functions": [
+        "normalizeSkillCommandLookup",
+        "findSkillCommand",
+        "resolveSkillCommandInvocation"
+      ]
+    },
+    {
+      "path": "openclaw/dist/string-coerce-DW4mBlAt.js",
+      "sha256": "41b0b673667f6e8f1a4b0674b4b940144e9f84ef9d20b1afc8196c11cbe2c320",
+      "functions": [
+        "normalizeNullableString",
+        "normalizeOptionalString",
+        "normalizeOptionalLowercaseString"
+      ]
+    }
+  ],
+  "extractedSourceSHA256": "5f62fc079fe172c38625d45b3a4577765774f9ebfc824fea85469f967e169492",
+  "skill": {
+    "name": "aispa",
+    "version": "0.2.0",
+    "path": "~/.agents/skills/aispa/SKILL.md",
+    "disableModelInvocation": true
+  },
+  "commandSpecOrigin": "minimal resolver input derived from actual installed skill name/path; full command discovery not run in this probe",
+  "results": [
+    {
+      "input": "/aispa",
+      "result": {
+        "command": {
+          "name": "aispa",
+          "skillName": "aispa",
+          "skillFile": "~/.agents/skills/aispa/SKILL.md"
+        }
+      }
+    },
+    {
+      "input": "/aispa parser-only-check",
+      "result": {
+        "command": {
+          "name": "aispa",
+          "skillName": "aispa",
+          "skillFile": "~/.agents/skills/aispa/SKILL.md"
+        },
+        "args": "parser-only-check"
+      }
+    },
+    {
+      "input": "/skill aispa parser-only-check",
+      "result": {
+        "command": {
+          "name": "aispa",
+          "skillName": "aispa",
+          "skillFile": "~/.agents/skills/aispa/SKILL.md"
+        },
+        "args": "parser-only-check"
+      }
+    },
+    {
+      "input": "$aispa",
+      "result": null
+    },
+    {
+      "input": "AISpa parser-only-check",
+      "result": null
+    }
+  ],
+  "assertions": "PASS",
+  "noProviderCalls": true,
+  "noAppStartup": true,
+  "noNetworkCalls": true,
+  "userMessagesSent": 0,
+  "modelRequestsSent": 0,
+  "boundaries": [
+    "Proves the installed slash parser resolves /aispa and /skill aispa for this command spec.",
+    "Does not execute a skill, user turn, dispatcher, permissions flow, or model.",
+    "$aispa not recognized by this slash parser; other explicit-reference handling was not exercised.",
+    "Full discovery eligibility was checked separately; command registry construction not exercised here."
+  ]
+}

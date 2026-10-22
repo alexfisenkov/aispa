@@ -18,11 +18,11 @@ TIERS = ("light", "standard", "heavy")
 # "fast" is never declared in a plan: the owner's fast mode assigns it to attempts.
 WORKER_ONLY = frozenset({"light", "standard", "fast"})
 KINDS = frozenset({"documentation", "formatting", "presentation"})
-FORBIDDEN = re.compile(r"(?:^|[./_-])(?:agents?|claude|gemini|openclaw|crab|skills?|prompts?|instructions?|system|developer|cursor|copilot|codex|windsurf|aider|rules?|polic(?:y|ies)|config|settings|secrets?|auth|billing|payments?|migrations?|schema|contracts?|api|dependencies|lock|foundation|security|workflow|scripts?|tools?|src|tests?)(?:[./_-]|$)", re.I)
+FORBIDDEN = re.compile(r"(?:^|[./_-])(?:agents?|claude|gemini|antigravity|openclaw|crab|skills?|prompts?|instructions?|system|developer|cursor|copilot|codex|windsurf|aider|rules?|polic(?:y|ies)|config|settings|secrets?|auth|billing|payments?|migrations?|schema|contracts?|api|dependencies|lock|foundation|security|workflow|scripts?|tools?|src|tests?)(?:[./_-]|$)", re.I)
 INSTRUCTION_NAMES = frozenset({"soul.md", "identity.md", "user.md", "heartbeat.md", "bootstrap.md", "boot.md", "memory.md"})
 # Standard may write code, never agent rules, secrets, access, money, data shape
 # or shared contracts: those carry risk a per-task critic is meant to catch.
-SENSITIVE = re.compile(r"(?:^|[./_-])(?:agents?|claude|gemini|openclaw|crab|skills?|prompts?|instructions?|system|developer|cursor|copilot|codex|windsurf|aider|cline|rules?|conventions|mcp|polic(?:y|ies)|secrets?|credentials?|tokens?|keys?|login|billing|payments?|migrations?|schema|contracts?|foundation|security|github|gitlab|husky|vscode|devcontainer|dockerfile|docker|deploy|env|envrc|npmrc|pypirc|netrc|pem|p12|pfx|keystore|package|pyproject|requirements|lock)(?:[./_-]|$)", re.I)
+SENSITIVE = re.compile(r"(?:^|[./_-])(?:agents?|claude|gemini|antigravity|openclaw|crab|skills?|prompts?|instructions?|system|developer|cursor|copilot|codex|windsurf|aider|cline|rules?|conventions|mcp|polic(?:y|ies)|secrets?|credentials?|tokens?|keys?|login|billing|payments?|migrations?|schema|contracts?|foundation|security|github|gitlab|husky|vscode|devcontainer|dockerfile|docker|deploy|env|envrc|npmrc|pypirc|netrc|pem|p12|pfx|keystore|package|pyproject|requirements|lock)(?:[./_-]|$)", re.I)
 # Access and money words are matched inside identifiers too (userAuth, stripeCheckout).
 SENSITIVE_PART = re.compile(r"auth(?!or)|passw|permission|secret|credential|payment|billing|checkout|stripe|invoice|(?:cursor|windsurf|cline|agent)rules|правил|секрет|пароль|доступ(?!н)|оплат|платеж|платёж", re.I)
 # The narrow list that earns a stronger model: security, secrets, access, money,

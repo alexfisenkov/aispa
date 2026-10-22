@@ -1,0 +1,115 @@
+{
+  "assetWorkflow": {
+    "commit": "a4790ab20333a27d7afa3cde49a1cc0c8092399d",
+    "conclusion": "success",
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/39750083544"
+  },
+  "assets": {
+    "aispa-update.json": {
+      "bytes": 14705,
+      "sha256": "fb8ef891452f446d4a07e91f0e95ad338283df882ed5ab6ac7c558e61fb46c6f"
+    },
+    "aispa.zip": {
+      "bytes": 414504,
+      "sha256": "caf7dcf3c3008636f0c0c08f2c3aac43ea0fba601608d3a4b8ce1985b5384bda"
+    },
+    "install.py": {
+      "bytes": 31313,
+      "sha256": "ec1dce14ba1fbb27e2d5b1670e87e8f37623195e7877be206e29cec66f278e37"
+    }
+  },
+  "assetsMatchReproduciblePackage": true,
+  "ci": {
+    "commit": "a4790ab20333a27d7afa3cde49a1cc0c8092399d",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "conclusion": "success",
+        "name": "python (windows-latest, 3.11)"
+      },
+      {
+        "conclusion": "success",
+        "name": "python (macos-latest, 3.11)"
+      },
+      {
+        "conclusion": "success",
+        "name": "python (macos-latest, 3.13)"
+      },
+      {
+        "conclusion": "success",
+        "name": "python (ubuntu-latest, 3.11)"
+      },
+      {
+        "conclusion": "success",
+        "name": "python (windows-latest, 3.13)"
+      },
+      {
+        "conclusion": "success",
+        "name": "python (ubuntu-latest, 3.13)"
+      }
+    ],
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/39744521796"
+  },
+  "commit": "a4790ab20333a27d7afa3cde49a1cc0c8092399d",
+  "environment": {
+    "globalInstallationChanged": false,
+    "isolatedLocalDirectories": true,
+    "platform": "darwin",
+    "python": "3.14.0"
+  },
+  "firstInstall": {
+    "currentAfterInstall": true,
+    "defaultStableSelection": true,
+    "destinationHasUnicodeAndSpaces": true,
+    "fileCount": 80,
+    "fullManifestMatch": true,
+    "installed": true,
+    "installedVersion": "0.2.0",
+    "previewLeftDestinationAbsent": true,
+    "publishedInstallerMatchesPinnedSource": true,
+    "repeatRejectedWithoutChanges": true,
+    "skillReadBack": true
+  },
+  "latestStableReadBack": true,
+  "limitations": [
+    "Only the OS and Python version named above were exercised.",
+    "No model workflow, comparative quality, global install, or native Windows acceptance is claimed.",
+    "No crash/power-loss atomicity or independent publisher signature is claimed."
+  ],
+  "publicationStableDuringProbe": true,
+  "release": "https://github.com/alexfisenkov/aispa/releases/tag/v0.2.0",
+  "releaseState": {
+    "draft": false,
+    "prerelease": false,
+    "publishedAt": "2026-10-22T08:45:03Z"
+  },
+  "repository": "alexfisenkov/aispa",
+  "schema": 1,
+  "status": "PASS",
+  "updateTest": {
+    "availableAfterRollback": true,
+    "availableBeforeUpdate": true,
+    "baselineMatchesPublishedPackage": true,
+    "candidateMatchesPublishedManifest": true,
+    "currentAfterInstall": true,
+    "diff": {
+      "added": 2,
+      "changed": 42,
+      "removed": 0,
+      "unchangedCount": 36
+    },
+    "fileCount": 80,
+    "from": "0.1.0",
+    "fromCommit": "a2c7c1b55a6769f0795296350933c7049d067b8a",
+    "fromFileCount": 78,
+    "fullManifestMatch": true,
+    "fullSnapshotRestored": true,
+    "installed": true,
+    "replacedVersionRetained": true,
+    "rolledBack": true,
+    "separateFirstInstallationUnchanged": true,
+    "to": "0.2.0"
+  },
+  "verifiedAt": "2026-10-22T08:48:00+00:00",
+  "version": "0.2.0"
+}

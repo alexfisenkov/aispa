@@ -20,12 +20,23 @@ COMMON_INPUTS = {"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".
                  "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb", "pyproject.toml",
                  "uv.lock", "poetry.lock", "Pipfile", "Pipfile.lock", "Cargo.toml", "Cargo.lock", "go.mod",
                  "go.sum", "tsconfig.json", "jsconfig.json", "Makefile", "Dockerfile", "compose.yaml"}
+NATIVE_RULE_INPUTS = {".agents/rules/aispa.md", ".agents/rules.json", ".cursor/rules/aispa.mdc"}
+NATIVE_RULE_DIRS = {".agents/rules", ".cursor/rules"}
+COMMON_INPUTS |= NATIVE_RULE_INPUTS | NATIVE_RULE_DIRS
+
+
+def native_rule_input(name):
+    """Only project rule Markdown, never arbitrary hidden settings or credentials."""
+    name = match_name(name)
+    return any(name.startswith(match_name(folder) + "/") and name.endswith(extension)
+               for folder, extension in ((".agents/rules", ".md"), (".cursor/rules", ".mdc")))
 
 
 def common_input(name):
     names = {match_name(item) for item in COMMON_INPUTS}
     name = match_name(name)
-    return "/" not in name and (name in names or name.startswith("requirements") and name.endswith(".txt"))
+    return (name in names or native_rule_input(name)
+            or ("/" not in name and name.startswith("requirements") and name.endswith(".txt")))
 
 
 class Invalid(ValueError):
@@ -150,7 +161,7 @@ class Journal:
         if not state or state.get("schema") != SCHEMA:
             raise Invalid("Неподдерживаемая схема журнала")
         if state.get("version") != VERSION:
-            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10", "0.1.0"}
+            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10", "0.1.0", "0.2.0"}
             if not (handoff_only and state.get("version") in supported
                     and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
                 raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")

@@ -1,73 +1,75 @@
-# Первая установка AISpa из опубликованного Release
+# Установка AISpa из опубликованного Release
 
-Опубликован [стабильный выпуск 0.1.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.1.0).
-Берите `install.py` из этого Release; вместе с ним опубликованы
-`aispa.zip` и `aispa-update.json`. Все три файла скачаны и побайтно сверены
-со сборкой точного commit. Проверены первая установка 78 файлов, выбор stable
-по умолчанию, отказ повторной установки и alpha.10 → 0.1.0 → откат.
-Проверка доставки выполнена в изолированных каталогах macOS/Python 3.14;
-CI движка отдельно прошла на Windows, macOS и Linux.
-[Квитанция](pilots/0.1.0/release-verification.json) и
-[границы проверки](validation-0.1.0.md). Глобальные установки не менялись.
+Последний опубликованный выпуск — [0.2.0](https://github.com/alexfisenkov/aispa/releases/tag/v0.2.0):
+Codex, Claude Code и Cursor. **0.3.0 — рабочий кандидат, не опубликован**;
+OpenClaw, Gemini CLI и Antigravity доступны в его исходниках. Скачивание
+последнего Release сейчас не устанавливает новые адаптеры.
 
-Пошаговая инструкция для macOS, Linux и Windows — раздел «Установка» в [README](../README.md). Нужны Python 3.11+ и Git. Скачайте `install.py` из выбранного Release в рабочую
-папку и сохраните ссылку на этот выпуск. `preview` читает опубликованный tag,
-проверяет точный Git commit, manifest, ZIP, хеши и состав файлов и создаёт
-кандидата для просмотра. Он не создаёт папку навыка.
+Всегда берите `install.py`, `aispa.zip` и `aispa-update.json` из одного выбранного
+Release. Установщик из старого выпуска может не знать новые значения runtime.
+Нужны Python 3.11+ и Git; на Windows используйте `python -X utf8` или `py -3 -X utf8`.
+Скачивание и общие шаги — [README](../README.md#установка).
 
-Без `--tag` установщик выбирает самый новый опубликованный выпуск,
-у которого одновременно нет SemVer prerelease-суффикса и GitHub хранит
-`prerelease=false`. Более высокий prerelease его не вытесняет. Если stable
-ещё нет, preview завершится понятной ошибкой до подготовки; автоматического
-перехода на alpha нет. Явный `--tag v0.1.0-alpha.10` позволяет выбрать
-опубликованный предварительный выпуск. Draft и tag без опубликованного
-Release не подходят. Поле `prerelease` в квитанции сохраняет фактический
-булев флаг GitHub, а не вычисляется по дефису в строке версии.
+## Среда и область установки
 
-Пример проектной установки Codex из папки, где лежит скачанный `install.py`:
+| runtime | project | global | Доступность |
+|---|---|---|---|
+| codex | `.agents/skills/aispa` | `~/.codex/skills/aispa` | опубликовано |
+| claude-code | `.claude/skills/aispa` | `~/.claude/skills/aispa` | опубликовано |
+| cursor | `.cursor/skills/aispa` | `~/.cursor/skills/aispa` | опубликовано |
+| openclaw | `.agents/skills/aispa` | `~/.openclaw/skills/aispa` | кандидат 0.3.0 |
+| gemini | `.gemini/skills/aispa` | `~/.gemini/skills/aispa` | кандидат 0.3.0 |
+| antigravity | `.agents/skills/aispa` | `~/.gemini/config/skills/aispa` | кандидат 0.3.0 app/IDE |
+
+Project-пути отсчитываются от `--project-root`. Для global этот аргумент
+не нужен. Общая Codex-копия `~/.agents/skills/aispa` выбирается через
+`--destination`; существующую папку обновляют, а не устанавливают поверх неё.
+Приоритеты дублирующих копий и Antigravity CLI — [адаптеры](../skills/aispa/references/native-agents.md).
+
+## Preview и apply
+
+Для опубликованных сред, из папки со скачанным установщиком:
 
 ```text
-python3 install.py preview --runtime codex --scope project --project-root <абсолютный-корень-проекта>
+python3 install.py preview --runtime claude-code --scope project --project-root <абсолютный-корень-проекта>
 ```
 
-На Windows используйте доступный Python 3.11+: `python -X utf8 install.py`
-или `py -3 -X utf8 install.py` с теми же аргументами. Для Claude Code укажите
-`--runtime claude-code`, для Cursor — `--runtime cursor`. Проектная установка
-выбирает `.agents/skills/aispa/`, `.claude/skills/aispa/` или
-`.cursor/skills/aispa/` соответственно. Глобальная установка использует
-`--scope global` без `--project-root` и выбирает `~/.codex/skills/aispa/`,
-`~/.claude/skills/aispa/` или `~/.cursor/skills/aispa/`; автоматически она не выполняется.
-Вместо runtime/scope можно указать отдельный свободный абсолютный каталог
-через `--destination`.
+После публикации выпуска с новыми адаптерами его `install.py` принимает:
 
-После `preview` проверьте в квитанции `candidateId`, `destination`, `tag`,
-`version`, `prerelease`, `commit`, `releaseUrl`, `archiveSha256` и `candidateDigest`. Когда
-выбран именно этот кандидат и путь свободен:
+```text
+python3 install.py preview --runtime openclaw --scope global
+python3 install.py preview --runtime gemini --scope global
+python3 install.py preview --runtime antigravity --scope global
+```
+
+Это альтернативы: выберите нужную среду. Пока подходящего выпуска нет,
+новый установщик отклоняет пакет, в котором выбранный runtime не объявлен.
+Номер версии и новый путь сами по себе не доказывают поддержку.
+Вместо runtime/scope можно задать свободный абсолютный `--destination`;
+он не выбирает и не доказывает совместимость среды.
+
+Preview проверяет опубликованный tag/commit, manifest, SHA-256 ZIP, состав,
+размеры и права файлов, сохраняет кандидата в `~/.aispa-installs/` либо в
+выбранном `--cache-dir`. Папка назначения ещё не создаётся.
+Проверьте `candidateId`, `destination`, `runtime`, `version`, `prerelease`,
+`commit`, `releaseUrl`, `archiveSha256`, `candidateDigest`. После решения об установке:
 
 ```text
 python3 install.py apply --candidate <candidateId> --confirm
 ```
 
-`--confirm` означает уже принятое решение об установке. Apply повторно
-проверяет файлы кандидата и создаёт **новую** папку назначения; существующий
-пакет не перезаписывается. Если каталог появился после preview или проверка
-разошлась, операция останавливается. Частично созданный каталог при ошибке
-сохраняется для осмотра, а не удаляется вслепую. Кандидат и квитанции остаются
-в `~/.aispa-installs/`, если не выбран иной `--cache-dir`.
+При нестандартном кэше передайте тот же `--cache-dir` в apply. Подтверждение
+не заменяет выбор пользователя. Apply повторно проверяет кандидата и
+поддержку runtime, не перезаписывает существующую папку, отказывается при
+конфликте/изменении кандидата. Черновик, main или tag без Release не подходят.
 
-После установки откройте `SKILL.md` установленного пакета. Его первое действие
-при явном вызове — `update-check`; обновление действующего пакета проходит
-отдельный цикл prepare → просмотр → apply из [регламента обновлений](updates.md).
-Начатый прогон продолжает работать своей закреплённой копией runtime.
+## После установки
 
-Опубликованные ресурсы 0.1.0 прошли реальный preview/apply, обновление и откат
-с сохранением файлов, режимов, активного журнала и закреплённого runtime.
-Модельный запуск и проверка всех пользовательских сред этим не подтверждаются;
-подробности — [validation-0.1.0.md](validation-0.1.0.md).
+Прочитайте установленный SKILL.md, откройте новую сессию агента и проверьте
+каталог навыков. При явном вызове первым действием выполняется `update-check`.
+Обновление существующего пакета и откат — [updates.md](updates.md).
+Активный прогон продолжает работать собственным закреплённым runtime.
 
-Доверие к установке основано на фиксированном GitHub publisher, HTTPS,
-опубликованном tag, проверенном commit и хешах ресурсов. Это не независимая
-цифровая подпись. Копирование исходников из ветки main или одного ZIP без
-сверки Release не заменяет этот маршрут. Проверка в коде — `tools/install.py`,
-сборка трёх ресурсов — `tools/package_update.py` и
-`.github/workflows/release.yml`.
+Проверенная доставка 0.2.0 описана в [validation-0.2.0.md](validation-0.2.0.md).
+Адресные тесты кандидата — [validation-agent-runtimes.md](validation-agent-runtimes.md).
+Они не подтверждают полное модельное исполнение и не означают публикацию 0.3.0.
