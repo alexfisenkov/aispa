@@ -1,0 +1,40 @@
+{
+  "command": "python3 <installed-skill>/tools/aispa.py --root <active-owner-project> dashboard refresh-view --port 53423",
+  "exitCode": 0,
+  "url": "http://127.0.0.1:53423/dashboard.html",
+  "running": true,
+  "contextCurrent": true,
+  "runVersion": "0.3.0",
+  "dashboardVersion": "0.3.2",
+  "readerMode": "compatible-view",
+  "pinnedBefore": "52d9e7effc48fe32459b768af36ecc217eaf628027fc5dfadb43b88d9db6e38b",
+  "pinnedAfter": "52d9e7effc48fe32459b768af36ecc217eaf628027fc5dfadb43b88d9db6e38b",
+  "activePointerUnchanged": true,
+  "journalPrefixUnchanged": true,
+  "journalBytesBefore": 26910305,
+  "journalBytesAfter": 26910305,
+  "wholeJournalUnchanged": true,
+  "nativeUiReadBack": {
+    "surface": "Codex IAB",
+    "versionLabel": "0.3.2 \u00b7 \u043f\u0440\u043e\u0435\u043a\u0442 0.3.0",
+    "liveDataLabel": true,
+    "observedCompletedTaskIds": [
+      "T01",
+      "T02",
+      "T03",
+      "T05"
+    ],
+    "observedRunningTaskIds": [
+      "T04"
+    ],
+    "observedPendingTaskIds": [
+      "T06"
+    ],
+    "observedEtaMinutes": [
+      46,
+      101
+    ],
+    "timeSensitiveSnapshot": true,
+    "rawEvidenceKeptPrivate": true
+  }
+}

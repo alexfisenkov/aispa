@@ -1,0 +1,26 @@
+{
+  "version": "0.3.2",
+  "sourceCommit": "8698e979988e76906f48e872c5cfa45f1d1455f8",
+  "tag": "v0.3.2",
+  "url": "https://github.com/alexfisenkov/aispa/releases/tag/v0.3.2",
+  "packageTreeMatchesInitialCiCommit": true,
+  "fileCount": 89,
+  "assets": [
+    {
+      "name": "aispa.zip",
+      "size": 460309,
+      "sha256": "9ed57ec06b27ffb2409634295c4e075b289fecca0e87a1f5d64974728599803c"
+    },
+    {
+      "name": "aispa-update.json",
+      "size": 16380,
+      "sha256": "4463a614028702f28b2b59f39004a968002d8a7a0348e62abb49e5cd18b00916"
+    },
+    {
+      "name": "install.py",
+      "size": 32769,
+      "sha256": "36fc5b8ef93e97abf4ac1737b119c62610b02f60dc88b1f8542848bea4453f7f"
+    }
+  ],
+  "downloadMatchesBuild": true
+}
