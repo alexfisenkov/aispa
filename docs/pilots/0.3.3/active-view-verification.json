@@ -1,0 +1,12 @@
+{
+  "operation": "refresh-view",
+  "url": "http://127.0.0.1:53423/dashboard.html",
+  "exitCode": 0,
+  "runVersion": "0.3.0",
+  "dashboardVersion": "0.3.3",
+  "pinnedBefore": "52d9e7effc48fe32459b768af36ecc217eaf628027fc5dfadb43b88d9db6e38b",
+  "pinnedAfter": "52d9e7effc48fe32459b768af36ecc217eaf628027fc5dfadb43b88d9db6e38b",
+  "activeUnchanged": true,
+  "journalPrefixUnchanged": true,
+  "wholeJournalUnchanged": false
+}

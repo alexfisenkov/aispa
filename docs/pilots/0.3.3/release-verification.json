@@ -1,0 +1,23 @@
+{
+  "version": "0.3.3",
+  "commit": "f16a39d009ad7db5b3d1c36fce5e2b97417c507c",
+  "fileCount": 89,
+  "downloadedMatchesBuild": true,
+  "assets": [
+    {
+      "name": "aispa.zip",
+      "size": 461035,
+      "sha256": "14414eab3f2d1294b5e7216e0317309385f6195ca548e841de89eed481477f48"
+    },
+    {
+      "name": "aispa-update.json",
+      "size": 16380,
+      "sha256": "cf7c034ca78f3170b2f92c48446a202fdf0139a9f21fa45b71bc47047d84c422"
+    },
+    {
+      "name": "install.py",
+      "size": 32769,
+      "sha256": "36fc5b8ef93e97abf4ac1737b119c62610b02f60dc88b1f8542848bea4453f7f"
+    }
+  ]
+}
