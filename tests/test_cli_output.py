@@ -38,7 +38,7 @@ class CliOutputTests(unittest.TestCase):
 
     def init(self, compact_mode=False):
         result = self.call("init", "--slug", "output", "--title", "Русский проект 🙂",
-                           "--mode", "auto", "--runtime", "codex", compact_mode=compact_mode)
+                           "--mode", "auto", "--runtime", "codex", "--check", "balanced", compact_mode=compact_mode)
         output = json.loads(result.stdout)
         self.run = self.root / ".aispa" / output["runDirectory"]
         self.cli = self.run / "runtime/tools/aispa.py"

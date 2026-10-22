@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import PurePosixPath
 
+from . import check_modes
 from .contracts import active, artifact_valid, nonempty
 from .store import Invalid, canonical_zone, confined, digest, file_hash
 
@@ -19,9 +20,17 @@ LEAN_REQUIRED = {"strict": ("main", "error"), "balanced": ("main", "empty", "err
                  "deep": DIMENSIONS}
 
 
-def required_dimensions(state, depth=None):
+def required_dimensions(state, depth=None, mode=None):
     depth = depth or state.get("depth", "balanced")
     if state.get("policy", {}).get("leanControl") is True:
+        # The owner's check mode overrides the depth-scaled set; the report depth
+        # itself (and strict's ban on initiatives) stays the run's chosen depth.
+        # Saved scenarios are judged by the mode they were recorded under.
+        mode = mode or check_modes.current(state)
+        if mode == "fast":
+            return LEAN_REQUIRED["strict"]
+        if mode == "max":
+            return DIMENSIONS
         return LEAN_REQUIRED.get(depth, DIMENSIONS)
     return DIMENSIONS
 MAX_REPORT_CHARS = 512000
@@ -79,7 +88,7 @@ def _size(report):
     _need(size <= MAX_REPORT_CHARS, "слишком большой отчёт")
 
 
-def _features(store, state, report):
+def _features(store, state, report, mode=None):
     _need(isinstance(report, dict) and {"basis", "depth", "depthReason", "features"} <= set(report)
           <= {"basis", "depth", "depthReason", "features", "noFeatureReason"},
           "сценарии требуют basis, depth, depthReason, features")
@@ -124,7 +133,7 @@ def _features(store, state, report):
         _need(_text(row["specQuote"], "цитата спецификации", 3000) in spec,
               "сценарии не привязаны к действующей спецификации")
         dimensions = row["dimensions"]
-        required = set(required_dimensions(state, report["depth"]))
+        required = set(required_dimensions(state, report["depth"], mode))
         _need(isinstance(dimensions, list) and len(required) <= len(dimensions) <= len(DIMENSIONS),
               "для каждой функции нужны обязательные измерения выбранной глубины")
         checked = set()
@@ -142,15 +151,15 @@ def _features(store, state, report):
             _text(cell["verification"], name + ": способ проверки")
             _need(isinstance(cell["counterexample"], str) and len(cell["counterexample"]) <= 1600,
                   "контрпример должен быть текстом")
-            if report["depth"] == "deep" and cell["status"] == "covered":
+            if (report["depth"] == "deep" or (mode or check_modes.current(state)) == "max") and cell["status"] == "covered":
                 _text(cell["counterexample"], name + ": контрпример для deep")
         _need(required <= checked, "сценарии функции неполны")
     _need(seen == set(expected), "не все действующие функции получили сценарии")
     _size(report)
 
 
-def _save(store, state, report, key, history, group, extra=None):
-    if state.get(key) and extra is None:
+def _save(store, state, report, key, history, group, extra=None, mode=None):
+    if state.get(key) and extra is None and state[key].get("checkMode") == mode:
         try:
             if _saved(store, state, key, history, group) == report:
                 return state[key]
@@ -160,7 +169,7 @@ def _save(store, state, report, key, history, group, extra=None):
     _need(isinstance(previous, list), "повреждена история: " + history)
     data = {"schema": SCHEMA, "run": state["run"], "report": report, **(extra or {})}
     ref = {**store.artifact(group, (json.dumps(data, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json"),
-           "basis": report["basis"]}
+           "basis": report["basis"], **({"checkMode": mode} if mode else {})}
     state[key] = ref
     state[history] = [*previous, dict(ref)]
     return ref
@@ -180,13 +189,18 @@ def _saved(store, state, key, history, group):
 
 
 def record_scenarios(store, state, report):
-    _features(store, state, report)
-    return _save(store, state, report, "featureScenarios", "featureScenarioHistory", "feature-scenarios")
+    lean = state.get("policy", {}).get("leanControl") is True
+    mode = check_modes.current(state) if lean else None
+    _features(store, state, report, mode)
+    return _save(store, state, report, "featureScenarios", "featureScenarioHistory", "feature-scenarios", mode=mode)
 
 
 def valid_scenarios(store, state):
     try:
-        _features(store, state, _saved(store, state, "featureScenarios", "featureScenarioHistory", "feature-scenarios"))
+        saved = state.get("featureScenarios")
+        mode = saved.get("checkMode") if isinstance(saved, dict) else None  # the mode they were made under
+        _features(store, state, _saved(store, state, "featureScenarios", "featureScenarioHistory", "feature-scenarios"),
+                  mode if mode in check_modes.MODES else None)
         return True
     except (Invalid, OSError, ValueError, TypeError, KeyError, RecursionError):
         return False

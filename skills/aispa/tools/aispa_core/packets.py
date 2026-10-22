@@ -36,6 +36,14 @@ def _context_artifact(store, value):
     return {"file": name, "sha256": sha}
 
 
+MODEL_RULE = ("Дешёвая модель по умолчанию; сильная — только для задач в зоне безопасности, ключей, доступа, "
+              "платежей и личных данных. Уровень мышления выбирает среда.")
+
+
+def _lean_strong(task, attempt):
+    return any(task_tiers.strong_model_path(zone) for zone in task.get("zones", []))
+
+
 def routing(state, task, role, attempt=None, store=None):
     """Recommend host-defined tiers, never invent a model ID or drop reviews."""
     foundation = any(task["id"] in other["dependsOn"] for other in state["tasks"])
@@ -49,26 +57,34 @@ def routing(state, task, role, attempt=None, store=None):
               or bool((attempt or {}).get("authorization")) or inherited_retry
               or bool((attempt or {}).get("repairPlan")))
     subject = attempt if attempt is not None else task
+    lean = state.get("policy", {}).get("leanControl") is True
+    extra = {}
+    if lean:
+        strong = _lean_strong(task, attempt)
+        extra = {"modelRule": MODEL_RULE}
     if task_tiers.worker_only(subject):
         light = task_tiers.is_light(subject)
-        require(role == "worker", "У light и standard нет роли критика или приёмщика")
-        return {"tier": "strong" if strong and not light else "standard", "advisory": True, "taskTier": subject["tier"],
-                "tierReason": subject.get("tierReason"),
+        fast = task_tiers.is_fast(subject)
+        require(role == "worker", "У light, standard и fast нет роли критика или приёмщика")
+        return {**extra, "tier": "strong" if strong and (lean or not light) else "standard", "advisory": True,
+                "taskTier": subject["tier"], "tierReason": subject.get("tierReason"),
                 "selection": "Use only host-exposed models permitted by project rules",
-                "reason": ("Explicit bounded low-risk change; semantic safety still requires final review" if light else
+                "reason": ("Owner's fast mode: the task gets no per-task review; tests, the clean-copy check and the final blind acceptance remain" if fast else
+                           "Explicit bounded low-risk change; semantic safety still requires final review" if light else
                            "Ordinary non-foundation code; the whole-version review replaces a per-task critic"),
                 "reviewPolicy": "verified_completion", "criticRounds": 0,
                 "minimumCriticRounds": 0, "maximumCriticRounds": 0, "actualCriticRounds": 0,
                 "taskRoleSlots": {"minimum": 1, "maximum": 1},
-                "perTaskReview": "skipped_light" if light else "skipped_standard", "projectReviewSeparate": True,
+                "perTaskReview": "skipped_" + subject["tier"], "projectReviewSeparate": True,
                 "reviewRule": "Current verification and worker evidence complete implementation; independent project review and final acceptance remain mandatory."}
     policy = review_policy.mode(attempt) if attempt is not None else review_policy.selected(state)
     conditional = policy in (review_policy.ADAPTIVE, review_policy.LEAN)
     slots = {review_policy.LEAN: {"minimum": 2, "maximum": 3}, review_policy.ADAPTIVE: {"minimum": 3, "maximum": 4}}
     rules = {review_policy.LEAN: "First PASS completes the task: the critic also checks closure criteria, constraints and the trace to the owner's words. WARN/BLOCK/FAIL requires repair and one fresh critic2 whose PASS completes the task. No third round, no separate task acceptor.",
              review_policy.ADAPTIVE: "First PASS goes to a separate acceptor; WARN/BLOCK/FAIL requires repair and one fresh critic2. No third round."}
-    return {"tier": "strong" if strong else "standard", "advisory": True,
-            "reason": "Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation",
+    return {**extra, "tier": "strong" if strong else "standard", "advisory": True,
+            "reason": ("Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation") if not lean else
+                      ("Sensitive zone: security, keys, access, payments or personal data" if strong else "Cheap model by default"),
             "selection": "Use only models exposed by the host and permitted by project rules; otherwise keep the current model",
             "report": "Save the full structured report to a file; return its path and at most 25 lines of conclusions",
             "reviewPolicy": policy,

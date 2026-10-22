@@ -53,12 +53,14 @@ def task_contract(state, task_id):
 def task_basis(store, state, task_id):
     closure = task_closure(state, task_id)
     attempt = (state.get("taskHistory", {}).get(task_id) or [{}])[-1]
-    zones = sorted({z for task in closure for z in task["zones"] + task.get("readZones", [])})
+    skipped = set(attempt.get("deferredDependencies", []))  # a deferred task's later retry cannot break its dependants
+    # Its code is skipped with it: a retry writing its own zone must not stale the dependants' proofs.
+    zones = sorted({z for task in closure if task["id"] not in skipped for z in task["zones"] + task.get("readZones", [])})
     return digest({"run": state["run"], "contract": task_contract(state, task_id),
                    "attempt": attempt.get("id"), "roles": attempt.get("roles", {}),
                    "code": store.code(zones, include_common=True), "readSet": zones,
                    "dependencies": [{"id": t["id"], "status": t["status"], "proof": t.get("proof")}
-                                    for t in closure if t["id"] != task_id]})
+                                    for t in closure if t["id"] != task_id and t["id"] not in skipped]})
 
 
 def scope_basis(state):
@@ -119,9 +121,16 @@ def artifact_valid(store, artifact):
         return False
 
 
-def gate_valid(store, state, name):
+def gate_valid(store, state, name, settled=False):
+    """settled: the owner's fast mode accepts a recorded, current acceptance even when it found failures;
+    max does so only when every failure belongs to a deferred core task (deferredSettled)."""
     gate = state["gates"].get(name)
-    if not gate or not gate.get("passed"):
+    if settled and name == "acceptance" and gate:
+        from . import check_modes
+        settled = check_modes.is_fast(state) or (check_modes.is_max(state) and bool(gate.get("deferredSettled")))
+    else:
+        settled = False
+    if not gate or not (gate.get("passed") or settled):
         return False
     from . import phase_receipts, execution_obligations
     if execution_obligations.enabled(state):
@@ -142,8 +151,9 @@ def gate_valid(store, state, name):
                 or not all(artifact_valid(store, ref.get("snapshot", {})) for ref in state.get("ownerReferences", []))):
             return False
     if name == "acceptance" and state.get("policy", {}).get("integrationReview"):
-        from . import integration
-        if not integration.proof_valid(store, state):
+        from . import check_modes, integration
+        # The owner's fast mode skips the whole-project review, as handoff_ready does.
+        if not check_modes.is_fast(state) and not integration.proof_valid(store, state):
             return False
     if name == "acceptance" and state.get("policy", {}).get("cleanClone"):
         from .cleanroom import valid
@@ -158,7 +168,7 @@ def gate_valid(store, state, name):
         from . import blind
         if not blind.derived_waves_valid(store, state):
             return False
-    return bool(gate and gate["passed"] and gate["basis"] == basis(store, state, name)
+    return bool(gate and (gate["passed"] or settled) and gate["basis"] == basis(store, state, name)
                 and artifact_valid(store, gate["report"])
                 and all(artifact_valid(store, a) for a in gate.get("artifacts", [])))
 

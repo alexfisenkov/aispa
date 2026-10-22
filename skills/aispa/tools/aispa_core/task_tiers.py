@@ -15,7 +15,8 @@ from .store import canonical_zone, common_input
 
 FIELDS = ("tier", "tierReason", "changeKind")
 TIERS = ("light", "standard", "heavy")
-WORKER_ONLY = frozenset({"light", "standard"})
+# "fast" is never declared in a plan: the owner's fast mode assigns it to attempts.
+WORKER_ONLY = frozenset({"light", "standard", "fast"})
 KINDS = frozenset({"documentation", "formatting", "presentation"})
 FORBIDDEN = re.compile(r"(?:^|[./_-])(?:agents?|claude|gemini|openclaw|crab|skills?|prompts?|instructions?|system|developer|cursor|copilot|codex|windsurf|aider|rules?|polic(?:y|ies)|config|settings|secrets?|auth|billing|payments?|migrations?|schema|contracts?|api|dependencies|lock|foundation|security|workflow|scripts?|tools?|src|tests?)(?:[./_-]|$)", re.I)
 INSTRUCTION_NAMES = frozenset({"soul.md", "identity.md", "user.md", "heartbeat.md", "bootstrap.md", "boot.md", "memory.md"})
@@ -24,6 +25,10 @@ INSTRUCTION_NAMES = frozenset({"soul.md", "identity.md", "user.md", "heartbeat.m
 SENSITIVE = re.compile(r"(?:^|[./_-])(?:agents?|claude|gemini|openclaw|crab|skills?|prompts?|instructions?|system|developer|cursor|copilot|codex|windsurf|aider|cline|rules?|conventions|mcp|polic(?:y|ies)|secrets?|credentials?|tokens?|keys?|login|billing|payments?|migrations?|schema|contracts?|foundation|security|github|gitlab|husky|vscode|devcontainer|dockerfile|docker|deploy|env|envrc|npmrc|pypirc|netrc|pem|p12|pfx|keystore|package|pyproject|requirements|lock)(?:[./_-]|$)", re.I)
 # Access and money words are matched inside identifiers too (userAuth, stripeCheckout).
 SENSITIVE_PART = re.compile(r"auth(?!or)|passw|permission|secret|credential|payment|billing|checkout|stripe|invoice|(?:cursor|windsurf|cline|agent)rules|правил|секрет|пароль|доступ(?!н)|оплат|платеж|платёж", re.I)
+# The narrow list that earns a stronger model: security, secrets, access, money,
+# personal data. Manifests, schemas, Docker, skills and prompts are not on it.
+STRONG_WORD = re.compile(r"(?:^|[./_-])(?:security|secrets?|credentials?|tokens?|keys?|apikeys?|passwords?|passwd|auth|oauth|login|access|permissions?|rights|acl|rbac|payments?|billing|checkout|invoices?|stripe|personal|pii|gdpr|profiles?|passport|безопасность|секреты?|пароли?|токены?|ключи?|доступ|права|оплата|платежи?|платёж|личное|личные|персональные)(?:[./_-]|$)", re.I)
+STRONG_PART = re.compile(r"auth(?!or)|passw|permission|secret|credential|payment|billing|checkout|stripe|invoice|gdpr|passport|персон|паспорт|личн|авториз|секрет|пароль|доступ(?!н)|оплат|платеж|платёж", re.I)
 EXTENSIONS = {"documentation": {".md", ".txt", ".rst"},
               "formatting": {".md", ".txt", ".rst", ".css"},
               "presentation": {".css", ".png", ".jpg", ".jpeg", ".webp"}}
@@ -43,6 +48,10 @@ def is_light(value):
 
 def is_standard(value):
     return value.get("tier") == "standard"
+
+
+def is_fast(value):
+    return value.get("tier") == "fast"
 
 
 def worker_only(value):
@@ -96,6 +105,16 @@ def validate_plan(tasks, closures):
 def sensitive_path(name):
     return (common_input(name) or PurePosixPath(name).name.casefold() in INSTRUCTION_NAMES
             or bool(SENSITIVE.search(name)) or bool(SENSITIVE_PART.search(name)))
+
+
+# Key and credential files, whatever their directory: the owner named keys and sensitive data.
+STRONG_FILE = re.compile(r"(?:^|/)(?:\.env[^/]*|[^/]*\.(?:pem|key|p12|pfx)|id_rsa[^/]*|\.npmrc|\.pypirc|\.netrc|credentials[^/]*)$", re.I)
+STRONG_DATA = re.compile(r"user[_-]?data|customer|client[_-]?data|персональн", re.I)
+
+
+def strong_model_path(name):
+    return bool(STRONG_WORD.search(name) or STRONG_PART.search(name)
+                or STRONG_FILE.search(name) or STRONG_DATA.search(name))
 
 
 def standard_zone(zone):

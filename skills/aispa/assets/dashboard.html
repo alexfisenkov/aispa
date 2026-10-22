@@ -217,6 +217,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
       <div><span data-i18n="updated">Последняя запись агента</span><b class="mono" id="updatedAt">—</b></div>
       <div><span data-i18n="observed">Актуальность проверена</span><b class="mono" id="observedAt">—</b></div>
       <div><span data-i18n="stage">Текущий этап</span><b id="stageName">—</b></div>
+      <div id="checkModeBox" hidden><span data-i18n="checkMode">Режим проверки</span><b id="checkModeName">—</b></div>
     </div>
   </div>
   <div class="card gates">
@@ -238,13 +239,18 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
   </div>
 </section>
 
+<details class="card history" id="modeChangesPanel" hidden>
+  <summary><h2 data-i18n="modeChanges">Смены режима проверки</h2><span class="note" id="modeChangesCount"></span></summary>
+  <div class="history-list" id="modeChanges"></div>
+</details>
+
 <details class="card history" id="historyPanel" hidden>
   <summary><h2 data-i18n="history">История</h2><span class="note" id="historyCount"></span></summary>
   <div class="history-list" id="events"></div>
 </details>
 
 <section class="card waves-card" aria-label="Задачи по волнам" data-aria-i18n="wavesAria">
-  <div style="display:grid;gap:6px"><h2 class="h2" data-i18n="waves">Задачи по волнам</h2><span class="sub" data-i18n="wavesNote">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
+  <div style="display:grid;gap:6px"><h2 class="h2" data-i18n="waves">Задачи по волнам</h2><span class="sub" id="wavesNote" data-i18n="wavesNote">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
   <div id="waves" style="display:grid;gap:20px"></div>
 </section>
 
@@ -311,18 +317,20 @@ var TASK={completed:'Реализовано',running:'В работе',pending:'
 var PHASE_STATUS={pending:['○','ожидает'],current:['●','в работе'],done:['✓','завершено'],
  skipped:['–','не требуется'],blocked:['!','заблокирована'],stale:['?','нужна повторная проверка']};
 var TIER={light:['Лёгкая задача','Без отдельных критиков · общая приёмка проекта'],
- standard:['Обычная задача','Без критика задачи · общий обзор версии'],heavy:['Тяжёлая задача','Стандартный маршрут проверки']};
+ standard:['Обычная задача','Без критика задачи · общий обзор версии'],
+ fast:['Быстрая задача','Без проверок по ходу · итоговая приёмка'],heavy:['Тяжёлая задача','Стандартный маршрут проверки']};
 var PHASE_LABEL={implementation:'Реализация',critic_1:'Первый критик',repair:'Правка',critic_2:'Второй критик',task_acceptance:'Приёмка задачи'};
 var GATES=[['coverage','Покрытие','Бриф отражён в спецификации'],['plan','План','Каждое требование есть в задачах'],
  ['acceptance','Приёмка','Независимая проверка ядра']];
 var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],['inherited','Остатки прошлых прогонов'],
  ['execution','Сроки исполнения'],['inheritedExecution','Сроки прошлых прогонов'],
- ['unmapped','Не попало в требования']];
+ ['unmapped','Не попало в требования'],['skippedChecks','Пропущенные проверки (быстрый режим)']];
 var UNKNOWN='Состояние не определено';
 var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['Обновить','Refresh'],workshopLink:[' — Telegram-канал, новая вкладка',' — Telegram channel, new tab'],updated:['Последняя запись агента','Last agent entry'],
- observed:['Актуальность проверена','Observed'],stage:['Текущий этап','Current stage'],checks:['Проверки','Checks'],
+ observed:['Актуальность проверена','Observed'],stage:['Текущий этап','Current stage'],checkMode:['Режим проверки','Check mode'],modeChanges:['Смены режима проверки','Check mode changes'],checks:['Проверки','Checks'],
  now:['Сейчас выполняется','Current work'],history:['История','History'],runTime:['Время прогона · без отмеченных пауз','Run time · excluding recorded pauses'],
  estimate:['Примерно до завершения','Approximate time remaining'],waves:['Задачи по волнам','Tasks by wave'],
+ wavesNoteFast:['В быстром режиме волны не сверяются с брифом. Фазы показаны только там, где есть запись движка.','In fast mode waves are not checked against the brief. Phases appear only when recorded by the engine.'],
  wavesNote:['После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.','The full brief is checked after each wave. Phases appear only when recorded by the engine.'],
  stageHeading:['Этап','Stage'],requirements:['Требования','Requirements'],
  requirementsNote:['«Реализовано по задачам» ещё не означает, что требование принято.','Implemented by tasks does not mean the requirement was accepted.'],
@@ -368,6 +376,10 @@ var EN={
  'Не подтверждено или устарело':'Unconfirmed or stale','Нет актуального подтверждения':'No current confirmation',
  'Состояние недоступно':'State unavailable','Нет данных':'No data','Пока нет оценки':'No estimate yet',
  'Задача принята':'Task accepted','Выполнение проверено':'Completion verified',
+ 'Быстрая задача':'Fast task','Без проверок по ходу · итоговая приёмка':'No in-flight checks · final acceptance',
+ 'Отложено в остатки':'Deferred to remaining','Пропущенные проверки (быстрый режим)':'Checks skipped by fast mode',
+ 'Проверка задач критиками':'Task review by critics','Тестовый контракт RED':'RED test contract',
+ 'Сверка волн с полным брифом':'Wave check against the full brief','Обзор версии целиком':'Whole-version review','Подробные сценарии (только main и error)':'Detailed scenarios (main and error only)','Быстро':'Fast','Сбалансированно':'Balanced','Максимум':'Maximum',
  'Лёгкая задача':'Light task','Тяжёлая задача':'Heavy task','Обычная задача':'Standard task',
  'Без критика задачи · общий обзор версии':'No task reviewer · whole-version review',
  'PASS критика закрывает задачу':'A passing critic closes the task',
@@ -577,6 +589,18 @@ function renderWaiting(d){
 }
 var EVENT_TYPES={init:'Начало прогона',note:'Запись',"run-paused":'Пауза прогона',"run-resumed":'Возобновление',
  "verification-executed":'Проверка выполнена',"journal-recovered":'Журнал восстановлен'};
+function renderModeChanges(d){
+ var panel=$('modeChangesPanel'),box=$('modeChanges'),rows=Array.isArray(d.checkModeHistory)?d.checkModeHistory.slice().reverse():[];
+ panel.hidden=!rows.length;box.replaceChildren();
+ $('modeChangesCount').textContent=rows.length?String(rows.length):'';
+ rows.forEach(function(item){if(!item||typeof item!=='object')return;
+  var row=h('div','history-event'),time=h('time',null,fmt(item.at));
+  if(item.at)time.setAttribute('datetime',String(item.at));
+  var body=h('div');body.append(h('b',null,(item.previous?tr(MODE_NAMES[item.previous]||item.previous)+' → ':'')+tr(MODE_NAMES[item.mode]||item.mode)));
+  if(typeof item.text==='string'&&item.text)body.append(h('span',null,' · «'+item.text+'»'));
+  row.append(time,body);box.append(row)});
+}
+var MODE_NAMES={fast:'Быстро',balanced:'Сбалансированно',max:'Максимум'};
 function renderEvents(d){
  var panel=$('historyPanel'),box=$('events'),rows=Array.isArray(d.events)?d.events.slice(-12).reverse():[];
  panel.hidden=!rows.length;box.replaceChildren();
@@ -589,6 +613,7 @@ function renderEvents(d){
   row.append(time,body);box.append(row)});
 }
 function remainingItem(value,key,reqs,tasks){
+ if(key==='skippedChecks')return {id:'',text:tr(value)};
  if(typeof value==='string'){
   if(key==='blockedTasks'){var task=tasks.find(function(t){return t.id===value});return {id:value,text:task?(task.note||task.title):tr('Причина блокера не указана')};}
   if(key==='excluded'){var req=reqs.find(function(r){return r.id===value});return {id:value,text:req?
@@ -609,6 +634,9 @@ function render(d){
   tr(HINT[status]||'Обновите состояние или проверьте совместимость версии.');
  $('statusShort').textContent=source==='archive'?tr('Архив'):tr(SHORT[status]||UNKNOWN)+(source==='demo'?sourceSuffix():'');
  var dot=DOT[status]||DOT.unavailable;$('statusDot').style.background=dot[0];$('statusDot').style.border=dot[1];
+ var note=$('wavesNote');if(note){var noteKey=d.checkMode==='fast'?'wavesNoteFast':'wavesNote';note.setAttribute('data-i18n',noteKey);note.textContent=I18N[noteKey][locale==='en'?1:0]}
+ var modeBox=$('checkModeBox');modeBox.hidden=!d.checkMode;
+ if(d.checkMode)$('checkModeName').textContent=tr(d.checkModeLabel||d.checkMode);
  $('updatedAt').textContent=fmt(d.updatedAt);$('observedAt').textContent=fmt(d.observedAt);
  var gates=$('gates');gates.replaceChildren();
  GATES.forEach(function(g){var ok=connected()&&d.gates&&d.gates[g[0]]===true,row=h('div','gate');
@@ -622,7 +650,7 @@ function render(d){
  var stages=$('stages');stages.replaceChildren();
  STAGES.forEach(function(x,i){var past=i<idx||(done&&i===idx),cur=i===idx&&!done,c=h('div','stage'+(cur?' cur':past?' past':''));
   c.append(h('i'));var t=h('div');t.append(h('small',null,pad(i+1)),h('b',null,tr(x[1])));c.append(t);stages.append(c)});
- renderActivity(d,status);renderWaiting(d);renderEvents(d);
+ renderActivity(d,status);renderWaiting(d);renderModeChanges(d);renderEvents(d);
  var waveNums=Array.from(new Set(tasks.map(function(t){return t.wave}))).sort(function(a,b){return a-b});
  Object.keys(FILTERS).forEach(function(k){var b=tabButtons[k];if(!b){b=h('button','tab');b.type='button';
    b.addEventListener('click',function(){filter=k;render(last)});tabButtons[k]=b;$('tabs').append(b)}
@@ -638,7 +666,7 @@ function render(d){
  var wv=$('waves');wv.replaceChildren();
  if(!tasks.length)wv.append(h('div','note',tr('План задач ещё не подготовлен.')));
  waveNums.forEach(function(n){var ts=tasks.filter(function(t){return t.wave===n}),c=ts.filter(function(t){return t.status==='completed'}).length;
-  var hasLight=ts.some(function(t){return t.tier==='light'||t.tier==='standard'||t.completionKind==='verified_completion'});
+  var hasLight=ts.some(function(t){return t.tier==='light'||t.tier==='standard'||t.tier==='fast'||t.completionKind==='verified_completion'});
   var hasProof=ts.some(function(t){return typeof t.proofCurrent==='boolean'}),accepted=ts.filter(function(t){return t.status==='completed'&&t.proofCurrent===true}).length;
   var w=h('div','wave'),hd=h('div','wave-head'),l=h('div');l.append(h('span','wave-num',n),h('b',null,tr('Волна')+' '+n));
   hd.append(l,h('span',null,(hasProof?(hasLight?(locale==='en'?accepted+' of '+ts.length+' completed and verified':accepted+' из '+ts.length+' выполнено и проверено'):(locale==='en'?accepted+' of '+ts.length+' tasks accepted':accepted+' из '+ts.length+' задач принято')):
@@ -650,6 +678,7 @@ function render(d){
     b.append(h('small',null,tr(TIER[t.tier][0])+' · '+tr(t.tier==='heavy'&&t.reviewPolicy==='lean'?'PASS критика закрывает задачу':TIER[t.tier][1])));
     if(t.tierReason)b.append(h('small',null,t.tierReason));
    }
+   if(t.deferred)b.append(h('small',null,tr('Отложено в остатки')));
    var right=h('div','task-right'),state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));
    var clock=h('span','mono task-time');clock.id='time-'+t.id;right.append(state,h('span','task-time',tr('Вся задача')),clock);
    if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){

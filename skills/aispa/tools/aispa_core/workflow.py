@@ -12,7 +12,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing, phase_receipts, execution_obligations
 from .team import TaskPipeline, task_proof_valid
-from . import project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
+from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -52,6 +52,11 @@ class Workflow:
         require(allow_wait or not (isinstance(self.s.get("waiting"), dict)
                                   and self.s["waiting"].get("kind") == "owner_question"),
                 "Ожидается ответ владельца; сначала сохраните факт ответа командой answered")
+
+    def check_mode(self, mode, path):
+        """Owner's words for a mode change come as a file, never as a new brief."""
+        self.running()
+        return self.pipeline.switch_check_mode(mode, read_input(path))
 
     def brief(self, path):
         self.running()
@@ -230,16 +235,22 @@ class Workflow:
         carryover.guard_current(self.store, self.s)
         task = self.task(tid)
         require(task["status"] in ("pending", "blocked"), "Задача уже запущена или завершена")
-        self.pipeline.start_guard(tid)
+        if self.pipeline.start_guard(tid):
+            self.save("task-cards-refreshed:" + tid)
+            raise Invalid("Карточки обновлены из-за отложенной зависимости; запросите пакет контекста задачи заново")
         require(context == basis(self.store, self.s, "task", tid), "Пакет контекста задачи устарел")
         closure = {t["id"] for t in task_closure(self.s, tid)} - {tid}
-        require(all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure) for dep in task["dependsOn"]),
+        deferred = self.pipeline._deferred_ids()
+        require(all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure)
+                    for dep in task["dependsOn"] if dep not in deferred),
                 "Зависимости задачи не приняты или доказательства устарели; включите актуального преемника в dependsOn")
         entry = self.s.setdefault("waveEntries", {}).get(str(task["wave"]))
         opening = not entry or entry["plan"] != plan_basis(self.s)
         for prior in {t["wave"] for t in self.s["tasks"] if t["wave"] < task["wave"]}:
             require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"] if t["wave"] == prior),
                     "Предыдущая волна ещё выполняется")
+            if self._wave_unchecked(prior):
+                continue
             review = self.s.get("waves", {}).get(str(prior))
             require(review and review["passed"] and review["plan"] == plan_basis(self.s)
                     and artifact_valid(self.store, review["report"])
@@ -248,7 +259,13 @@ class Workflow:
             if opening and prior == max(t["wave"] for t in self.s["tasks"] if t["wave"] < task["wave"]):
                 require(review["basis"] == basis(self.store, self.s, "wave"), "Последняя сверка волны устарела; повторите общую проверку")
         if opening:
-            self.s["waveEntries"][str(task["wave"])] = {"plan": plan_basis(self.s), "openedAt": timestamp()}
+            self.s["waveEntries"][str(task["wave"])] = {
+                "plan": plan_basis(self.s), "openedAt": timestamp(),
+                **({"checkMode": check_modes.current(self.s)} if check_modes.enabled(self.s) else {})}
+            if check_modes.is_fast(self.s):  # survives reset, which clears waveEntries
+                mark = {"wave": task["wave"], "plan": plan_basis(self.s)}
+                if mark not in self.s.setdefault("fastWaves", []):
+                    self.s["fastWaves"].append(mark)
         if self.s.get("policy", {}).get("testIntent"):
             test_intent.capture_baseline(self.store, self.s, tid)
         at = timestamp()
@@ -260,18 +277,23 @@ class Workflow:
         task.pop("proof", None)
         self.save("task-started:" + tid, at)
 
+    def _wave_unchecked(self, number):
+        return check_modes.wave_unchecked(self.s, number)
+
     def ready(self):
         """Addressed scheduler: ready peers only; never bypass the wave gate."""
         self.build_ready()
         unfinished = [t for t in self.s["tasks"] if t["status"] not in ("completed", "blocked")]
         wave = min((t["wave"] for t in unfinished), default=None)
+        deferred = self.pipeline._deferred_ids()
         tasks = []
         for task in unfinished:
             if task["wave"] != wave or task["status"] != "pending":
                 continue
             closure = {t["id"] for t in task_closure(self.s, task["id"])} - {task["id"]}
-            if all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure) for dep in task["dependsOn"]):
-                prior = [w for w in {t["wave"] for t in self.s["tasks"]} if w < wave]
+            if all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure)
+                   for dep in task["dependsOn"] if dep not in deferred):
+                prior = [w for w in {t["wave"] for t in self.s["tasks"]} if w < wave and not self._wave_unchecked(w)]
                 if any(not self.s.get("waves", {}).get(str(w), {}).get("passed") for w in prior):
                     continue
                 tasks.append({"id": task["id"], "title": task["title"],
@@ -330,6 +352,7 @@ class Workflow:
                 task["status"] = "pending"
                 task.pop("proof", None)
                 task.pop("phaseTiming", None)
+                task.pop("deferred", None)
         self.s["waves"] = {}
         self.s["waveEntries"] = {}
         self.save("tasks-reset:" + ",".join(sorted(affected)), at)
@@ -408,7 +431,7 @@ class Workflow:
         return passed
 
     def handoff_ready(self):
-        if self.s.get("policy", {}).get("integrationReview"):
+        if self.s.get("policy", {}).get("integrationReview") and not check_modes.is_fast(self.s):
             require(integration.proof_valid(self.store, self.s),
                     "До сдачи нужны актуальное полное ревью финальной задачи по её политике и отдельная приёмка")
         if self.s.get("policy", {}).get("deliveryDocs"):
@@ -441,17 +464,26 @@ class Workflow:
         passed = not report["unmapped"] and None not in missing and not core & missing
         core_tasks = [t for t in self.s["tasks"] if set(t["requirements"]) & core]
         passed = passed and all(t["status"] == "completed" for t in core_tasks)
+        # Max: a core task the owner's rules deferred goes to the remainder, not to a dead end; any other failure still stops the delivery.
+        deferred_settled = False
+        if not passed and check_modes.is_max(self.s) and not report["unmapped"] and None not in missing:
+            deferred = check_modes.deferred_ids(self.s, self.store)
+            owned = {r for t in self.s["tasks"] if t["id"] in deferred for r in t["requirements"]}
+            deferred_settled = bool(deferred and all(t["status"] == "completed" or t["id"] in deferred for t in core_tasks)
+                                    and missing <= owned)
         # Reuse only a fully successful independent source-first final review of
         # one completed task. Intermediate waves retain their original checks.
         numbers = {t["wave"] for t in self.s["tasks"]}
         last_wave = max(numbers)
-        reusable = bool(self.s.get("policy", {}).get("finalWaveReuse") and
+        reusable = bool(self.s.get("policy", {}).get("finalWaveReuse") and not check_modes.is_max(self.s) and
                         len(self.s["tasks"]) == 1 and len(numbers) == 1 and
                         self.s["tasks"][0]["status"] == "completed" and passed and
                         not failures and not report["unmapped"] and
                         self.s.get("policy", {}).get("cleanClone") and blind.valid(self.store, self.s))
         missing_wave = reusable and any("derivedFrom" in self.s.get("waves", {}).get(str(n), {}) for n in numbers)
         for number in numbers:
+            if self._wave_unchecked(number):
+                continue
             checkpoint = self.s.get("waves", {}).get(str(number))
             okay = bool(checkpoint and checkpoint["passed"] and checkpoint["plan"] == plan_basis(self.s)
                         and artifact_valid(self.store, checkpoint["report"])
@@ -479,6 +511,7 @@ class Workflow:
             "passed": passed, "basis": report["basis"], "failures": failures,
             "unmapped": report["unmapped"], "artifacts": artifacts,
             "executionFindings": execution_findings,
+            **({"deferredSettled": True} if deferred_settled else {}),
             "report": report_artifact}
         phase_receipts.record(self.store, self.s, "acceptance", report_artifact, actor=author, basis=report["basis"])
         self.s["stage"] = "acceptance"
@@ -488,7 +521,8 @@ class Workflow:
     def finish(self):
         self.build_ready()
         self.handoff_ready()
-        require(gate_valid(self.store, self.s, "acceptance"), "Обязательное ядро не принято или доказательства устарели")
+        # The owner's fast mode reports the problems at the end instead of repairing them first.
+        require(gate_valid(self.store, self.s, "acceptance", settled=True), "Обязательное ядро не принято или доказательства устарели")
         require(verified(self.store, self.s), "Проверка текущего кода устарела")
         require(self.store.clean(), "Сначала сохраните изменения проекта в Git")
         if self.s.get("policy", {}).get("projectKnowledge"):
@@ -510,6 +544,7 @@ class Workflow:
         execution_remaining = [row for row in execution_results if row["status"] != "passed"]
         self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited or execution_remaining or inherited_execution else "accepted"
         self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked,
+                               "deferredTasks": sorted(check_modes.deferred_ids(self.s, self.store)),
                                "inherited": [{"id": item["id"], "status": item["status"], "text": item.get("requirement", {}).get("text", "")} for item in inherited]}
         if execution_obligations.enabled(self.s):
             self.s["executionResults"] = execution_results
@@ -519,6 +554,14 @@ class Workflow:
             self.s.setdefault("executionResultHistory", []).append(ref)
         if inherited_execution:
             self.s["remaining"]["inheritedExecution"] = inherited_execution
+        if check_modes.enabled(self.s):
+            gate = self.s["gates"]["acceptance"]
+            if check_modes.is_fast(self.s) and not gate.get("passed"):
+                self.s["status"] = "delivered_with_remaining"
+                if gate.get("unmapped"):
+                    self.s["remaining"]["unmapped"] = gate["unmapped"]
+            self.s["remaining"]["skippedChecks"] = check_modes.skipped_checks(self.s)
+            self.s["remaining"]["checkModeChanges"] = check_modes.history_view(self.store, self.s)
         timing.stop(self.s, at, completed=True)
         self.save("delivery-recorded", at)
 

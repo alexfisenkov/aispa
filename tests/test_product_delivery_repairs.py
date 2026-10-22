@@ -160,6 +160,16 @@ class RepairTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             self.fx.team.assign("T01", "worker", "fixture", "newer", "session", model="test-model")
 
+    def test_lean_fresh_worker_needs_no_model_id_but_must_be_fresh(self):
+        self.fx.state["policy"]["leanControl"] = True
+        repairs.record(self.fx.store, self.fx.state, "T01", self.report("wrong_approach", "fresh"))
+        with self.assertRaises(Invalid):  # the same context is still not a new executor
+            self.fx.team.assign("T01", "worker", "fixture", "stale", "session", fresh=False)
+        new = self.fx.team.assign("T01", "worker", "fixture", "new", "session")  # no model ID
+        self.assertIsNone(self.fx.state["actors"][new]["model"])
+        repairs.worker_guard(self.fx.store, self.fx.state, "T01", new)
+        self.assertIn("a strong model only for sensitive zones", repairs.view(self.fx.store, self.fx.state, "T01")["rule"])
+
     def test_all_findings_and_external_blocker_must_remain(self):
         bad = self.report(); bad["addresses"] = []
         with self.assertRaises(Invalid):

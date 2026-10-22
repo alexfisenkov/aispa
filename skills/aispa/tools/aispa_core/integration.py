@@ -310,6 +310,7 @@ def _project_actor(store, state, actor=None, *, optional=False):
 
 
 def _project_ready(store, state):
+    from .check_modes import is_deferred
     from .task_tiers import worker_only
     from .team import direct_proof_current, task_proof_valid
     tid = state.get("integrationTask")
@@ -317,7 +318,8 @@ def _project_ready(store, state):
     attempt = (state.get("taskHistory", {}).get(tid) or [{}])[-1]
     _need(worker_only(attempt), "отдельное общее ревью предназначено для итоговой задачи light или standard")
     _need(direct_proof_current(store, state, tid), "нет текущего доказательства итоговой задачи")
-    _need(all(task.get("status") == "completed" and task_proof_valid(store, state, task["id"])
+    _need(all(is_deferred(state, task, store)
+              or task.get("status") == "completed" and task_proof_valid(store, state, task["id"])
               for task in state["tasks"]), "до общего ревью нужны текущие доказательства всех задач")
     return tid, attempt
 

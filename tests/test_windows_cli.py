@@ -25,7 +25,7 @@ class WindowsCliEncodingTests(unittest.TestCase):
                                         env=environment, capture_output=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
                 return json.loads(result.stdout.decode("utf-8"))
-            state = call("init", "--slug", "unicode", "--title", "Русский проект 🙂", "--mode", "auto", "--runtime", "codex")
+            state = call("init", "--slug", "unicode", "--title", "Русский проект 🙂", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
             self.assertEqual(state["title"], "Русский проект 🙂")
             cli = root / ".aispa" / state["runDirectory"] / "runtime/tools/aispa.py"
             self.assertTrue(cli.is_file(), "The following UTF-8 operations use the pinned runtime")

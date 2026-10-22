@@ -148,7 +148,7 @@ class DocumentCliTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True, capture_output=True)
         self.path = self.root / "README.md"
         self.path.write_text("# Initial\n\nInitial body.\n", encoding="utf-8", newline="\n")
-        self.call("init", "--slug", "documents", "--title", "Documents fixture", "--mode", "auto", "--runtime", "codex")
+        self.call("init", "--slug", "documents", "--title", "Documents fixture", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
 
     def tearDown(self):
         self.temp.cleanup()

@@ -12,7 +12,7 @@ from aispa_core.display import publish, project
 from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
-from aispa_core import project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
+from aispa_core import check_modes, project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 from aispa_core.cli_output import emit
 from aispa_core import phase_receipts
 
@@ -44,6 +44,8 @@ def parser():
     init.add_argument("--mode", required=True, choices=("auto", "important", "interview"))
     init.add_argument("--runtime", required=True, choices=("codex", "claude-code", "cursor"))
     init.add_argument("--depth", choices=("strict", "balanced", "deep"), default="balanced")
+    init.add_argument("--check", required=True, choices=check_modes.MODES,
+                      help="Сколько проверять: fast (быстро), balanced (сбалансированно), max (максимум)")
     controls.parsers(sub)
     for name in ("brief", "requirements", "spec", "coverage", "acceptance"):
         action = sub.add_parser(name)
@@ -124,6 +126,9 @@ def parser():
     critic.add_argument("--file", required=True)
     attempt = sub.add_parser("new-attempt"); attempt.add_argument("id")
     attempt.add_argument("--brief", required=True); attempt.add_argument("--quote", required=True)
+    switch = sub.add_parser("check-mode"); switch.add_argument("mode", choices=check_modes.MODES)
+    switch.add_argument("--file", required=True, help="Файл с дословными словами владельца о смене режима")
+    sub.add_parser("extra-wave").add_argument("id")
     promotion = sub.add_parser("promote-task"); promotion.add_argument("id")
     promotion.add_argument("--reason", required=True)
     global_review = sub.add_parser("integration-review")
@@ -276,6 +281,7 @@ def execute(args):
                                    "leanControl": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
+                check_modes.initialize(state, args.check)
                 state["runtime"] = args.runtime
                 state["runtimeDigest"] = runtime_digest()
                 integration.capture(store, state)
@@ -493,6 +499,10 @@ def execute(args):
             ok = flow.pipeline.review(args.id, args.round, args.file)
         elif action == "new-attempt":
             receipt = {"attempt": flow.pipeline.new_attempt(args.id, args.brief, args.quote)}
+        elif action == "check-mode":
+            receipt = {"mode": args.mode, "tasks": flow.check_mode(args.mode, args.file)}
+        elif action == "extra-wave":
+            receipt = {"attempt": flow.pipeline.extra_wave(args.id)}
         elif action == "promote-task":
             receipt = {"attempt": flow.pipeline.promote(args.id, args.reason)}
         elif action == "integration-review":

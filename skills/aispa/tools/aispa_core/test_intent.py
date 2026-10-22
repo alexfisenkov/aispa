@@ -350,9 +350,18 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
     return True
 
 
+def required(state, attempt):
+    """Fast attempts are checked by the worker's own run, without RED proof."""
+    return bool(state.get("policy", {}).get("testIntent")) and (attempt or {}).get("tier") != "fast"
+
+
+def _required_for(state, task_id):
+    return required(state, (state.get("taskHistory", {}).get(task_id) or [{}])[-1])
+
+
 def valid(store, state, task_id, *, require_green=True, allow_source_changes=False):
     """Fail closed for policy runs; old runs remain unaffected."""
-    if not state.get("policy", {}).get("testIntent"):
+    if not _required_for(state, task_id):
         return True
     try:
         return _valid(store, state, task_id, require_green=require_green, allow_source_changes=allow_source_changes)
@@ -362,7 +371,7 @@ def valid(store, state, task_id, *, require_green=True, allow_source_changes=Fal
 
 def history_valid(store, state, task_id):
     """Validate preserved evidence without judging a descendant's current code."""
-    if not state.get("policy", {}).get("testIntent"):
+    if not _required_for(state, task_id):
         return True
     try:
         return _valid(store, state, task_id, require_green=False, allow_source_changes=True, historical=True)

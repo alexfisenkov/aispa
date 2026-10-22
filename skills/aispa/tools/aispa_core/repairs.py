@@ -6,6 +6,11 @@ from .store import digest
 from .review_policy import required_ids
 
 
+def _lean(state):
+    """Lean runs use cheap models everywhere: a repair needs a fresh context, not a strong model."""
+    return state.get("policy", {}).get("leanControl") is True
+
+
 def _attempt(state, tid):
     history = state.get("taskHistory", {}).get(tid, [])
     require(history, "Неизвестная попытка задачи")
@@ -31,7 +36,8 @@ def _validate(state, tid, report):
     require(all(nonempty(report[f]) and len(report[f]) <= 2400 for f in ("diagnosis", "reason", "changes")),
             "Нужны диагноз, обоснование исполнителя и конкретное изменение подхода")
     if report["cause"] in ("missing_context", "wrong_approach"):
-        require(report["route"] == "fresh", "Недостающий контекст или неверный подход требуют свежего сильного исполнителя")
+        require(report["route"] == "fresh", "Недостающий контекст или неверный подход требуют нового исполнителя с полным контекстом"
+                if _lean(state) else "Недостающий контекст или неверный подход требуют свежего сильного исполнителя")
     if report["route"] == "same":
         require(report["cause"] == "implementation_gap", "Тот же исполнитель подходит для локального дефекта реализации")
     if report["cause"] == "external_blocker":
@@ -77,8 +83,12 @@ def read(store, state, tid):
 def assignment_guard(store, state, tid, *, fresh, model):
     report = read(store, state, tid)
     attempt = _attempt(state, tid)
-    require(report["route"] == "fresh" and fresh is True and nonempty(model),
-            "Замена требует маршрута fresh, независимого контекста и реального ID сильной модели среды")
+    if _lean(state):  # the model ID is optional; a strong one is advised only for sensitive zones
+        require(report["route"] == "fresh" and fresh is True,
+                "Замена требует маршрута fresh и нового исполнителя с полным контекстом")
+    else:
+        require(report["route"] == "fresh" and fresh is True and nonempty(model),
+                "Замена требует маршрута fresh, независимого контекста и реального ID сильной модели среды")
     require(attempt["actors"]["worker"] == attempt["submitted"]["actor"],
             "Новый исполнитель ремонта уже назначен; это не новый круг попыток")
 
@@ -93,8 +103,12 @@ def worker_guard(store, state, tid, actor=None):
         require(aid == original, "Ремонт должен выполнять исходный исполнитель согласно диагнозу")
     else:
         agent = state.get("actors", {}).get(aid, {})
-        require(aid != original and agent.get("fresh") is True and nonempty(agent.get("model")),
-                "Нужен новый исполнитель с независимым контекстом и записанной моделью")
+        if _lean(state):
+            require(aid != original and agent.get("fresh") is True,
+                    "Нужен новый исполнитель с полным контекстом")
+        else:
+            require(aid != original and agent.get("fresh") is True and nonempty(agent.get("model")),
+                    "Нужен новый исполнитель с независимым контекстом и записанной моделью")
     return attempt["repairPlan"]
 
 
@@ -106,4 +120,4 @@ def view(store, state, tid):
             "requiredFindingIds": sorted(required_ids(attempt["rounds"][0])),
             "requiredFindings": [f for f in attempt["rounds"][0]["findings"] if f["id"] in required_ids(attempt["rounds"][0])],
             "recorded": attempt.get("repairPlan"),
-            "rule": "implementation_gap: same or fresh; missing_context/wrong_approach: fresh strong worker; external_blocker: blocked. No extra critic round."}
+            "rule": "implementation_gap: same or fresh; missing_context/wrong_approach: fresh worker (full context; a strong model only for sensitive zones in lean runs); external_blocker: blocked. No extra critic round."}

@@ -217,6 +217,15 @@ class FinalWaveTests(Fixture):
         self.assertFalse(gate_valid(self.store, self.state, "acceptance"))
         self.assertFalse(blind.derived_waves_valid(self.store, self.state))
 
+    def test_max_mode_does_not_reuse_the_final_blind_review(self):
+        from aispa_core import check_modes
+        self.prepare(); self.completed()
+        self.state["policy"] = {"finalWaveReuse": True, "leanControl": True}
+        check_modes.initialize(self.state, "max")
+        with self.assertRaises(Invalid):
+            self.flow.acceptance(self.file(self.final_blind()))
+        self.assertEqual(self.state.get("waves", {}), {})
+
     def test_exact_full_scope_required_and_task_acceptor_cannot_substitute(self):
         self.prepare(); self.completed()
         self.state["policy"] = {"finalWaveReuse": True}

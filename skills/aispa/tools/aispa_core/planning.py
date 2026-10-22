@@ -5,7 +5,7 @@ from collections import Counter
 from .contracts import (active, artifact_valid, basis, definition, nonempty, overlap,
                         require, validate_plan)
 from .store import digest
-from . import delivery, review_policy, task_tiers
+from . import check_modes, delivery, review_policy, task_tiers
 
 MAX_TASKS = 96
 MAX_REPORT_CHARS = 131072
@@ -18,14 +18,20 @@ def _role_estimate(state, tasks):
     else:
         tasks = list(tasks)
         count = len(tasks)
-        if task_tiers.enabled(state):
-            light = sum(task_tiers.worker_only(t) for t in tasks)
+        if task_tiers.enabled(state) or check_modes.current(state) != check_modes.DEFAULT:
+            light = sum(_worker_only(state, t) for t in tasks)
             low, high = _heavy_slots(state)
             return {"minimum": light + (count - light) * low, "maximum": light + (count - light) * high}
     if review_policy.selected(state) == review_policy.LEGACY:
         return count * 4
     low, high = _heavy_slots(state)
     return {"minimum": count * low, "maximum": count * high}
+
+
+def _worker_only(state, task):
+    """Fast makes every task worker-only, max makes it heavy; otherwise the declared class."""
+    tier = check_modes.effective_tier(state, task.get("tier"))
+    return task_tiers.worker_only({"tier": tier})
 
 
 def _heavy_slots(state):
@@ -81,8 +87,9 @@ def analyze(store, state, raw):
     return {"basis": digest({"run": state["run"], "scope": basis(store, state, "coverage"), "draft": definitions}),
             "draft": definitions, "suggestions": suggestions,
             **({"taskTiers": {t["id"]: {"tier": t["tier"], "tierReason": t["tierReason"],
-                 "taskWorkers": 1, "taskCritics": {"minimum": 0 if task_tiers.worker_only(t) else 1, "maximum": 0 if task_tiers.worker_only(t) else 2},
-                 "taskAcceptors": 0 if task_tiers.worker_only(t) or review_policy.selected(state) == review_policy.LEAN else 1} for t in tasks},
+                 "effectiveTier": check_modes.effective_tier(state, t["tier"]),
+                 "taskWorkers": 1, "taskCritics": {"minimum": 0 if _worker_only(state, t) else 1, "maximum": 0 if _worker_only(state, t) else 2},
+                 "taskAcceptors": 0 if _worker_only(state, t) or review_policy.selected(state) == review_policy.LEAN else 1} for t in tasks},
                  "projectReviewSeparate": True,
                  "projectReviewRole": "integration-reviewer when the final frozen attempt is light or standard"} if task_tiers.enabled(state) else {}),
             "taskCount": len(tasks), "taskRoleStarts": _role_starts(state, tasks),

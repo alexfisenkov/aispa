@@ -4,11 +4,13 @@ from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
 from .team import _record_valid, task_proof_valid
-from . import carryover, review_policy, execution_obligations, phase_receipts, task_tiers
+from . import carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи",
           "verified_completion": "Выполнение проверено"}
+
+MODE_LABELS = {"fast": "Быстро", "balanced": "Сбалансированно", "max": "Максимум"}
 
 LABELS = {"running": "В работе", "paused": "Приостановлено", "blocked": "Есть препятствие",
           "cancelled": "Отменено", "accepted": "Все действующие требования приняты",
@@ -117,7 +119,8 @@ def project(store, state):
     if not all(current.values()):
         gates["acceptance"] = False
     status = state["status"]
-    if status in ("accepted", "delivered_with_remaining") and not gates["acceptance"]:
+    settled = gates["acceptance"] or (all(current.values()) and gate_valid(store, state, "acceptance", settled=True))
+    if status in ("accepted", "delivered_with_remaining") and not settled:
         status = "stale"
     rows = []
     for req in state["requirements"]:
@@ -134,6 +137,7 @@ def project(store, state):
     remaining = {
         "checks": assessment.get("failures", []) if current_assessment else [],
         "blockedTasks": [t["id"] for t in state["tasks"] if t["status"] == "blocked"],
+        "deferredTasks": sorted(check_modes.deferred_ids(state, store)),
         "excluded": [r["id"] for r in state["requirements"] if r["scope"] != "active"],
         "unmapped": assessment.get("unmapped", []) if current_assessment else [],
         "inherited": [{"id": item["id"], "status": item["status"], "text": item["requirement"]["text"]}
@@ -144,6 +148,9 @@ def project(store, state):
         {"id": row["id"], "event": row["event"], "deadline": row["deadline"],
          "status": "pending", "note": "Execution event has not been attested"}
         for row in execution["obligations"]]
+    if check_modes.enabled(state):
+        remaining["skippedChecks"] = check_modes.skipped_checks(state)
+        remaining["checkModeChanges"] = check_modes.history_view(store, state)
     remaining["execution"] = [row for row in results if row["status"] != "passed"]
     remaining["inheritedExecution"] = carryover.unresolved_execution(store, state)
     tasks = []
@@ -154,7 +161,8 @@ def project(store, state):
         light = task_tiers.worker_only(attempt)
         accepted = attempt.get("acceptance") or {}
         tasks.append(dict(task, tier=attempt.get("tier", "heavy"), tierReason=attempt.get("tierReason", ""),
-                          plannedTier=task.get("tier", "heavy"),
+                          plannedTier=attempt.get("plannedTier", task.get("tier", "heavy")),
+                          deferred=check_modes.is_deferred(state, task, store),
                           completionKind="verified_completion" if attempt.get("verifiedCompletion") else (accepted.get("completionKind", "task_acceptance") if accepted else None),
                           perTaskReview=("skipped_" + attempt["tier"]) if light else "required",
                           elapsedSeconds=elapsed(task, observed),
@@ -167,11 +175,12 @@ def project(store, state):
                           criticRounds=len((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1].get("rounds", []))))
     estimate_tasks = [dict(t, status="pending") if t["status"] == "completed" and not current.get(t["id"]) else t
                       for t in tasks]
-    return {"version": state["version"], "title": state["title"], "run": state["run"],
+    mode = check_modes.current(state)
+    return {"version": state["version"], "checkMode": mode, "checkModeLabel": MODE_LABELS[mode], "title": state["title"], "run": state["run"],
             "status": status, "label": LABELS.get(status, "Проект изменён; приёмка устарела"),
             "stage": state["stage"], "displayStage": display_stage(state, gates),
             "updatedAt": state["updatedAt"], "observedAt": observed, "gates": gates,
-            "verified": verified(store, state), "requirements": rows, "tasks": tasks,
+            "verified": verified(store, state), "checkModeHistory": check_modes.history_view(store, state), "requirements": rows, "tasks": tasks,
             "remaining": remaining, "remainingAssessed": current_assessment, "decisions": state["notes"],
             "executionPolicy": execution_obligations.enabled(state),
             "phaseAuthorship": phase_receipts.summary(store, state),

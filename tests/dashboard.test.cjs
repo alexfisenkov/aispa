@@ -389,3 +389,46 @@ test('standard and lean tasks name their review route',async()=>{
  f.el('language').change('en');assert.match(f.text('waves'),/Standard task · No task reviewer/);
  assert.match(f.text('waves'),/A passing critic closes the task/);
 });
+test('mode changes are shown with time, direction and the owner words',async()=>{
+ const d=sample();d.checkMode='fast';d.checkModeLabel='Быстро';
+ d.checkModeHistory=[{mode:'max',previous:'balanced',at:'2026-10-22T10:00:00Z',text:'Проверь всё тщательно'},
+  {mode:'fast',previous:'max',at:'2026-10-22T11:00:00Z',text:'Теперь быстро'}];
+ d.remaining={skippedChecks:['Проверка задач критиками','Тестовый контракт RED']};
+ const f=await fixture('',d);
+ assert.equal(f.el('modeChangesPanel').hidden,false);
+ const text=f.text('modeChanges');
+ assert.match(text,/Сбалансированно → Максимум/);assert.match(text,/«Проверь всё тщательно»/);
+ assert.match(text,/Максимум → Быстро/);assert.match(text,/«Теперь быстро»/);
+ assert.ok(text.indexOf('Теперь быстро')<text.indexOf('Проверь всё'));
+ assert.match(f.text('remaining'),/Пропущенные проверки/);assert.match(f.text('remaining'),/Тестовый контракт RED/);
+ f.el('language').change('en');
+ assert.match(f.text('modeChanges'),/Balanced → Maximum/);assert.match(f.text('remaining'),/RED test contract/);
+ const none=await fixture('',sample());assert.equal(none.el('modeChangesPanel').hidden,true);
+});
+test('fast mode says the waves are not checked against the brief and names skipped scenarios',async()=>{
+ const d=sample();d.checkMode='fast';d.checkModeLabel='Быстро';
+ d.remaining={skippedChecks:['Подробные сценарии (только main и error)']};
+ const f=await fixture('',d);
+ assert.match(f.text('wavesNote'),/В быстром режиме волны не сверяются с брифом/);
+ assert.match(f.text('remaining'),/Подробные сценарии \(только main и error\)/);
+ f.el('language').change('en');
+ assert.match(f.text('wavesNote'),/In fast mode waves are not checked/);
+ assert.match(f.text('remaining'),/Detailed scenarios \(main and error only\)/);
+ const plain=await fixture('',sample());assert.match(plain.text('wavesNote'),/После каждой волны проверяется весь бриф/);
+});
+test('check mode, fast tasks and deferred tasks are named',async()=>{
+ const d=sample();d.checkMode='max';d.checkModeLabel='Максимум';
+ d.tasks=[{id:'T01',title:'Быстрая',requirements:['R01'],wave:1,status:'completed',proofCurrent:true,tier:'fast',
+  plannedTier:'heavy',tierReason:'Режим «быстро»',completionKind:'verified_completion',perTaskReview:'skipped_fast',elapsedSeconds:5,phaseSteps:[]},
+  {id:'T02',title:'Сложная',requirements:['R01'],wave:2,status:'blocked',proofCurrent:false,tier:'heavy',deferred:true,
+   elapsedSeconds:9,phaseSteps:[]}];
+ const f=await fixture('',d);
+ assert.equal(f.el('checkModeBox').hidden,false);assert.equal(f.el('checkModeName').textContent,'Максимум');
+ assert.match(f.text('waves'),/Быстрая задача · Без проверок по ходу · итоговая приёмка/);
+ assert.match(f.text('waves'),/Отложено в остатки/);
+ f.el('language').change('en');
+ assert.equal(f.el('checkModeName').textContent,'Maximum');
+ assert.match(f.text('waves'),/Fast task · No in-flight checks · final acceptance/);
+ assert.match(f.text('waves'),/Deferred to remaining/);
+ const old=await fixture('',sample());assert.equal(old.el('checkModeBox').hidden,true);
+});

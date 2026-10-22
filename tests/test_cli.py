@@ -57,7 +57,7 @@ class CliTests(unittest.TestCase):
         return result
 
     def init(self, cli=CLI):
-        state = self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", "--runtime", "codex", cli=cli)
+        state = self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", "--runtime", "codex", "--check", "balanced", cli=cli)
         self.run = self.root / ".aispa" / state["runDirectory"]
         self.cli = self.run / "runtime/tools/aispa.py"
         self.inbox = self.root / ".aispa/inbox"
@@ -119,18 +119,18 @@ class CliTests(unittest.TestCase):
             process.stdout.close()
 
     def test_mode_is_explicit(self):
-        self.call("init", "--slug", "example", "--title", "Example", "--runtime", "codex", expected=2)
+        self.call("init", "--slug", "example", "--title", "Example", "--runtime", "codex", "--check", "balanced", expected=2)
         self.assertFalse((self.root / ".aispa/active.json").exists())
 
     def test_runtime_is_explicit(self):
-        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", expected=2)
+        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--check", "balanced", expected=2)
         self.assertFalse((self.root / ".aispa/active.json").exists())
 
     def test_init_does_not_write_through_ignore_symlink(self):
         external = Path(self.temp.name) / "external-ignore"
         external.write_text("keep this unchanged\n", encoding="utf-8", newline="\n")
         (self.root / ".gitignore").symlink_to(external)
-        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", expected=2)
+        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", "--check", "balanced", expected=2)
         self.assertEqual(external.read_text(encoding="utf-8"), "keep this unchanged\n")
         self.assertFalse((self.root / ".aispa/active.json").exists())
 
@@ -147,7 +147,7 @@ class CliTests(unittest.TestCase):
 
     def test_init_rejects_ignore_directory_before_switching_active_run(self):
         (self.root / ".gitignore").mkdir()
-        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", expected=2)
+        self.call("init", "--slug", "example", "--title", "Example", "--mode", "auto", "--runtime", "codex", "--check", "balanced", expected=2)
         self.assertFalse((self.root / ".aispa/active.json").exists())
 
     def test_carry_command_records_real_disposition_across_runs(self):
@@ -158,7 +158,7 @@ class CliTests(unittest.TestCase):
         self.call("requirements", "--file", self.input([requirement]))
         self.call("block", "T99", "--note", "unknown", expected=2)
         self.call("close", "cancelled", "--note", "Synthetic owner stopped this fixture")
-        state = self.call("init", "--slug", "second", "--title", "Next", "--mode", "auto", "--runtime", "codex")
+        state = self.call("init", "--slug", "second", "--title", "Next", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
         self.run = self.root / ".aispa" / state["runDirectory"]
         ledger = self.call("memory")
         item = ledger["items"][0]
@@ -441,7 +441,7 @@ class CliTests(unittest.TestCase):
             with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
                 self.assertEqual(json.load(response)["status"], "stale")
         (self.root / "app.py").write_bytes(original)
-        new = self.call("init", "--slug", "next", "--title", "Next iteration", "--mode", "auto", "--runtime", "codex")
+        new = self.call("init", "--slug", "next", "--title", "Next iteration", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
         self.assertNotEqual(new["runDirectory"], state["runDirectory"])
         self.assertEqual(new["status"], "running")
         history = self.call("knowledge", "--path", "app.py", "--archive")

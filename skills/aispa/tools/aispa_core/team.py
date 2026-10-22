@@ -8,7 +8,7 @@ import copy
 import json
 import uuid
 
-from . import timing, repairs, participants, integration, test_intent, review_policy, task_tiers
+from . import timing, repairs, participants, integration, test_intent, review_policy, task_tiers, check_modes
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -49,6 +49,11 @@ def _sealed_valid(store, record):
     if not isinstance(record, dict) or not artifact_valid(store, record.get("record", {})):
         return False
     return _json(store.text(record["record"])) == {k: v for k, v in record.items() if k != "record"}
+
+
+def _declared(attempt):
+    """Class the plan gave the attempt; fast and max may run it under another."""
+    return {"tier": attempt.get("plannedTier") or attempt.get("tier")}
 
 
 def _latest(state, tid):
@@ -115,6 +120,20 @@ def _history_valid(store, state, tid):
                     or previous.get("rounds") or previous.get("acceptance")
                     or not nonempty(auth.get("reason"))
                     or auth.get("previousTier") != previous.get("tier") or auth.get("nextTier") != "heavy"):
+                return False
+            continue
+        if auth.get("kind") == "check-mode":
+            request = auth.get("request")
+            if (previous.get("rounds") or previous.get("acceptance") or previous.get("verifiedCompletion")
+                    or auth.get("mode") not in check_modes.MODES or not isinstance(request, dict)
+                    or not artifact_valid(store, request)
+                    or not any(row.get("request") == request and row.get("mode") == auth["mode"]
+                               for row in state.get("checkModeHistory", []))):
+                return False
+            continue
+        if auth.get("kind") == "extra-wave":
+            if (not previous.get("terminal") or task_tiers.worker_only(previous) or task_tiers.worker_only(attempt)
+                    or sum((a.get("authorization") or {}).get("kind") == "extra-wave" for a in history) != 1):
                 return False
             continue
         index, source = briefs.get(auth.get("brief"), (0, None))
@@ -229,7 +248,7 @@ def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
         require({row["id"] for row in resolutions} == review_policy.required_ids(first)
                 and all(row["status"] in ("resolved", "rejected") for row in resolutions),
                 "Второй критик не закрыл обязательные замечания")
-    if state.get("policy", {}).get("testIntent"):
+    if test_intent.required(state, attempt):
         require(attempt.get("testIntent") and all(record.get("testIntent") == attempt["testIntent"] for record in records)
                 and test_intent.history_valid(store, state, tid), "Повреждена история тестового контракта")
     return final
@@ -262,7 +281,7 @@ def _historical_light(store, state, task, attempt):
         return None
     if set((row["requirement"], row["criterion"]) for row in accepted.get("coverage", [])) != expected:
         return None
-    if state.get("policy", {}).get("testIntent"):
+    if test_intent.required(state, attempt):
         if (not attempt.get("testIntent") or accepted.get("testIntent") != attempt["testIntent"]
                 or not test_intent.history_valid(store, state, task["id"])):
             return None
@@ -294,7 +313,7 @@ def _historical_one(store, state, tid):
     if (not _record_valid(store, accepted) or accepted.get("actor") != attempt["actors"]["acceptor"]
             or accepted["basis"] != final["basis"] or accepted.get("previousReport") != final["report"]["sha256"]):
         return None
-    if state.get("policy", {}).get("testIntent") and accepted.get("testIntent") != attempt.get("testIntent"):
+    if test_intent.required(state, attempt) and accepted.get("testIntent") != attempt.get("testIntent"):
         return None
     if review_policy.adaptive(attempt):
         report = _json(store.text(accepted["report"]))
@@ -337,7 +356,7 @@ def _historical_lean(store, state, task, attempt, accepted):
         return None
     if not _record_valid(store, accepted) or accepted["actor"] != attempt["actors"][role]:
         return None
-    if state.get("policy", {}).get("testIntent") and accepted.get("testIntent") != attempt.get("testIntent"):
+    if test_intent.required(state, attempt) and accepted.get("testIntent") != attempt.get("testIntent"):
         return None
     card = _role_data(store, attempt, role)
     report = _json(store.text(accepted["report"]))
@@ -400,7 +419,7 @@ def direct_proof_current(store, state, tid):
         if not historical_proof_valid(store, state, tid):
             return False
         attempt = _latest(state, tid)
-        if state.get("policy", {}).get("testIntent"):
+        if test_intent.required(state, attempt):
             repaired = bool(attempt.get("rounds") and not attempt["rounds"][0]["passed"] and attempt.get("repair"))
             if not test_intent.valid(store, state, tid, allow_source_changes=repaired):
                 return False
@@ -459,15 +478,48 @@ class TaskPipeline:
 
     def _new(self, tid, authorization=None):
         task = next((t for t in self.s["tasks"] if t["id"] == tid), {})
-        return {**({key: task[key] for key in task_tiers.FIELDS if key in task} if task_tiers.enabled(self.s) else {}),"id": uuid.uuid4().hex, "briefCount": len(self.s["briefs"]), "contract": None,
+        attempt = {**({key: task[key] for key in task_tiers.FIELDS if key in task} if task_tiers.enabled(self.s) else {}),"id": uuid.uuid4().hex, "briefCount": len(self.s["briefs"]), "contract": None,
                 "reviewPolicy": review_policy.selected(self.s),
                 "roles": {}, "actors": {}, "writers": [], "actorHistory": [], "rounds": [], "submitted": None, "repair": None,
                 "acceptance": None, "terminal": False, "authorization": authorization,
                 "createdAt": timestamp(), "cardHistory": [], "submissionHistory": [], "repairHistory": []}
+        if authorization is None:
+            self._mode_class(attempt, task, [])
+        return attempt
 
-    def _sources(self, tid):
+    def _mode_class(self, attempt, task, history):
+        """Fast and max set the class of an attempt; the plan keeps its own and
+        the declared class survives as plannedTier. A promotion stays heavy
+        unless the owner chose fast."""
+        if not (task_tiers.enabled(self.s) and check_modes.enabled(self.s)) or not task:
+            return
+        mode = check_modes.current(self.s)
+        for key in ("plannedTier", "checkMode"):
+            attempt.pop(key, None)
+        attempt.update({key: task[key] for key in task_tiers.FIELDS if key in task})
+        promoted = next((a for a in reversed(history) if (a.get("authorization") or {}).get("kind") == "tier-escalation"), None)
+        if promoted and mode != "fast":
+            attempt.update(tier="heavy", tierReason=promoted.get("tierReason", attempt.get("tierReason")))
+            return
+        planned, target = task.get("tier", "heavy"), check_modes.effective_tier(self.s, task.get("tier"))
+        if target != planned:
+            attempt.update(plannedTier=planned, tier=target, checkMode=mode)
+
+    def _deferred_ids(self):
+        return check_modes.deferred_ids(self.s, self.store)
+
+    def _skipped(self, tid):
+        history = self.s.get("taskHistory", {}).get(tid) or [{}]
+        return set(history[-1].get("deferredDependencies", []))
+
+    def _closure(self, tid, skip=None):
+        """Closure without deferred dependencies recorded on the attempt."""
+        skip = self._skipped(tid) if skip is None else skip
+        return [t for t in task_closure(self.s, tid) if t["id"] == tid or t["id"] not in skip]
+
+    def _sources(self, tid, skip=None):
         requirements = {r["id"]: r for r in self.s["requirements"]}
-        ids = {rid for task in task_closure(self.s, tid) for rid in task["requirements"]}
+        ids = {rid for task in self._closure(tid, skip) for rid in task["requirements"]}
         ids |= {r["id"] for r in active(self.s) if r["kind"] == "constraint"}
         originals = {}
         for rid in sorted(ids):
@@ -481,7 +533,7 @@ class TaskPipeline:
         return self._sources(tid)
 
     def inherited_proofs(self, tid):
-        return [_proof_ref(self.s, task["id"]) for task in task_closure(self.s, tid) if task["id"] != tid]
+        return [_proof_ref(self.s, task["id"]) for task in self._closure(tid) if task["id"] != tid]
 
     def _cards(self, tid, attempt, custom=None):
         require(not attempt["rounds"] and not attempt.get("verifiedCompletion"), "Карточки заморожены после проверки")
@@ -499,13 +551,17 @@ class TaskPipeline:
         attempt.update(contract=task_contract(self.s, tid), briefCount=len(self.s["briefs"]),
                        roles={}, actors={}, writers=[], submitted=None, repair=None,
                        acceptance=None, verification=None)
+        deferred = sorted(self._deferred_ids() & {t["id"] for t in task_closure(self.s, tid)} - {tid})
+        if deferred or "deferredDependencies" in attempt:
+            attempt["deferredDependencies"] = deferred
         context = {"schema": 1, "project": self.s["title"], "run": self.s["run"], "task": tid,
                    "reviewPolicy": review_policy.mode(attempt),
                    **{key: attempt[key] for key in task_tiers.FIELDS if key in attempt},
                    "attempt": attempt["id"], "contract": attempt["contract"], "title": task["title"],
                    "zones": task["zones"], "readZones": task.get("readZones", []),
-                   "closure": [definition(t) for t in task_closure(self.s, tid)],
-                   "sources": self._sources(tid),
+                   "closure": [definition(t) for t in self._closure(tid, deferred)],
+                   **({"deferredDependencies": deferred} if deferred else {}),
+                   "sources": self._sources(tid, deferred),
                    "constraints": [copy.deepcopy(r) for r in active(self.s) if r["kind"] == "constraint"],
                    "briefs": copy.deepcopy(self.s["briefs"]), "spec": copy.deepcopy(self.s["spec"])}
         for role in task_tiers.roles(attempt):
@@ -517,7 +573,7 @@ class TaskPipeline:
                     "Роли нужны специализация и строковые проверки")
             lenses = LENSES[role] + (LENSES["acceptor"] if review_policy.lean(attempt) and role.startswith("critic") else [])
             all_checks = list(dict.fromkeys(task["criteria"] + lenses + checks))
-            if self.s.get("policy", {}).get("testIntent") and role.startswith("critic"):
+            if test_intent.required(self.s, attempt) and role.startswith("critic"):
                 all_checks.append("Тестовый контракт и изменения тестов действительно проверяют критерии задачи")
             if self.s.get("policy", {}).get("errorBoundaryChecks") and role != "worker":
                 all_checks.append("Проверены применимые отказные границы failureChecks, сохранность данных и реальные отрицательные сценарии")
@@ -635,7 +691,7 @@ class TaskPipeline:
         if role == "worker" and task_tiers.worker_only(attempt):
             expected |= {(r["id"], c) for r in active(self.s) if r["kind"] == "constraint" for c in r["acceptance"]}
         if role == "acceptor" or role.startswith("critic") and review_policy.lean(attempt):
-            expected |= {(task["id"], c) for task in task_closure(self.s, tid) for c in task["criteria"]}
+            expected |= {(task["id"], c) for task in self._closure(tid) for c in task["criteria"]}
             expected |= {(r["id"], c) for r in active(self.s) if r["kind"] == "constraint" for c in r["acceptance"]}
         return expected
 
@@ -661,7 +717,7 @@ class TaskPipeline:
         if role != "worker":
             require(report.get("independent") is True, "Проверяющему нужен независимый контекст")
         require(task_verified(self.store, self.s, tid), "Нет успешной адресной проверки текущей задачи")
-        if self.s.get("policy", {}).get("testIntent") and role != "worker":
+        if test_intent.required(self.s, attempt) and role != "worker":
             repaired = bool(attempt.get("rounds") and not attempt["rounds"][0]["passed"] and attempt.get("repair"))
             require(test_intent.valid(self.store, self.s, tid, allow_source_changes=repaired),
                     "Тестовый контракт отсутствует, повреждён или не подтверждён реальным RED/GREEN")
@@ -686,7 +742,7 @@ class TaskPipeline:
                                  "report": self.store.artifact("reviews", text.encode(), ".json"),
                                  "artifacts": artifacts, "verification": copy.deepcopy(attempt["verification"]),
                                  **({"testIntent": copy.deepcopy(attempt.get("testIntent"))}
-                                    if self.s.get("policy", {}).get("testIntent") else {}),
+                                    if test_intent.required(self.s, attempt) else {}),
                                  **extra})
 
     def submit(self, tid, path):
@@ -825,8 +881,31 @@ class TaskPipeline:
         else:
             attempt["terminal"] = True
             task["phase"] = "critic_2"
-            self.host.block(tid, "Второй критик не принял задачу; третий раунд автоматически не разрешён")
+            self._block(tid, attempt, "Второй критик не принял задачу; третий раунд автоматически не разрешён")
         return passed
+
+    def _block(self, tid, attempt, note):
+        """After the one extra wave a refusal defers the task to the next run."""
+        history = self.s.get("taskHistory", {}).get(tid) or []
+        if check_modes.enabled(self.s) and any((a.get("authorization") or {}).get("kind") == "extra-wave" for a in history):
+            self.host.block(tid, "Отложено в остатки следующего прогона после дополнительной волны: " + note)
+            self.host.task(tid)["deferred"] = check_modes.is_deferred(self.s, self.host.task(tid), self.store)
+            self._recard_dependents(tid)
+            self.host.save("task-deferred:" + tid)
+        else:
+            self.host.block(tid, note)
+
+    def _recard_dependents(self, tid):
+        """Idle tasks built on a deferred task get cards without its criteria."""
+        for other in self.s["tasks"]:
+            history = self.s.get("taskHistory", {}).get(other["id"])
+            if other["id"] == tid or other.get("status") != "pending" or not history:
+                continue
+            attempt = history[-1]
+            if (tid in {t["id"] for t in task_closure(self.s, other["id"])} and attempt.get("roles")
+                    and not (attempt["actors"] or attempt["writers"] or attempt["submitted"] or attempt["rounds"]
+                             or attempt.get("verifiedCompletion") or attempt["terminal"])):
+                self._cards(other["id"], attempt)
 
     def _inherited_report(self, tid, report):
         inherited = self.inherited_proofs(tid)
@@ -939,7 +1018,7 @@ class TaskPipeline:
             self.host.save("task-accepted:" + tid)
         else:
             attempt["terminal"] = True
-            self.host.block(tid, "Приёмщик обнаружил расхождение с запросом или неподтверждённый критерий")
+            self._block(tid, attempt, "Приёмщик обнаружил расхождение с запросом или неподтверждённый критерий")
         return passed
 
     def _light_changes(self, tid, attempt):
@@ -954,14 +1033,17 @@ class TaskPipeline:
                       and direct_proof_current(self.store, self.s, t["id"])) for z in t["zones"]}
         owned = []
         for row in changes:
-            # Light keeps its exact-file rule; standard tolerates directory peers.
-            peer = _inside(row["path"], peers) if task_tiers.is_standard(attempt) else row["path"] in peers
+            # Light keeps its exact-file rule; standard and fast tolerate directory peers.
+            wide = task_tiers.is_standard(attempt) or task_tiers.is_fast(attempt)
+            peer = _inside(row["path"], peers) if wide else row["path"] in peers
             if not _inside(row["path"], task["zones"]) and peer:
                 continue
-            if task_tiers.is_standard(attempt):
-                # Standard owns whole declared zones, still never a sensitive path.
-                require(_inside(row["path"], task["zones"]), "Изменение вышло за зоны standard: " + row["path"])
-                require(not task_tiers.sensitive_path(row["path"]),
+            if wide:
+                # Standard owns whole declared zones, still never a sensitive path;
+                # fast is the owner's choice and checks only the zones.
+                require(_inside(row["path"], task["zones"]),
+                        "Изменение вышло за зоны " + attempt["tier"] + ": " + row["path"])
+                require(task_tiers.is_fast(attempt) or not task_tiers.sensitive_path(row["path"]),
                         "Чувствительный путь требует promote-task: " + row["path"])
                 for value in (row["before"], row["after"]):
                     require(value is None or value.get("missing") or "sha256" in value,
@@ -1011,16 +1093,76 @@ class TaskPipeline:
                                             "previousAttempt": old["id"], "at": timestamp()})
         new = self._new(tid, authorization)
         new.update({key: old[key] for key in task_tiers.FIELDS if key in old})
+        task = next((t for t in self.s["tasks"] if t["id"] == tid), None)
+        if task is not None and check_modes.enabled(self.s) and (check_modes.current(self.s) != "balanced" or "plannedTier" in old):
+            self._mode_class(new, task, self.s["taskHistory"][tid])
         self.s["taskHistory"][tid].append(new)
         # A withdrawn task can be reactivated under its original ID. Its
         # historical budget is retained even while absent from the live plan.
-        task = next((t for t in self.s["tasks"] if t["id"] == tid), None)
         if task is not None:
             timing.stop(task, timestamp())
             task.update(status="pending", phase="implementation")
-            for key in ("proof", "note", "finishedAt", "phaseTiming"):
+            for key in ("proof", "note", "finishedAt", "phaseTiming", "deferred"):
                 task.pop(key, None)
         self.host.save("owner-task-attempt:" + tid)
+        return new["id"]
+
+    def switch_check_mode(self, mode, words):
+        """Owner's words (kept verbatim, no brief): done work stays; idle tasks get a new attempt."""
+        self.host.running()
+        row = check_modes.record_switch(self.store, self.s, mode, words)
+        affected = []
+        for task in self.s["tasks"]:
+            tid, history = task["id"], self.s.get("taskHistory", {}).get(task["id"])
+            if task["status"] not in ("pending", "running", "blocked") or not history:
+                continue
+            old = history[-1]
+            if (old["terminal"] or old["rounds"] or old["submitted"] or old.get("verifiedCompletion") or old["acceptance"]
+                    or not task_tiers.enabled(self.s)):
+                continue
+            require(_history_valid(self.store, self.s, tid), "Повреждена история разрешений на попытки")
+            auth = _seal(self.store, {"kind": "check-mode", "previousAttempt": old["id"],
+                                      "request": row["request"], "mode": mode, "at": timestamp()})
+            new = self._new(tid, auth)
+            self._mode_class(new, task, history)
+            if new.get("tier", "heavy") == old.get("tier", "heavy"):
+                continue
+            if old.get("lightBaseline"):
+                new["lightBaseline"] = copy.deepcopy(old["lightBaseline"])
+            history.append(new)
+            if task["status"] != "blocked":  # an ordinary obstacle stays; only the attempt changes class
+                timing.stop(task, timestamp())
+                task.update(status="pending", phase="implementation")
+                for key in ("proof", "note", "finishedAt", "phaseTiming", "completionKind"):
+                    task.pop(key, None)
+            self._cards(tid, new)
+            affected.append(tid)
+        self.host.save("check-mode-changed")
+        return affected
+
+    def extra_wave(self, tid):
+        """The one extra wave of max mode: no owner words, never repeated."""
+        self.host.running()
+        require(check_modes.is_max(self.s), "Дополнительная волна доступна только в режиме проверки max")
+        old, task = self._attempt(tid), self.host.task(tid)
+        history = self.s["taskHistory"][tid]
+        refused = old.get("acceptance") and old["acceptance"].get("passed") is False
+        require(old["terminal"] and task["status"] == "blocked" and not task_tiers.worker_only(old)
+                and (refused or len(old["rounds"]) == 2 and not old["rounds"][-1]["passed"]),
+                "Дополнительная волна доступна после исчерпанных кругов проверки заблокированной задачи")
+        require(not any((a.get("authorization") or {}).get("kind") == "extra-wave" for a in history),
+                "Дополнительная волна для задачи уже использована")
+        auth = _seal(self.store, {"kind": "extra-wave", "previousAttempt": old["id"], "at": timestamp()})
+        new = self._new(tid, auth)
+        self._mode_class(new, task, history)
+        new["tier"] = "heavy"
+        history.append(new)
+        timing.stop(task, timestamp())
+        task.update(status="pending", phase="implementation")
+        for key in ("proof", "note", "finishedAt", "phaseTiming", "completionKind", "deferred"):
+            task.pop(key, None)
+        self._cards(tid, new)
+        self.host.save("task-extra-wave:" + tid)
         return new["id"]
 
     def start_guard(self, tid):
@@ -1030,9 +1172,18 @@ class TaskPipeline:
         require(attempt["contract"] == task_contract(self.s, tid), "Контракт команды устарел")
         for role in task_tiers.roles(attempt):
             _role_data(self.store, attempt, role)
-        if task_tiers.worker_only(attempt) and not attempt.get("lightBaseline"):
-            # A restart never forgets writes made since the attempt began.
+        current = sorted(self._deferred_ids() & {t["id"] for t in task_closure(self.s, tid)} - {tid})
+        if current != attempt.get("deferredDependencies", []):
+            require(not (attempt["actors"] or attempt["writers"] or attempt["submitted"]),
+                    "Набор отложенных зависимостей изменился после назначения исполнителя; нужна новая команда владельца")
+            self._cards(tid, attempt)
+            return True
+        if (task_tiers.worker_only(attempt) or check_modes.enabled(self.s)) and not attempt.get("lightBaseline"):
+            # A restart never forgets writes made since the attempt began; under
+            # lean control every attempt keeps it so a later switch to a
+            # worker-only class still sees writes outside the zones.
             attempt["lightBaseline"] = _artifact_json(self.store, "team-records", {"records": self.store.code_records()})
+        return False
 
     def reset_guard(self, tid):
         affected = {tid}
@@ -1055,12 +1206,12 @@ class TaskPipeline:
         heavy_coverage = {rid for task in new_tasks
                           if not task_tiers.worker_only(task) or
                           (task["id"] in known and definition(task) == definition(known[task["id"]])
-                           and not task_tiers.worker_only((self.s.get("taskHistory", {}).get(task["id"]) or [{}])[-1]))
+                           and not task_tiers.worker_only(_declared((self.s.get("taskHistory", {}).get(task["id"]) or [{}])[-1])))
                           for rid in task["requirements"]}
         for tid, history in self.s.get("taskHistory", {}).items():
             consumed = any(attempt["rounds"] for attempt in history)
             if task_tiers.enabled(self.s):
-                consumed = consumed or any(not task_tiers.worker_only(a) or a.get("actors") or a.get("submitted") or a.get("verifiedCompletion") for a in history) or known.get(tid, {}).get("startedAt") or known.get(tid, {}).get("status") == "running"
+                consumed = consumed or any(not task_tiers.worker_only(_declared(a)) or a.get("actors") or a.get("submitted") or a.get("verifiedCompletion") for a in history) or known.get(tid, {}).get("startedAt") or known.get(tid, {}).get("status") == "running"
             latest = history[-1]
             require(_history_valid(self.store, self.s, tid), "Повреждена история разрешений на попытки")
             authorized = latest["contract"] is None and latest.get("authorization") and _sealed_valid(self.store, latest["authorization"])
@@ -1080,7 +1231,7 @@ class TaskPipeline:
             if task_tiers.enabled(self.s):
                 obligations = set()
                 for historical in history:
-                    if not task_tiers.worker_only(historical) and historical.get("roles"):
+                    if not task_tiers.worker_only(_declared(historical)) and historical.get("roles"):
                         card = _role_data(self.store, historical, "worker")
                         prior = next((t for t in card["closure"] if t["id"] == tid), None)
                         require(prior is not None, "Историческая heavy-карточка потеряла исходную задачу")
@@ -1088,13 +1239,14 @@ class TaskPipeline:
                 require(obligations.intersection(active_ids) <= heavy_coverage,
                         "Активные исторические heavy-требования должны оставаться покрыты heavy-задачей")
             if tid in proposed and task_tiers.enabled(self.s):
-                if task_tiers.worker_only(latest):
-                    require(all(proposed[tid].get(key) == latest.get(key) for key in task_tiers.FIELDS),
+                if task_tiers.worker_only(_declared(latest)):
+                    require(all(proposed[tid].get(key) == latest.get(key) for key in task_tiers.FIELDS if key != "tier")
+                            and proposed[tid].get("tier") == _declared(latest)["tier"],
                             "Классификация light заморожена; повышение выполняется через promote-task")
                 # A promotion overrides the original plan declaration without
                 # rewriting its immutable plan-review artifact.
                 escalated = any(a.get("authorization", {}).get("kind") == "tier-escalation" for a in history if a.get("authorization"))
-                require(not task_tiers.worker_only(proposed[tid]) or all(task_tiers.worker_only(a) for a in history) or
+                require(not task_tiers.worker_only(proposed[tid]) or all(task_tiers.worker_only(_declared(a)) for a in history) or
                         escalated and tid in known and definition(proposed[tid]) == definition(known[tid]),
                         "Историю heavy нельзя понизить до light")
                 authorization = latest.get("authorization") or {}

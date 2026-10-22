@@ -445,7 +445,7 @@ def record(store, state, report):
     _require(state.get("status") == "running", "запись возможна перед завершением активного прогона")
     _require(all(task.get("status") in ("completed", "blocked") for task in state.get("tasks", [])),
              "сначала завершите работу над задачами или явно сохраните препятствие")
-    _require(gate_valid(store, state, "acceptance") and verified(store, state), "нужна свежая успешная итоговая приёмка и проверка")
+    _require(gate_valid(store, state, "acceptance", settled=True) and verified(store, state), "нужна свежая успешная итоговая приёмка и проверка")
     # The actual command receipt must come from the saved journal, not a caller-supplied dict.
     carryover._journal(store, state)
     _require(isinstance(report, dict) and len(_json(report)) <= MAX_ARTIFACT_BYTES, "неверный отчёт знаний")
