@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa.py",
+    "--root",
+    "[PROJECT]",
+    "status"
+  ],
+  "exitCode": 1,
+  "stderr": "Traceback (most recent call last):\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa.py\", line 590, in <module>\n    sys.exit(main())\n             ~~~~^^\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa.py\", line 583, in main\n    return execute(parser().parse_args())\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa.py\", line 564, in execute\n    view = publish(store, state)\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa_core/display.py\", line 171, in publish\n    view = project(store, state)\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa_core/display.py\", line 164, in project\n    \"estimate\": estimate(estimate_tasks, status, observed), \"activity\": state.get(\"activity\"),\n                ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa_core/progress.py\", line 44, in estimate\n    spent = elapsed(task, at) or 0\n            ~~~~~~~^^^^^^^^^^\n  File \"[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa_core/timing.py\", line 18, in elapsed\n    return round(value, 3)\nTypeError: type NoneType doesn't define __round__ method\n",
+  "readOnlyIntent": true,
+  "note": "Installed pinned 0.3.0 projection may write derived status.json on success; journal is not mutated by status",
+  "runtimeVersionReadBack": {
+    "command": [
+      "python3",
+      "[PROJECT]/.aispa/runs/[RUN]/runtime/tools/aispa.py",
+      "--version"
+    ],
+    "exitCode": 0,
+    "stdout": "0.3.0\n"
+  }
+}

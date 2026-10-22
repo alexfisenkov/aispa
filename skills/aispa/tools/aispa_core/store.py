@@ -176,14 +176,18 @@ class Journal:
         state = journal["last"]["state"] if journal["last"] else None
         if not state or state.get("schema") != SCHEMA:
             raise Invalid("Неподдерживаемая схема журнала")
-        if state.get("version") != VERSION:
-            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10", "0.1.0", "0.2.0", "0.3.0"}
-            if not (handoff_only and state.get("version") in supported
-                    and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
-                raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")
+        self._require_version(state, handoff_only=handoff_only)
         self._verify_sources(state)
         self._verified = journal
         return copy.deepcopy(state)
+
+    def _require_version(self, state, *, handoff_only=False):
+        """Normal writers stay version-pinned; a read-only viewer may specialize this guard."""
+        if state.get("version") != VERSION:
+            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10", "0.1.0", "0.2.0", "0.3.0", "0.3.1"}
+            if not (handoff_only and state.get("version") in supported
+                    and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
+                raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")
 
     def _verify_sources(self, state):
         try:

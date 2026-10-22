@@ -5,7 +5,7 @@ import json
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
 from .store import common_input, confined, Invalid
 from .portable import match_name, relative_name
-from . import docmeta, telemetry, review_policy, task_tiers
+from . import autonomy, docmeta, telemetry, review_policy, task_tiers
 
 MAX_PACKET_BYTES = 16000
 
@@ -171,6 +171,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
             from . import project_documents
             original_intent["projectIntent"] = project_documents.intent_reference(store, state)
         return {"kind": "blind", "basis": blind.basis(store, state),
+                **({"autonomy": autonomy.view(state)} if autonomy.enabled(state) else {}),
                 **original_intent,
                 "briefs": _brief_packet(store, state),
                 "inheritedBriefs": carryover.brief_sources(store, state),
@@ -185,6 +186,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                  and _safe_path(store.root, name).is_file()]
         check, clean = state.get("verification"), state.get("cleanrun")
         return {"kind": kind, "basis": store.code(), "writer": state.get("knowledge", {}).get("writer", {}).get("id"),
+                **({"autonomy": autonomy.view(state)} if autonomy.enabled(state) else {}),
                 "projectFiles": names[:128], "omittedFiles": max(0, len(names) - 128),
                 "verification": check, "verificationDigest": digest(check) if check else None,
                 "cleanrun": clean, "cleanrunDigest": digest(clean) if clean else None,
@@ -196,6 +198,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
     req_ids = {rid for task in selected for rid in task["requirements"]}
     reqs = [r for r in active(state) if kind != "task" or r["id"] in req_ids or r["kind"] == "constraint"]
     packet = {"kind": kind, "basis": basis(store, state, kind, task_id), "runDirectory": str(store.run),
+              **({"autonomy": autonomy.view(state)} if autonomy.enabled(state) else {}),
               "briefs": _brief_packet(store, state), "requirements": reqs, "spec": state["spec"],
               "tasks": [dict(definition(t), status=t["status"]) for t in selected],
               "verification": state["verification"], "projectContext": state.get("projectContext"),
@@ -292,7 +295,7 @@ def write(store, packet, *, maximum=MAX_PACKET_BYTES):
     original_bytes = len(encode(packet))
     sections = {}
     # Each reference is smaller than its payload. Never discard even one check.
-    movable = sorted((key for key in packet if key not in ("kind", "basis")),
+    movable = sorted((key for key in packet if key not in ("kind", "basis", "autonomy")),
                      key=lambda key: len(encode(packet[key])), reverse=True)
     for key in movable:
         if len(encode(envelope)) <= maximum:

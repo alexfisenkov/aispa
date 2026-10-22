@@ -1,5 +1,6 @@
 """Recorded wall-clock intervals. Explicit pauses are excluded; CPU time is not measured."""
 from datetime import datetime
+import math
 
 FIELDS = ("startedAt", "activeSince", "elapsedSeconds", "finishedAt", "attempts")
 TASK_PHASES = ("implementation", "critic_1", "repair", "critic_2", "task_acceptance")
@@ -13,8 +14,15 @@ def elapsed(record, at):
     if not record.get("startedAt") and "elapsedSeconds" not in record:
         return None
     value = record.get("elapsedSeconds", 0.0)
+    # A projected legacy/queued task may explicitly contain null. Unknown
+    # clocks stay unknown; booleans and non-finite values are not durations.
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        return None
     if record.get("activeSince"):
-        value += difference(at, record["activeSince"])
+        try:
+            value += difference(at, record["activeSince"])
+        except (TypeError, ValueError, OverflowError):
+            return None
     return round(value, 3)
 
 

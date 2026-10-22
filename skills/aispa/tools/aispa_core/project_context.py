@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from .store import Invalid, digest
 from .portable import is_link, relative_name
-from . import carryover, docmeta, ideas
+from . import autonomy, carryover, docmeta, ideas
 
 
 RUNTIMES = ("codex", "claude-code", "cursor", "openclaw", "gemini", "antigravity")
@@ -416,6 +416,9 @@ def refresh(store, state):
     blockers = [{"task": t.get("id"), "note": t.get("note")} for t in state.get("tasks", [])
                 if t.get("status") == "blocked"]
     progress_data = {key: state.get(key) for key in ("stage", "status", "waiting", "remaining", "activity")}
+    autonomy_contract = autonomy.view(state)
+    if autonomy_contract is not None:
+        progress_data["autonomy"] = autonomy_contract
     progress_data.update(runtime=runtime, blockers=blockers, nextSteps=_next(state),
                          tasks=state.get("tasks", []), actors=state.get("actors", {}),
                          taskHistory=state.get("taskHistory", {}),
@@ -498,6 +501,7 @@ def refresh(store, state):
               "Проект: " + short(state.get("title")) + "\n"
               "Среда: " + runtime + "; этап: " + short(state.get("stage")) +
               "; статус: " + short(state.get("status")) + ".\n\n"
+              + ("Общение с владельцем:\n" + _block(autonomy_contract) + "\n" if autonomy_contract is not None else "") +
               "Полные данные: [бриф](brief.md), [спецификация](spec.md), [требования](requirements.json), "
               "[план](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
               "Сжатие памяти не удаляет канонические записи.\n" + intent_pointer + "\n"

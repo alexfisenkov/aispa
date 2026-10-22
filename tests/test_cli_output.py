@@ -63,7 +63,7 @@ class CliOutputTests(unittest.TestCase):
         self.assertNotIn("compact", initial)
         output = json.loads(self.call("decision", "Сохранить обычный вывод").stdout)
         self.assertEqual(set(output), {"ok", "run", "runDirectory", "status", "stage", "gates",
-                                      "receipt", "task", "counts", "contextIndex"})
+                                  "receipt", "task", "counts", "contextIndex", "autonomy"})
         status = json.loads(self.call("status").stdout)
         self.assertEqual(status["decisions"][0]["text"], "Сохранить обычный вывод")
         self.assertNotIn("compact", status)

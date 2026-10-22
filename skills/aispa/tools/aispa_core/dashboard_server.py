@@ -13,13 +13,16 @@ from socketserver import TCPServer
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
 
+from . import VERSION
 from .display import project
+from .dashboard_reader import DisplayJournal, SnapshotJournal
 from .portable import is_link
-from .store import Invalid, Journal, atomic_json
+from .store import Invalid, Journal, atomic_json, digest, file_hash
 
 
 MARKER = "AISpa-dashboard-service-v1"
@@ -139,12 +142,59 @@ def _private_request(meta, method, endpoint, timeout=.5):
         connection.close()
 
 
-def _verified(store, meta):
+def _health(store, meta):
     response, _reason = _private_request(meta, "GET", "_control/health")
-    return bool(isinstance(response, dict) and response.get("marker") == MARKER
-                and response.get("rootHash") == _root_hash(store)
-                and response.get("instance") == meta["instance"]
-                and response.get("pid") == meta["pid"])
+    if (isinstance(response, dict) and response.get("marker") == MARKER
+            and response.get("rootHash") == _root_hash(store)
+            and response.get("instance") == meta["instance"]
+            and response.get("pid") == meta["pid"]):
+        return response
+    return None
+
+
+def _verified(store, meta):
+    """Ownership is enough to stop our old service, never enough to reuse it."""
+    return _health(store, meta) is not None
+
+
+def _runtime_digest():
+    package = TOOLS_DIR.parent
+    return digest({path.relative_to(package).as_posix(): file_hash(path)
+                   for path in sorted(package.rglob("*")) if path.is_file()
+                   and "__pycache__" not in path.parts and path.suffix != ".pyc"})
+
+
+def _context(state, asset, *, compatible_view=False):
+    """Capture the reader package and actual asset, not a later active-run claim."""
+    return {"run": state["run"], "version": state["version"], "dashboardVersion": VERSION,
+            "runtimeDigest": _runtime_digest(), "pinnedRuntimeDigest": state.get("runtimeDigest"),
+            "readerMode": "compatible-view" if compatible_view else "pinned",
+            "assetSha256": hashlib.sha256(asset).hexdigest()}
+
+
+def _expected_context(store, *, compatible_view=False, asset=None):
+    reader = DisplayJournal(store.root) if compatible_view else store
+    state = reader.load()
+    context = _context(state, _asset_bytes(store) if asset is None else asset, compatible_view=compatible_view)
+    if not compatible_view and state.get("runtimeDigest") and state["runtimeDigest"] != context["runtimeDigest"]:
+        raise Invalid("Dashboard требует закреплённый runtime текущего прогона")
+    return context
+
+
+def _context_matches(health, expected):
+    # Missing fields in a legacy health reply require an authenticated restart.
+    return health is not None and all(health.get(key) == value for key, value in expected.items())
+
+
+def _public_info(meta, health, expected):
+    current = _context_matches(health, expected) if expected is not None else False
+    return {"running": current, "url": _url(meta["port"]) if current else None,
+            "port": meta["port"], "instance": meta["instance"], "pid": meta["pid"],
+            "unverified": health is None, "serviceRunning": health is not None,
+            "contextCurrent": current,
+            **({"context": {key: health[key] for key in ("run", "version", "dashboardVersion", "runtimeDigest",
+                                                        "pinnedRuntimeDigest", "readerMode", "assetSha256")
+                            if key in health}} if health is not None else {})}
 
 
 def _port_closed(port):
@@ -158,10 +208,12 @@ def inspect(store):
     meta = _read_meta(store)
     if meta is None:
         return {"running": False, "url": None, "port": _last_port(store), "instance": None, "pid": None}
-    running = _verified(store, meta)
-    return {"running": running, "url": _url(meta["port"]) if running else None,
-            "port": meta["port"], "instance": meta["instance"], "pid": meta["pid"],
-            "unverified": not running}
+    health = _health(store, meta)
+    try:
+        expected = _expected_context(store, compatible_view=health is not None and health.get("readerMode") == "compatible-view")
+    except (Invalid, OSError, ValueError, KeyError, TypeError):
+        expected = None
+    return _public_info(meta, health, expected)
 
 
 status = inspect
@@ -175,38 +227,42 @@ def _remove_matching(store, meta):
     return False
 
 
+def _stop_locked(store, meta):
+    if meta is None:
+        return {"running": False, "stopped": False, "port": _last_port(store)}
+    if not _verified(store, meta):
+        cleaned = _remove_matching(store, meta) if _port_closed(meta["port"]) else False
+        return {"running": False, "stopped": False, "staleMetadataRemoved": cleaned,
+                "port": meta["port"], "instance": meta["instance"]}
+    response, _reason = _private_request(meta, "POST", "_control/shutdown", timeout=2)
+    if response is None:
+        return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and _verified(store, meta):
+        time.sleep(.05)
+    if _verified(store, meta):
+        return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
+    child = _CHILDREN.pop(meta["instance"], None)
+    if child is not None:
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+    _remove_matching(store, meta)
+    return {"running": False, "stopped": True, "port": meta["port"], "instance": meta["instance"]}
+
+
 def stop(store):
     """Ask the exact authenticated service to stop; never signal a numeric PID."""
     with _lifecycle_lock(store):
-        meta = _read_meta(store)
-        if meta is None:
-            return {"running": False, "stopped": False, "port": _last_port(store)}
-        if not _verified(store, meta):
-            cleaned = _remove_matching(store, meta) if _port_closed(meta["port"]) else False
-            return {"running": False, "stopped": False, "staleMetadataRemoved": cleaned,
-                    "port": meta["port"], "instance": meta["instance"]}
-        response, _reason = _private_request(meta, "POST", "_control/shutdown", timeout=2)
-        if response is None:
-            return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and _verified(store, meta):
-            time.sleep(.05)
-        if _verified(store, meta):
-            return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
-        child = _CHILDREN.pop(meta["instance"], None)
-        if child is not None:
-            try:
-                child.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                pass
-        _remove_matching(store, meta)
-        return {"running": False, "stopped": True, "port": meta["port"], "instance": meta["instance"]}
+        return _stop_locked(store, _read_meta(store))
 
 
-def _spawn(store, port):
+def _spawn(store, port, expected):
     instance = secrets.token_hex(16)
     token = secrets.token_urlsafe(48)
-    config = {"root": str(store.root), "port": port, "instance": instance, "token": token}
+    config = {"root": str(store.root), "port": port, "instance": instance, "token": token,
+              "compatibleView": expected["readerMode"] == "compatible-view"}
     child = subprocess.Popen([sys.executable, "-B", "-m", "aispa_core.dashboard_server"],
                              cwd=str(TOOLS_DIR), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, close_fds=True,
@@ -229,11 +285,12 @@ def _spawn(store, port):
                 response, reason = _private_request(meta, "GET", "_control/health")
                 if (isinstance(response, dict) and response.get("marker") == MARKER
                         and response.get("rootHash") == _root_hash(store)
-                        and response.get("instance") == instance and response.get("pid") == child.pid):
+                        and response.get("instance") == instance and response.get("pid") == child.pid
+                        and _context_matches(response, expected)):
                     _write_last_port(store, meta["port"])
                     child.stdout.close()  # one-shot diagnostic channel, never held by a live daemon
                     _CHILDREN[instance] = child
-                    return inspect(store)
+                    return _public_info(meta, response, expected)
                 phase = "health-" + ("identity-mismatch" if reason == "ok" else reason)
             else:
                 phase = "metadata-other-instance"
@@ -261,23 +318,74 @@ def _spawn(store, port):
     raise Invalid("Dashboard не подтвердил запуск на loopback (" + phase + ", " + child_state + ")")
 
 
-def start(store, port=0):
+def _refresh_asset(store, asset):
+    """Replace only the dashboard HTML, retaining the exact prior bytes privately."""
+    target = store.home / "dashboard.html"
+    if is_link(target) or target.exists() and not target.is_file():
+        raise Invalid("Dashboard asset должен быть обычным файлом")
+    before = target.read_bytes() if target.exists() else None
+    if before == asset:
+        return
+    if before is not None:
+        folder = _service_dir(store, create=True) / "asset-backups"
+        if is_link(folder):
+            raise Invalid("Каталог копий dashboard не должен быть ссылкой")
+        folder.mkdir(exist_ok=True)
+        backup = folder / (hashlib.sha256(before).hexdigest() + ".html")
+        if is_link(backup):
+            raise Invalid("Копия dashboard не должна быть ссылкой")
+        if backup.exists():
+            if not backup.is_file() or backup.read_bytes() != before:
+                raise Invalid("Конфликт резервной копии dashboard")
+        else:
+            descriptor = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(before)
+                stream.flush()
+                os.fsync(stream.fileno())
+    descriptor, name = tempfile.mkstemp(prefix=".aispa-dashboard-", dir=store.home)
+    temp = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(asset)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if (is_link(target) or target.exists() and not target.is_file()
+                or (target.read_bytes() if target.exists() else None) != before):
+            raise Invalid("Dashboard asset изменился во время обновления")
+        os.replace(temp, target)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def start(store, port=0, *, refresh_view=False):
     """Start at most one managed dashboard for this project and reuse its port."""
     if type(port) is not int or not 0 <= port < 65536:
         raise Invalid("Порт dashboard должен быть от 0 до 65535")
-    store.load()  # a dashboard belongs to an initialized project
+    if type(refresh_view) is not bool:
+        raise Invalid("Неверный режим просмотра dashboard")
+    asset = ASSET.read_bytes() if refresh_view else None
+    expected = _expected_context(store, compatible_view=refresh_view, asset=asset)
+    if refresh_view:
+        reader = DisplayJournal(store.root)
+        project(reader, reader.load())  # Validate projection before any asset/service mutation.
     with _lifecycle_lock(store):
-        live = inspect(store)
-        if live["running"]:
-            return live
-        requested = port or live["port"] or 0
+        if refresh_view:
+            _refresh_asset(store, asset)
+        meta = _read_meta(store)
+        health = _health(store, meta) if meta is not None else None
+        if _context_matches(health, expected):
+            return _public_info(meta, health, expected)
+        if health is not None and not _stop_locked(store, meta)["stopped"]:
+            raise Invalid("Старый dashboard не подтвердил остановку; новый экземпляр не запущен")
+        requested = port or (meta["port"] if meta else _last_port(store)) or 0
         try:
-            return _spawn(store, requested)
+            return _spawn(store, requested, expected)
         except Invalid:
             if port != 0 or requested == 0 or _port_closed(requested):
                 raise
             # The previous port may now be owned by an unrelated service.
-            return _spawn(store, 0)
+            return _spawn(store, 0, expected)
 
 
 def _asset_bytes(store):
@@ -288,12 +396,17 @@ def _asset_bytes(store):
     return selected.read_bytes()
 
 
-def serve(store, *, port=0, instance=None, token=None, managed=False, announce=True):
+def serve(store, *, port=0, instance=None, token=None, managed=False, announce=True, compatible_view=False):
     """Run the exact-path HTTP server until authenticated shutdown or signal."""
     if type(port) is not int or not 0 <= port < 65536:
         raise Invalid("Порт dashboard должен быть от 0 до 65535")
-    store.load()
+    reader_class = DisplayJournal if compatible_view else SnapshotJournal
+    initial_state = reader_class(store.root).load()
     asset = _asset_bytes(store)
+    loaded = _context(initial_state, asset, compatible_view=compatible_view)
+    if not compatible_view and initial_state.get("runtimeDigest") and initial_state["runtimeDigest"] != loaded["runtimeDigest"]:
+        raise Invalid("Dashboard требует закреплённый runtime текущего прогона")
+    pinned_digest = initial_state.get("runtimeDigest")
     instance = instance or secrets.token_hex(16)
     token = token or secrets.token_urlsafe(48)
     root_hash = _root_hash(store)
@@ -318,6 +431,11 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
             if data:
                 self.wfile.write(data)
 
+        def _status_error(self, code):
+            # Fixed codes only: exceptions may contain local paths or source text.
+            self._send(409, json.dumps({"error": {"code": code}}).encode("utf-8"),
+                       "application/json; charset=utf-8")
+
         def do_GET(self):
             if not self._host_ok():
                 self._send(421)
@@ -328,16 +446,36 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
             elif route.path == "/dashboard.html":
                 self._send(200, asset, "text/html; charset=utf-8")
             elif route.path == "/status.json":
-                try:
-                    reader = Journal(store.root)
-                    payload = json.dumps(project(reader, reader.load()), ensure_ascii=False).encode("utf-8")
-                except (Invalid, OSError, ValueError, KeyError, TypeError):
-                    self._send(409)
-                    return
+                for attempt in range(3):
+                    try:
+                        # A writer may append after load but before projection.
+                        # Retry only that exact race, with no cross-attempt cache.
+                        reader = reader_class(store.root)
+                        state = reader.load()
+                        if (state["run"] != loaded["run"] or state["version"] != loaded["version"]
+                                or state.get("runtimeDigest") != pinned_digest
+                                or hashlib.sha256(_asset_bytes(store)).hexdigest() != loaded["assetSha256"]):
+                            self._status_error("dashboard_context_changed")
+                            return
+                        view = project(reader, state)
+                        # Validators can report a false gate on a concurrent
+                        # append. Do not publish a mixed snapshot in that case.
+                        reader.read_journal()
+                        view.update(dashboardVersion=loaded["dashboardVersion"], viewerMode=loaded["readerMode"])
+                        payload = json.dumps(view, ensure_ascii=False).encode("utf-8")
+                        break
+                    except Invalid as error:
+                        if str(error) == "Журнал изменился после проверки" and attempt < 2:
+                            continue
+                        self._status_error("status_unavailable")
+                        return
+                    except (OSError, ValueError, KeyError, TypeError):
+                        self._status_error("status_unavailable")
+                        return
                 self._send(200, payload, "application/json; charset=utf-8")
             elif route.path == "/_control/health" and self._authorized():
                 payload = json.dumps({"marker": MARKER, "rootHash": root_hash,
-                                      "instance": instance, "pid": os.getpid()}).encode("utf-8")
+                                      "instance": instance, "pid": os.getpid(), **loaded}).encode("utf-8")
                 self._send(200, payload, "application/json; charset=utf-8")
             else:
                 self._send(404)
@@ -370,9 +508,12 @@ def child_main():
         if not isinstance(config, dict) or not all(isinstance(config.get(key), str) and config[key]
                                                    for key in ("root", "instance", "token")):
             raise Invalid("Неверный запуск dashboard child")
+        if type(config.get("compatibleView", False)) is not bool:
+            raise Invalid("Неверный режим dashboard child")
         stage = "serve"
         serve(Journal(config["root"]), port=config["port"], instance=config["instance"],
-              token=config["token"], managed=True, announce=False)
+              token=config["token"], managed=True, announce=False,
+              compatible_view=config.get("compatibleView", False))
     except (Invalid, OSError, ValueError, KeyError, TypeError) as exc:
         detail = "os-" + str(exc.errno) if isinstance(exc, OSError) else type(exc).__name__
         print("AISPA_DASHBOARD_START_ERROR:" + stage + "/" + detail, file=sys.stdout)

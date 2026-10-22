@@ -1,0 +1,52 @@
+{
+  "command": [
+    "python3",
+    "skills/aispa/tools/aispa.py",
+    "--root",
+    ".\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438/live-dashboard/ui-fixture",
+    "dashboard",
+    "refresh-view",
+    "--port",
+    "62823"
+  ],
+  "exitCode": 0,
+  "stdout": {
+    "running": true,
+    "url": "http://127.0.0.1:62823/dashboard.html",
+    "port": 62823,
+    "instance": "f554f62ae575d9db72891359f333a6ff",
+    "pid": 20024,
+    "unverified": false,
+    "serviceRunning": true,
+    "contextCurrent": true,
+    "context": {
+      "run": "20261022T145701-ui-progress-9e6a0c73",
+      "version": "0.3.2",
+      "dashboardVersion": "0.3.2",
+      "runtimeDigest": "6b5aa6e6644ed7ff2eabdd6f9f7538b4459f5c0ba289255889039773ed7fc744",
+      "pinnedRuntimeDigest": "16d8430e00d2f28d5d573f65774dcffa3c2f694fc6d572ea7201d441677b301a",
+      "readerMode": "compatible-view",
+      "assetSha256": "9b5c37ae3df3161a575c83d689269814f2bcca894049a5c61ef73272599f65c6"
+    },
+    "requiredHostActions": [
+      {
+        "action": "open-dashboard",
+        "url": "http://127.0.0.1:62823/dashboard.html",
+        "surface": "embedded",
+        "visible": true,
+        "verification": "required"
+      }
+    ]
+  },
+  "stderr": "",
+  "before": {
+    "journal": "2829149c442d890bf0822c51b178eda5a3f9a2b99faa076ba5684460482a8b6c",
+    "active": "df6e686957077fdcbb4023f13c4ebcd3eb80eab1dafff2f0f077efc36fa154ba",
+    "pinnedTree": "0835849af34d987550ec729e0ebb3d88083ffe246868326b61a0813b86d2e348"
+  },
+  "after": {
+    "journal": "2829149c442d890bf0822c51b178eda5a3f9a2b99faa076ba5684460482a8b6c",
+    "active": "df6e686957077fdcbb4023f13c4ebcd3eb80eab1dafff2f0f077efc36fa154ba",
+    "pinnedTree": "0835849af34d987550ec729e0ebb3d88083ffe246868326b61a0813b86d2e348"
+  }
+}
