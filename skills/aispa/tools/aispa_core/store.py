@@ -125,13 +125,29 @@ class Journal:
         finally:
             lock.unlink(missing_ok=True)
 
-    def create(self, slug, title, initializer=None):
+    def preflight_create(self, slug):
+        """Read-only validation before init modifies any ordinary project file."""
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", slug):
             raise Invalid("Имя прогона: латинские буквы, цифры и дефис")
+        old = None
         if (self.home / "active.json").exists():
             old = self.load(handoff_only=True)
             if old["status"] not in ("accepted", "delivered_with_remaining", "cancelled"):
                 raise Invalid("Предыдущий прогон не завершён; продолжите его или явно отмените")
+        return old
+
+    def private_history_ignored(self):
+        try:
+            result = subprocess.run(["git", "-C", str(self.root), "check-ignore", "--no-index", "-q", "--", ".aispa/"],
+                                    capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise Invalid("Не удалось проверить исключение приватного каталога .aispa") from error
+        if result.returncode not in (0, 1):
+            raise Invalid("Не удалось проверить исключение приватного каталога .aispa")
+        return result.returncode == 0
+
+    def create(self, slug, title, initializer=None):
+        self.preflight_create(slug)
         ident = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + slug + "-" + uuid.uuid4().hex[:8]
         self.run = confined(self.home, "runs/" + ident)
         self._verified = None

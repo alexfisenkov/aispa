@@ -33,7 +33,8 @@ class CliTests(unittest.TestCase):
         self.command_env["PATH"] = str(runner_directory) + os.pathsep + os.environ.get("PATH", "")
         self.git("init", "-q")
         (self.root / "app.py").write_text("print('ready')\n", encoding="utf-8", newline="\n")
-        self.git("add", "app.py")
+        (self.root / "INTENT.md").write_text("# Project intent\nA local command with observable output.\n", encoding="utf-8", newline="\n")
+        self.git("add", "app.py", "INTENT.md")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")
 
     def tearDown(self):

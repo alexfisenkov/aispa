@@ -60,6 +60,9 @@ def basis(state):
              "requirements": state["requirements"]}
     if state.get("policy", {}).get("executionObligations"):
         value["executionObligations"] = state.get("executionObligations", [])
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        value["projectIntent"] = project_documents.accepted_basis(state)
     return digest(value)
 
 
@@ -110,6 +113,9 @@ def _observations(store, state, report, *, check_sources):
 
 
 def _validate(store, state, report, *, check_sources=True):
+    if state.get("policy", {}).get("projectDocuments") and check_sources:
+        from . import project_documents
+        project_documents.require_fresh_intent(store, state)
     _object(report, _FIELDS, ("collection", "challenge"))
     _require(_size(report) <= MAX_REPORT_CHARS, "отчёт слишком большой; сократите изложение, сохранив все требования")
     _require(report["basis"] == basis(state), "бриф или требования изменились; обновите разбор идеи")

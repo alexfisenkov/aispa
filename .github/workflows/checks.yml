@@ -45,6 +45,9 @@ jobs:
           test_packets test_team test_knowledge test_carryover test_telemetry
           test_cli test_blind test_cleanroom test_windows_cli
           test_windows_paths test_windows_cleanroom test_windows_portable_tools
+          test_project_documents test_project_documents_cli test_project_file_map
+          test_ideas test_planning test_workflow test_cli_output
+          test_check_modes_e2e.FastModeE2E
       - name: Study-plan pilot example tests
         if: inputs.scope != 'runtimes'
         working-directory: examples/study-plan

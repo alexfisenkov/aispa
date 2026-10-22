@@ -3,15 +3,18 @@ import http.client
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
+import ssl
 import stat
 import struct
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import urllib.error
 import zipfile
 import zlib
@@ -82,6 +85,76 @@ class UpdateTests(unittest.TestCase):
     def prepare(self):
         with self.network([self.release()]):
             return updates.prepare(self.package)
+
+    def test_https_context_preserves_valid_default_ca_and_windows_native_trust(self):
+        clean_env = {key: value for key, value in os.environ.items() if key not in ("SSL_CERT_FILE", "SSL_CERT_DIR")}
+        for platform, cafile, capath in (("darwin", "/configured/ca.pem", None),
+                                        ("linux", None, "/configured/certs"), ("win32", None, None)):
+            with self.subTest(platform=platform, cafile=cafile, capath=capath):
+                secure = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                with patch.dict(os.environ, clean_env, clear=True), patch.object(updates.sys, "platform", platform), \
+                     patch.object(ssl, "create_default_context", return_value=secure), \
+                     patch.object(ssl, "get_default_verify_paths", return_value=SimpleNamespace(cafile=cafile, capath=capath)), \
+                     patch.object(Path, "is_file", side_effect=AssertionError("No fallback with native/default trust")):
+                    self.assertIs(updates._https_context(), secure)
+                    self.assertTrue(secure.check_hostname)
+                    self.assertEqual(secure.verify_mode, ssl.CERT_REQUIRED)
+                    self.assertEqual(dict(os.environ), clean_env)
+
+    def test_https_context_respects_explicit_ca_environment_even_when_empty(self):
+        clean_env = {key: value for key, value in os.environ.items() if key not in ("SSL_CERT_FILE", "SSL_CERT_DIR")}
+        for key, value in (("SSL_CERT_FILE", "/custom/ca.pem"), ("SSL_CERT_DIR", "/custom/certs"),
+                           ("SSL_CERT_FILE", ""), ("SSL_CERT_DIR", "")):
+            with self.subTest(key=key, value=value):
+                secure = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                configured = dict(clean_env, **{key: value})
+                with patch.dict(os.environ, configured, clear=True), \
+                     patch.object(ssl, "create_default_context", return_value=secure), \
+                     patch.object(ssl, "get_default_verify_paths", side_effect=AssertionError("Explicit configuration wins")), \
+                     patch.object(Path, "is_file", side_effect=AssertionError("No system fallback for explicit CA")):
+                    self.assertIs(updates._https_context(), secure)
+                    self.assertTrue(secure.check_hostname)
+                    self.assertEqual(secure.verify_mode, ssl.CERT_REQUIRED)
+                    self.assertEqual(dict(os.environ), configured)
+
+    def test_https_context_uses_existing_system_bundle_only_when_defaults_absent(self):
+        clean_env = {key: value for key, value in os.environ.items() if key not in ("SSL_CERT_FILE", "SSL_CERT_DIR")}
+        for bundle in ("/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt"):
+            with self.subTest(bundle=bundle):
+                secure = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                with patch.dict(os.environ, clean_env, clear=True), patch.object(updates.sys, "platform", "darwin"), \
+                     patch.object(ssl, "create_default_context", return_value=secure), \
+                     patch.object(ssl, "get_default_verify_paths", return_value=SimpleNamespace(cafile=None, capath=None)), \
+                     patch.object(Path, "is_file", autospec=True, side_effect=lambda path: path.as_posix() == bundle), \
+                     patch.object(ssl.SSLContext, "load_verify_locations") as load:
+                    self.assertIs(updates._https_context(), secure)
+                    load.assert_called_once_with(cafile=bundle)
+                    self.assertTrue(secure.check_hostname)
+                    self.assertEqual(secure.verify_mode, ssl.CERT_REQUIRED)
+                    self.assertEqual(dict(os.environ), clean_env)
+
+    def test_missing_all_ca_stays_verified_and_offline_without_env_mutation(self):
+        clean_env = {key: value for key, value in os.environ.items() if key not in ("SSL_CERT_FILE", "SSL_CERT_DIR")}
+        secure = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        opener = Mock()
+        opener.open.side_effect = urllib.error.URLError(ssl.SSLCertVerificationError("untrusted certificate"))
+        before = updates._snapshot(self.package)
+        with patch.dict(os.environ, clean_env, clear=True), patch.object(updates.sys, "platform", "darwin"), \
+             patch.object(ssl, "create_default_context", return_value=secure), \
+             patch.object(ssl, "get_default_verify_paths", return_value=SimpleNamespace(cafile=None, capath=None)), \
+             patch.object(Path, "is_file", return_value=False), \
+             patch.object(ssl.SSLContext, "load_verify_locations") as load, \
+             patch.object(updates.urllib.request, "build_opener", return_value=opener) as build:
+            self.assertEqual(updates.check(self.package)["status"], "offline")
+            load.assert_not_called()
+            handlers = build.call_args.args
+            self.assertTrue(any(isinstance(handler, updates._SafeRedirect) for handler in handlers))
+            https = next(handler for handler in handlers if isinstance(handler, updates.urllib.request.HTTPSHandler))
+            self.assertIs(https._context, secure)
+            self.assertTrue(secure.check_hostname)
+            self.assertEqual(secure.verify_mode, ssl.CERT_REQUIRED)
+            self.assertEqual(dict(os.environ), clean_env)
+        self.assertEqual(updates._snapshot(self.package), before)
 
     def test_no_release_and_offline_are_read_only(self):
         before = updates._snapshot(self.package)[1]
