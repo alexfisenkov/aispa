@@ -15,6 +15,7 @@ from aispa_core.workflow import Workflow
 from aispa_core import check_modes, project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 from aispa_core.cli_output import emit
 from aispa_core import phase_receipts
+from aispa_core import project_documents
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -112,6 +113,11 @@ def parser():
     adapter = sub.add_parser("project-context")
     adapter.add_argument("--runtime", required=True, choices=project_context.RUNTIMES)
     sub.add_parser("context-refresh")
+    project_docs = sub.add_parser("project-documents")
+    project_docs.add_argument("--role", choices=project_documents.ROLES)
+    project_docs.add_argument("--path")
+    project_docs.add_argument("--sha256")
+    project_docs.add_argument("--reason")
     team = sub.add_parser("team"); team.add_argument("--file")
     assignment = sub.add_parser("assign"); assignment.add_argument("id")
     assignment.add_argument("--role", required=True, choices=("worker", "critic1", "critic2", "acceptor"))
@@ -266,7 +272,9 @@ def execute(args):
                 raise Invalid(".gitignore должен быть обычным файлом; содержимое сохранено")
             if is_link(store.home / "dashboard.html"):
                 raise Invalid("Дашборд не должен быть символической ссылкой")
-            previous_state = store.load(handoff_only=True) if (store.home / "active.json").exists() else None
+            previous_state = store.preflight_create(args.slug)
+            if store.git("ls-files", "-z", "--", ".aispa"):
+                raise Invalid("Приватный каталог .aispa уже отслеживается Git; init не будет добавлять туда снимки")
             inherited = carryover.capture(store, previous_state) if previous_state else None
             learned = knowledge.capture(store, previous_state) if previous_state else None
             def initialize_run(state):
@@ -278,7 +286,7 @@ def execute(args):
                                    "adaptiveCritique": True, "phaseReceipts": True,
                                    "executionObligations": True, "finalWaveReuse": True,
                                    "errorBoundaryChecks": True, "taskTiers": True,
-                                   "leanControl": True}
+                                   "leanControl": True, "projectDocuments": True}
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
                 check_modes.initialize(state, args.check)
@@ -288,12 +296,19 @@ def execute(args):
                 if inherited is not None:
                     carryover.attach(store, state, inherited)
                 knowledge.attach(store, state, learned)
+                project_documents.initialize(store, state, previous=previous_state)
                 shutil.copytree(PACKAGE, store.run / "runtime", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-            state = store.create(args.slug, args.title, initializer=initialize_run)
-            shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
+            # Keep private source snapshots ignored even if initialization is
+            # interrupted after one document has been captured.
             previous = ignore.read_bytes() if ignore.exists() else b""
+            if b".aispa/" in previous.splitlines() and not store.private_history_ignored():
+                raise Invalid("Исключение .aispa/ переопределено правилами Git; исправьте .gitignore до init")
             if b".aispa/" not in previous.splitlines():
                 ignore.write_bytes(previous + (b"\n" if previous and not previous.endswith(b"\n") else b"") + b".aispa/\n")
+            if not store.private_history_ignored():
+                raise Invalid("Git не исключает .aispa; приватные снимки не созданы")
+            state = store.create(args.slug, args.title, initializer=initialize_run)
+            shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
             store.append(state, "runtime-pinned")
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
@@ -308,7 +323,8 @@ def execute(args):
                      or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
                      or (args.action in ("idea", "repair-plan", "integration-review") and not args.file)
-                     or (args.action == "documents" and not args.refresh))
+                     or (args.action == "documents" and not args.refresh)
+                     or (args.action == "project-documents" and not any((args.role, args.path, args.sha256, args.reason))))
         if not read_only and state.get("runtimeDigest") != runtime_digest():
             raise Invalid("Пакет изменён. Продолжайте сохранённой копией runs/<run>/runtime/tools/aispa.py; обновление требует миграции")
         flow = Workflow(store, state)
@@ -470,6 +486,15 @@ def execute(args):
             else:
                 print(json.dumps(packets.usage_summary(store, state), ensure_ascii=False, indent=2))
                 return 0
+        elif action == "project-documents":
+            if not any((args.role, args.path, args.sha256, args.reason)):
+                print(json.dumps(project_documents.view(store, state), ensure_ascii=False, indent=2))
+                return 0
+            flow.running()
+            if not all((args.role, args.path, args.sha256, args.reason)):
+                raise Invalid("Для привязки нужны --role, --path, --sha256 и --reason")
+            receipt = project_documents.bind(store, state, args.role, args.path, args.sha256, args.reason)
+            flow.save("project-document-bound:" + args.role)
         elif action == "project-context":
             receipt = project_context.initialize(store, state, args.runtime)
             flow.save("project-context-adapted")

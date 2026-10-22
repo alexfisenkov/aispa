@@ -11,6 +11,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
                         validate_plan, verified, task_basis, task_verified, task_closure)
 from .store import Invalid, timestamp
 from . import timing, phase_receipts, execution_obligations
+from . import project_documents
 from .team import TaskPipeline, task_proof_valid
 from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
 
@@ -94,6 +95,7 @@ class Workflow:
 
     def seal(self):
         self.running()
+        project_documents.require_fresh_intent(self.store, self.s)
         require(self.s["briefs"] and active(self.s), "Нужны бриф и действующие требования")
         if self.s.get("policy", {}).get("sourceAccounting"):
             require(briefmap.valid(self.store, self.s, actor_check=lambda s, a, r: participants.actor_check(self.store, s, a, r)),
@@ -113,6 +115,7 @@ class Workflow:
 
     def spec(self, path):
         self.running()
+        project_documents.require_fresh_intent(self.store, self.s)
         require(self.s.get("sealed"), "Сначала зафиксируйте бриф и обязательное ядро")
         if self.s.get("policy", {}).get("ideaReview"):
             require(ideas.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "idea"),
@@ -159,6 +162,7 @@ class Workflow:
 
     def plan(self, path, review_path=None, actor=None):
         self.running()
+        project_documents.require_fresh_intent(self.store, self.s)
         if self.s.get("policy", {}).get("discovery"):
             require(discovery.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "discovery"),
                     "Исследование проекта отсутствует, не атрибутировано или устарело; обновите discover")

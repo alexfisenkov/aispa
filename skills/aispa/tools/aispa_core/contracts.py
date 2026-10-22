@@ -56,6 +56,9 @@ def task_basis(store, state, task_id):
     skipped = set(attempt.get("deferredDependencies", []))  # a deferred task's later retry cannot break its dependants
     # Its code is skipped with it: a retry writing its own zone must not stale the dependants' proofs.
     zones = sorted({z for task in closure if task["id"] not in skipped for z in task["zones"] + task.get("readZones", [])})
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        zones = sorted(set(zones) | set(project_documents.required_paths(state)))
     return digest({"run": state["run"], "contract": task_contract(state, task_id),
                    "attempt": attempt.get("id"), "roles": attempt.get("roles", {}),
                    "code": store.code(zones, include_common=True), "readSet": zones,
@@ -73,6 +76,9 @@ def scope_basis(state):
     if state.get("policy", {}).get("executionObligations"):
         value["executionObligations"] = state.get("executionObligations", [])
         value["executionSeal"] = state.get("executionSeal")
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        value["projectIntent"] = project_documents.accepted_basis(state)
     return digest(value)
 
 
@@ -132,6 +138,12 @@ def gate_valid(store, state, name, settled=False):
         settled = False
     if not gate or not (gate.get("passed") or settled):
         return False
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        try:
+            project_documents.require_fresh_intent(store, state)
+        except (Invalid, OSError, ValueError, TypeError, KeyError):
+            return False
     from . import phase_receipts, execution_obligations
     if execution_obligations.enabled(state):
         try:
@@ -259,6 +271,9 @@ def validate_plan(state, items):
     from . import task_tiers
     task_tiers.validate_plan(tasks, closures)
     common = {canonical_zone(z) for z in COMMON_INPUTS} | {z for t in tasks.values() for z in t["zones"] if common_input(z)}
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        common |= {canonical_zone(z) for z in project_documents.required_paths(state)}
     readsets = {tid: sorted(common | {z for t in closure for z in t["zones"] + t.get("readZones", [])})
                 for tid, closure in closures.items()}
     values = list(tasks.values())

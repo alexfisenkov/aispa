@@ -15,8 +15,10 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import ssl
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -209,13 +211,33 @@ def _trusted_url(url, *, redirect=False):
     raise Invalid("Ресурс находится вне доверенного GitHub-репозитория")
 
 
+def _https_context():
+    """Keep verified TLS, using an OS bundle only for a Python without CA paths.
+
+    Explicit CA environment settings and Windows' native trust loading are
+    authoritative. The fallback belongs to this opener, never the process env.
+    """
+    context = ssl.create_default_context()
+    if sys.platform == "win32" or "SSL_CERT_FILE" in os.environ or "SSL_CERT_DIR" in os.environ:
+        return context
+    defaults = ssl.get_default_verify_paths()
+    if defaults.cafile or defaults.capath:
+        return context
+    for name in ("/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt",
+                 "/etc/pki/tls/certs/ca-bundle.crt"):
+        if Path(name).is_file():
+            context.load_verify_locations(cafile=name)
+            break
+    return context
+
+
 def _download(url, limit, deadline):
     _trusted_url(url)
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("Истекло время проверки обновления")
     request = urllib.request.Request(url, headers={"User-Agent": "AISpa-updater", "Accept": "application/vnd.github+json"})
-    opener = urllib.request.build_opener(_SafeRedirect())
+    opener = urllib.request.build_opener(_SafeRedirect(), urllib.request.HTTPSHandler(context=_https_context()))
     with opener.open(request, timeout=min(remaining, 5.0)) as response:
         _trusted_url(response.geturl(), redirect=True)
         length = response.headers.get("Content-Length")

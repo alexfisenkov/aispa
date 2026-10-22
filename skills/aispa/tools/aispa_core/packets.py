@@ -166,11 +166,16 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         # Deliberately omit spec, plan, registry, reviews, discovery and memory.
         from . import blind, carryover
         clone = state.get("cleanroom") or {}
+        original_intent = {}
+        if state.get("policy", {}).get("projectDocuments"):
+            from . import project_documents
+            original_intent["projectIntent"] = project_documents.intent_reference(store, state)
         return {"kind": "blind", "basis": blind.basis(store, state),
+                **original_intent,
                 "briefs": _brief_packet(store, state),
                 "inheritedBriefs": carryover.brief_sources(store, state),
                 "clone": {k: clone[k] for k in ("path", "head", "tree") if k in clone},
-                "instructions": "Read original briefs and run the cloned product first. Do not open the source project's spec, registry, tasks or reviews. Save independent observations before requesting the reconciliation packet."}
+                "instructions": "Read original briefs and run the cloned product first. If projectIntent is present, read its original source as persistent context, not a new task or permission. Do not open the source project's spec, registry, tasks or reviews. Save independent observations before requesting the reconciliation packet."}
     if kind == "knowledge":
         from . import executions
         from .discovery import _names, _kind, _safe_path
@@ -196,6 +201,10 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
               "verification": state["verification"], "projectContext": state.get("projectContext"),
               "discovery": state.get("discovery"), "carryover": state.get("carryover")}
     packet.update(document_context(store, state, kind, selected, source_paths))
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        packet["projectIntent"] = project_documents.intent_reference(store, state)
+        packet["projectFileMap"] = ".aispa/context/INDEX.md"
     if state.get("ideaReview") and kind == "coverage":
         packet["ideaStudy"] = state["ideaReview"]
         if state.get("policy", {}).get("productChallenge"):

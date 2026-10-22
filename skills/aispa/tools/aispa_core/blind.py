@@ -36,7 +36,11 @@ def _sources(store, state):
 
 def _candidate(store, state):
     sources = _sources(store, state)
-    return {"run": state["run"], "briefs": list(sources.values()), "sourceCode": store.code(),
+    context = {}
+    if state.get("policy", {}).get("projectDocuments"):
+        from . import project_documents
+        context["projectIntent"] = project_documents.intent_reference(store, state)
+    return {**context, "run": state["run"], "briefs": list(sources.values()), "sourceCode": store.code(),
             "head": store.git("rev-parse", "HEAD").decode("ascii").strip(),
             "tree": store.git("rev-parse", "HEAD^{tree}").decode("ascii").strip()}
 

@@ -123,10 +123,81 @@ def _block(value):
     return fence + "json\n" + text + fence + "\n"
 
 
+PROJECT_ROLE_LABELS = {"interview": "Интервью", "intent": "Замысел проекта", "spec": "Спецификация",
+                       "plan": "План разработки", "index": "Карта проекта"}
+PROJECT_STATUS_LABELS = {"fresh": "Актуален", "changed": "Изменён — перечитать", "missing": "Файл не найден",
+                         "ambiguous": "Несколько кандидатов — файл не выбран", "absent": "Не сопоставлен",
+                         "unsafe": "Недопустимый источник", "unbound": "Найден — ещё не сопоставлен"}
+
+
+def _table_text(value):
+    text = str(value).replace("\\", "\\\\").replace("\r", " ").replace("\n", " ")
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    for char in "|[]*_`":
+        text = text.replace(char, "\\" + char)
+    return text
+
+
+def _project_link(store, row):
+    """Link only selected, safe files that still exist; never synthesize a path."""
+    name = row.get("path")
+    if not isinstance(name, str) or row.get("status") not in ("fresh", "changed"):
+        return None
+    try:
+        path = _path(store.root, name)
+        if not path.is_file():
+            return None
+    except (Invalid, OSError):
+        return None
+    relative = Path(os.path.relpath(path, store.home / "context")).as_posix()
+    return "[" + _table_text(name) + "](" + quote(relative, safe="/") + ")"
+
+
+def _project_document_map(store, state):
+    """Render navigation to adopted originals, without copying their content."""
+    if state.get("policy", {}).get("projectDocuments") is not True:
+        return "", "", None
+    from . import project_documents
+    document_map = project_documents.view(store, state)
+    roles = document_map.get("roles", {})
+    lines = ["## Исходные документы проекта", "",
+             "Это обычные файлы проекта. Открывайте оригинал нужного документа по ссылке; "
+             "он может выполнять несколько ролей. Интервью и замысел сохраняют решения между прогонами, "
+             "но текущий объём работы определяет бриф прогона.", "",
+             "| Роль | Файл проекта | Назначение | Когда читать | Состояние |",
+             "| --- | --- | --- | --- | --- |"]
+    for role, label in PROJECT_ROLE_LABELS.items():
+        row = roles.get(role, {})
+        status = PROJECT_STATUS_LABELS.get(row.get("status"), "Не определено")
+        link = _project_link(store, row)
+        path = link or _table_text(row.get("path") or "—")
+        if row.get("status") in ("ambiguous", "unbound") or (row.get("status") == "unsafe" and not row.get("path")):
+            candidates = row.get("candidates", [])
+            names = [candidate.get("path", "") if isinstance(candidate, dict) else candidate
+                     for candidate in candidates]
+            names = [name for name in names if isinstance(name, str) and name]
+            path = "Не выбран" + (": " + "; ".join(_table_text(name) for name in names[:5]) if names else "")
+            if len(names) > 5:
+                path += "; ещё " + str(len(names) - 5) + " — в project-documents"
+        lines.append("| " + " | ".join((label, path, _table_text(row.get("purpose", "—")),
+                                        _table_text(row.get("whenRead", "—")), status)) + " |")
+    lines += ["", "Актуальность означает совпадение с сохранённой версией файла, а не приёмку результата. "
+              "При изменении оригинала перечитайте его и обновите сопоставление. "
+              "Если путь известен, открывайте его напрямую: весь каталог на каждой задаче не нужен.", ""]
+    intent = roles.get("intent", {})
+    status = PROJECT_STATUS_LABELS.get(intent.get("status"), "Не определено")
+    pointer = "Замысел проекта: " + (_project_link(store, intent) or "[карта исходных документов](INDEX.md)") + "; " + status + ".\n"
+    if len(pointer) > 256:
+        pointer = "Замысел проекта: [карта исходных документов](INDEX.md); " + status + ".\n"
+    return "\n".join(lines) + "\n", pointer, document_map
+
+
 def inventory(root):
     """Inventory names only: never read configs, secrets, tests or historical copies."""
     if is_link(root):
         raise Invalid("AISpa context: ссылка вместо корня запрещена")
+    from .project_documents import RECOGNIZED_DOCUMENTS
+    document_names = DOCUMENTS | set(RECOGNIZED_DOCUMENTS)
     result = {"zones": [], "manifests": [], "entrypoints": [], "documents": [], "instructions": []}
     for name in ("AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md"):
         path = root / name
@@ -147,7 +218,7 @@ def inventory(root):
                     result["manifests"].append(rel)
                 if path.name in ENTRYPOINTS:
                     result["entrypoints"].append(rel)
-                if path.name.lower() in DOCUMENTS:
+                if path.name.casefold().replace("_", "-").replace(" ", "-") in document_names:
                     result["documents"].append(rel)
     walk(root)
     result["scope"] = "Names only, depth <= 3; hidden, generated, fixture and history trees excluded."
@@ -398,7 +469,14 @@ def refresh(store, state):
     if not learned.get("records") and not learned.get("inherited"):
         knowledge_text += "Проверенные знания ещё не записаны.\n"
     found = inventory(store.root)
-    index = ("# Контекст проекта AISpa\n\n" + lead +
+    project_map, intent_pointer, document_map = _project_document_map(store, state)
+    map_lead = ("Эта страница — навигация. Канон проекта — сопоставленные исходные документы; "
+                "канон текущего прогона — журнал и неизменные источники из [source-map.json](source-map.json).\n\n"
+                if document_map is not None else lead)
+    generated_intro = ("## Представления текущего прогона\n\n"
+                       "Эти файлы создаёт движок AISpa. Они доступны только для чтения; не редактируйте их вручную.\n\n"
+                       if document_map is not None else "")
+    index = ("# Контекст проекта AISpa\n\n" + map_lead + project_map + generated_intro +
              "Читайте [краткую память](memory.md), затем нужный документ:\n\n"
              "- [Бриф](brief.md), [требования](requirements.json), [спецификация](spec.md).\n"
              "- [План](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
@@ -422,7 +500,7 @@ def refresh(store, state):
               "; статус: " + short(state.get("status")) + ".\n\n"
               "Полные данные: [бриф](brief.md), [спецификация](spec.md), [требования](requirements.json), "
               "[план](plan.md), [решения](decisions.md), [прогресс и роли](progress.md).\n"
-              "Сжатие памяти не удаляет канонические записи.\n\n"
+              "Сжатие памяти не удаляет канонические записи.\n" + intent_pointer + "\n"
               "Прошлые прогоны: [история и остатки](carryover.md); незакрытых пунктов: " + str(inherited["summary"]["outstanding"]) + ".\n"
               "Архитектура, команды и неизвестное: [изучение проекта](project-study.md).\n\n"
               "Разбор идеи: [idea.md](idea.md). Знания о коде: [knowledge.md](knowledge.md), читать адресно.\n"
@@ -456,7 +534,7 @@ def refresh(store, state):
     content["documents.yaml"] = _json(documents)
     source_map = {"schema": 1, "derived": True, "run": state["run"], "runtime": runtime,
                   "stateDigest": digest(state), "journal": journal, "sources": sources,
-                  "inventory": found, "views": {name: hashlib.sha256(text.encode()).hexdigest() for name, text in content.items()}}
+                  "inventory": found, "projectDocuments": document_map, "views": {name: hashlib.sha256(text.encode()).hexdigest() for name, text in content.items()}}
     for name, text in content.items():
         _write(paths[name], text.encode())
     # Last write is the commit marker: interrupted refreshes are detectably stale.
@@ -474,6 +552,9 @@ def info(store, state):
         journal = _journal(store, state)
         fresh = (saved["run"] == state["run"] and saved["stateDigest"] == digest(state)
                  and saved["journal"] == journal and journal["recordedStateDigest"] == digest(state))
+        if state.get("policy", {}).get("projectDocuments") is True:
+            from . import project_documents
+            fresh = fresh and saved.get("projectDocuments") == project_documents.view(store, state)
         for name in VIEWS[:-1]:
             view = _path(store.root, ".aispa/context/" + name)
             fresh = fresh and view.is_file() and hashlib.sha256(view.read_bytes()).hexdigest() == saved["views"].get(name)

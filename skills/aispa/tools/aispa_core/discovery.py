@@ -15,6 +15,7 @@ import tomllib
 from .store import Invalid, digest, NATIVE_RULE_INPUTS, native_rule_input
 from .portable import is_link, relative_name
 from . import docmeta
+from . import project_documents
 
 
 SCHEMA = 1
@@ -35,6 +36,7 @@ MANIFESTS = {"package.json", "pyproject.toml", "Cargo.toml", "go.mod", "composer
 DOCUMENTS = {"readme.md", "architecture.md", "decisions.md", "contributing.md", "index.md",
              "data-dictionary.md", "glossary.md", "agents.md", "agents.override.md", "claude.md",
              "gemini.md", "testing.md", "conventions.md", "design.md"}
+DOCUMENTS |= project_documents.RECOGNIZED_DOCUMENTS
 SAFE_HIDDEN = {".editorconfig"} | NATIVE_RULE_INPUTS
 CODE_NAMES = {"main", "app", "index", "server", "cli", "api", "routes", "router", "models",
               "schema", "database", "repository", "service", "store", "__main__", "__init__"}
@@ -81,7 +83,7 @@ def _kind(name, *, explicit=False):
         return "manifest"
     if name in SAFE_HIDDEN or native_rule_input(name):
         return "configuration"
-    if lower in DOCUMENTS or (path.parts[0].lower() in {"docs", "doc", "adr"} and path.suffix.lower() == ".md"):
+    if lower in DOCUMENTS or project_documents._role(name) or (path.parts[0].lower() in {"docs", "doc", "adr"} and path.suffix.lower() == ".md"):
         return "document"
     if "tests" not in path.parts and "test" not in path.parts and path.stem.lower() in CODE_NAMES and path.suffix.lower() in CODE_EXTENSIONS:
         return "code"
@@ -296,6 +298,11 @@ def collect(store, state, paths=None, *, metadata_receipt=None):
             metadata_receipt.update(result)
     if paths is None and state.get("discoveryCollection"):
         paths = _collection(store, state).get("includedPaths", [])
+    if state.get("policy", {}).get("projectDocuments"):
+        # Read bound analogues even when their filenames are not in the default
+        # catalog. Missing/stale references remain visible in project-documents.
+        mapped = project_documents.view(store, state)["roles"].values()
+        paths = sorted(set(paths or []) | {row["path"] for row in mapped if row.get("status") in ("fresh", "changed")})
     scan = _scan(store, paths)
     basis = digest({"run": state["run"], "scan": scan["scanDigest"], "limits": scan["limits"], "includedPaths": scan["includedPaths"]})
     if state.get("discoveryCollection"):
