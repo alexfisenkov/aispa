@@ -6,7 +6,8 @@ permissions:
 jobs:
   python:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Windows runs the subprocess-heavy CLI suites several times slower.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 75 || 30 }}
     strategy:
       fail-fast: false
       matrix:
