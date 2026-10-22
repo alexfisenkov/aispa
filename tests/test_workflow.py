@@ -429,7 +429,9 @@ class WorkflowTests(unittest.TestCase):
         view = project(self.store, self.state)
         self.assertEqual(view["remaining"]["blockedTasks"], ["T02"])
         self.assertFalse(view["remainingAssessed"])
-        self.assertEqual(view["estimate"]["reason"], "blocked")
+        self.assertEqual(view["estimate"]["reason"], "estimate")
+        self.assertTrue(view["estimate"]["waitingForBlockers"])
+        self.assertFalse(view["estimate"]["waitIncluded"])
 
 
 if __name__ == "__main__":

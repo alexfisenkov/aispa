@@ -1,0 +1,22 @@
+test_live_projection_includes_blockers_before_final_delivery (test_workflow.WorkflowTests.test_live_projection_includes_blockers_before_final_delivery) ... ok
+test_blocked_task_keeps_a_conditional_work_estimate_without_inventing_wait (test_timing.TimingTests.test_blocked_task_keeps_a_conditional_work_estimate_without_inventing_wait) ... ok
+test_clock_rollback_never_creates_negative_time (test_timing.TimingTests.test_clock_rollback_never_creates_negative_time) ... ok
+test_estimate_accounts_for_parallel_and_serial_work (test_timing.TimingTests.test_estimate_accounts_for_parallel_and_serial_work) ... ok
+test_final_review_has_no_invented_remaining_time (test_timing.TimingTests.test_final_review_has_no_invented_remaining_time) ... ok
+test_initial_plan_estimate_is_an_explicit_broad_assumption (test_timing.TimingTests.test_initial_plan_estimate_is_an_explicit_broad_assumption) ... ok
+test_null_invalid_and_nonfinite_clocks_remain_unknown (test_timing.TimingTests.test_null_invalid_and_nonfinite_clocks_remain_unknown) ... ok
+test_one_measured_task_provides_a_low_confidence_estimate (test_timing.TimingTests.test_one_measured_task_provides_a_low_confidence_estimate) ... ok
+test_overrun_is_not_zero_remaining (test_timing.TimingTests.test_overrun_is_not_zero_remaining) ... ok
+test_pause_and_resume_exclude_the_pause (test_timing.TimingTests.test_pause_and_resume_exclude_the_pause) ... ok
+test_phase_progress_refines_the_plan_estimate_and_overrun_stays_positive (test_timing.TimingTests.test_phase_progress_refines_the_plan_estimate_and_overrun_stays_positive) ... ok
+test_quick_light_samples_do_not_calibrate_heavy_work (test_timing.TimingTests.test_quick_light_samples_do_not_calibrate_heavy_work) ... ok
+test_running_interval_is_measured_from_recorded_start (test_timing.TimingTests.test_running_interval_is_measured_from_recorded_start) ... ok
+test_same_wave_dependencies_are_not_counted_as_parallel (test_timing.TimingTests.test_same_wave_dependencies_are_not_counted_as_parallel) ... ok
+test_seven_display_steps_are_grounded_in_actual_state (test_timing.TimingTests.test_seven_display_steps_are_grounded_in_actual_state) ... ok
+test_two_samples_with_pending_null_never_crash_or_double_count_running_time (test_timing.TimingTests.test_two_samples_with_pending_null_never_crash_or_double_count_running_time) ... ok
+test_unknown_times_are_not_zero_duration (test_timing.TimingTests.test_unknown_times_are_not_zero_duration) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.124s
+
+OK

@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes, dashboard]
+        options: [full, runtimes, dashboard, dashboard-fix]
 permissions:
   contents: read
 jobs:
@@ -60,6 +60,14 @@ jobs:
           test_phase_progress test_dashboard_liveness test_timing test_workflow
           test_autonomy test_display_details test_dashboard_reader_cache
           test_preparation_workflow test_packets test_project_context test_team test_cli
+      - name: Conditional estimate contract regression
+        if: inputs.scope == 'dashboard-fix'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_workflow.WorkflowTests.test_live_projection_includes_blockers_before_final_delivery
+          test_timing
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan

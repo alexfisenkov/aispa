@@ -60,3 +60,14 @@ SHA journal/active/pinned и сырой JSON ответа. Итоговая до
 и SHA до/после refresh-view. После второго круга основной агент добавил
 версию старого runtime через --version и явно разделил SHA исходного и
 обезличенного лога. Третьего круга нет; финальная metadata-сверка — основным агентом.
+
+## Финальная CI и адресное уточнение теста
+
+[Первый запуск](https://github.com/alexfisenkov/aispa/actions/runs/39804132915)
+проверяет 258 тестов. Ubuntu выявила одно устаревшее ожидание в
+`test_live_projection_includes_blockers_before_final_delivery`: тест ожидал
+reason=blocked, хотя новый согласованный экран возвращает условное рабочее
+время с waitingForBlockers=true и waitIncluded=false. Проверка сохранности
+блокера остаётся; обновляется только ожидание ETA. Production-код не меняется.
+Адресный повтор dashboard-fix проверяет этот тест, timing и UI на трёх ОС;
+полные модельные прогоны и повтор всего Python-набора не запускаются.
