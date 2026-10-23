@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview]
+        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview, dashboard-release]
 permissions:
   contents: read
 jobs:
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: ${{ inputs.scope == 'dashboard-preview' && '0' || '1' }}
+          fetch-depth: ${{ (inputs.scope == 'dashboard-preview' || inputs.scope == 'dashboard-release') && '0' || '1' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -84,6 +84,15 @@ jobs:
         env:
           PYTHONPATH: tests
         run: python -B -m unittest test_dashboard_compare test_label_release_compat -v
+      - name: Dashboard release and upgrade boundaries
+        if: inputs.scope == 'dashboard-release'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_label_release_compat test_dashboard_compare test_updates test_install
+          test_dashboard_server.DashboardServerTests.test_compatible_reader_has_explicit_version_allowlist_and_blocks_writes
+          test_dashboard_server.DashboardServerTests.test_refresh_view_refuses_unsupported_or_damaged_state_before_asset_change
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan
