@@ -1,0 +1,40 @@
+{
+  "checkedAt": "2026-10-23T03:43:58.775971+00:00",
+  "approvedUiCommit": "a3d2647f9f5e39bc274ab7d3e48d00362252ce96",
+  "approvedHtmlChanges": "demo version only: 0.3.4 -> 0.3.5",
+  "htmlSha256": "0982f0682a92ab56169c8458ba8508163bae027891c223508781db633258b472",
+  "checks": [
+    {
+      "suite": "node",
+      "argv": [
+        "node",
+        "--test",
+        "tests/dashboard.test.cjs"
+      ],
+      "cwd": ".",
+      "exitCode": 0,
+      "logSha256": "fdb34cc6f2b33e669034c983907ea88c59ab629dd0037e6e7a8f6ed9806b9e5d"
+    },
+    {
+      "suite": "python",
+      "argv": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "-v",
+        "test_label_release_compat",
+        "test_dashboard_compare",
+        "test_updates",
+        "test_install",
+        "test_dashboard_server.DashboardServerTests.test_start_status_stop_and_port_reuse",
+        "test_dashboard_server.DashboardServerTests.test_compatible_reader_has_explicit_version_allowlist_and_blocks_writes",
+        "test_dashboard_server.DashboardServerTests.test_refresh_view_refuses_unsupported_or_damaged_state_before_asset_change"
+      ],
+      "cwd": "tests",
+      "exitCode": 0,
+      "logSha256": "3349678ab46d0632314f68be9101aafbf59905268b00f35461e671ac0638bab5"
+    }
+  ],
+  "fullModelRuns": 0
+}

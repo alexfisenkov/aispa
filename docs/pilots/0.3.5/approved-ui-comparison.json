@@ -1,0 +1,21 @@
+{
+  "checkedAt": "2026-10-23T03:48:01.957458+00:00",
+  "sourceCommand": [
+    "git",
+    "show",
+    "a3d2647f9f5e39bc274ab7d3e48d00362252ce96:skills/aispa/assets/dashboard.html"
+  ],
+  "sourceExitCode": 0,
+  "approvedCommit": "a3d2647f9f5e39bc274ab7d3e48d00362252ce96",
+  "path": "skills/aispa/assets/dashboard.html",
+  "approvedSha256": "037425f9e9db851a8ed2dd7a51ae41e1ee45b1fc0c59f1b787e3dfe70d31ed44",
+  "substitution": {
+    "old": "0.3.4",
+    "new": "0.3.5",
+    "occurrences": 1
+  },
+  "transformedSha256": "0982f0682a92ab56169c8458ba8508163bae027891c223508781db633258b472",
+  "workingSha256": "0982f0682a92ab56169c8458ba8508163bae027891c223508781db633258b472",
+  "bytesEqual": true,
+  "comparisonExitCode": 0
+}

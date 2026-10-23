@@ -1,4 +1,4 @@
-"""A wording-only upgrade must not require restarting a 0.3.2 project."""
+"""Dashboard upgrades preserve read-only access to previous stable runs."""
 from pathlib import Path
 import sys
 import tempfile
@@ -9,18 +9,22 @@ from aispa_core.store import Journal, Invalid
 from aispa_core.dashboard_reader import DisplayJournal
 
 class LabelReleaseCompatibilityTests(unittest.TestCase):
-    def test_active_032_has_read_only_view_and_terminal_handoff_without_mutation(self):
-        with tempfile.TemporaryDirectory() as root:
-            store=Journal(root)
-            with patch('aispa_core.store.VERSION','0.3.2'):
-                state=store.create('old','Synthetic previous stable')
-            path=store.run/'events.jsonl'; before=path.read_bytes()
-            with self.assertRaises(Invalid):store.load()
-            self.assertEqual(DisplayJournal(root).load()['version'],'0.3.2')
-            self.assertEqual(path.read_bytes(),before)
-            state['status']='cancelled';store.append(state,'synthetic-terminal')
-            before=path.read_bytes()
-            self.assertEqual(store.load(handoff_only=True)['version'],'0.3.2')
-            self.assertEqual(path.read_bytes(),before)
+    def test_previous_patch_runs_have_read_only_view_and_terminal_handoff(self):
+        for version in ('0.3.2', '0.3.3', '0.3.4'):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as root:
+                store=Journal(root)
+                with patch('aispa_core.store.VERSION',version):
+                    state=store.create('old','Synthetic previous stable')
+                path=store.run/'events.jsonl'; before=path.read_bytes()
+                with self.assertRaises(Invalid):store.load()
+                with self.assertRaises(Invalid):store.load(handoff_only=True)
+                reader=DisplayJournal(root)
+                self.assertEqual(reader.load()['version'],version)
+                with self.assertRaises(Invalid):reader.append(state,'must-not-write')
+                self.assertEqual(path.read_bytes(),before)
+                state['status']='cancelled';store.append(state,'synthetic-terminal')
+                before=path.read_bytes()
+                self.assertEqual(store.load(handoff_only=True)['version'],version)
+                self.assertEqual(path.read_bytes(),before)
 
 if __name__=='__main__':unittest.main()

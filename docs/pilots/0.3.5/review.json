@@ -1,0 +1,12 @@
+{
+  "tech": {
+    "round1": "OK"
+  },
+  "reality": {
+    "round1": "FIX",
+    "finding": "Persist exact approved-HTML comparison evidence",
+    "round2": "OK"
+  },
+  "fullModelRuns": 0,
+  "publication": "pending"
+}

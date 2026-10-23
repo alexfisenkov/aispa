@@ -3,7 +3,7 @@ from . import VERSION
 from .store import Invalid, Journal, canonical_zone
 
 
-SUPPORTED_VERSIONS = frozenset({"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", VERSION})
+SUPPORTED_VERSIONS = frozenset({"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", VERSION})
 
 
 class SnapshotJournal(Journal):

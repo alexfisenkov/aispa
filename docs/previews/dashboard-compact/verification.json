@@ -1,0 +1,129 @@
+{
+  "recordedAt": "2026-10-22T19:16:22.282762+00:00",
+  "baselineCommit": "68225daa2dd2a0619562d0bf874da49f0c3060bf",
+  "assetSha256": "037425f9e9db851a8ed2dd7a51ae41e1ee45b1fc0c59f1b787e3dfe70d31ed44",
+  "checks": {
+    "node": {
+      "command": "node --test tests/dashboard.test.cjs",
+      "exitCode": 0,
+      "passed": 82
+    },
+    "python": {
+      "command": "PYTHONPATH=tests python3 -B -m unittest test_dashboard_compare test_label_release_compat -v",
+      "exitCode": 0,
+      "passed": 3,
+      "checkedAt": "2026-10-22T19:18:32.977002+00:00",
+      "logSha256": "c6dad835b8abe6372dfa18ae0dd574d307bff30d6a6adf4390c2c2bcec123a95"
+    }
+  },
+  "browser": {
+    "capturedAt": "2026-10-22T19:14:57.674Z",
+    "assetSha256": "037425f9e9db851a8ed2dd7a51ae41e1ee45b1fc0c59f1b787e3dfe70d31ed44",
+    "desktop": {
+      "before": {
+        "clientWidth": 1600,
+        "closedTaskHeight": 238,
+        "firstTaskTop": 1232,
+        "height": 900,
+        "scrollWidth": 1600,
+        "width": 1600
+      },
+      "after": {
+        "clientWidth": 1600,
+        "closedTaskHeight": 64,
+        "firstTaskTop": 834,
+        "height": 900,
+        "scrollWidth": 1600,
+        "width": 1600
+      }
+    },
+    "screenshots": {
+      "before-desktop-final.jpg": "9e69b2895d1b009a3b5084be8312b0eb862caf8d195b9ddd0c578756078dd550",
+      "after-desktop-final.jpg": "1a7742e4a0d741a8a612d6bf05a62c2d50db969b1f02f79b7dc2a38d57e7cc41",
+      "after-mobile-final.jpg": "7d6ad6cb2309537cee01831e4319fca5bbc04167756c414c6f24f2d4e017bbb2",
+      "after-mobile-expanded-final.jpg": "037e97a2742f6f318753575b2f46e051ca6a1725cd5104c274350fedb11d8ab3",
+      "after-dark-en-final.jpg": "6ea6195eaa7dd771113f08cf80ab70b66c833683766e9a72b28a1de2215a7181",
+      "comparison-final.jpg": "b0d9e0606e0823f650f79c096819b89245efe5a66abee27cc3ace537ea8e9240"
+    },
+    "mobile": {
+      "clientWidth": 390,
+      "height": 844,
+      "scrollWidth": 390,
+      "taskTimeFont": "12px",
+      "width": 390
+    },
+    "disclosure": {
+      "clientWidth": 390,
+      "content": "T03\nПисьмо-подтверждение\nПравка · пример\nВся задача\n7 мин 33 с\nДетали\nДетали задачи\nЭтапы и время задачи\n✓ Реализация\n✓ Первый критик\n● Правка\n○ Второй критик\n○ Приёмка задачи\nИнтервал этапа: Правка\n2 мин 03 с\nТребования в задаче\nR02 · Запись подтверждается сообщением на почту в течение минуты\nРеализовано задач: 0 / 1 · актуально проверено: 0 / 1 · Обязательное ядро\nНа ремонте · пример",
+      "open": true,
+      "scrollWidth": 390
+    },
+    "darkEnglish": {
+      "clientWidth": 1600,
+      "eta": "≈ 30–79 min",
+      "lang": "en",
+      "scrollWidth": 1600
+    },
+    "states": [
+      {
+        "status": "paused",
+        "activity": "Пауза",
+        "eta": "После возобновления",
+        "label": "Приостановлено · пример"
+      },
+      {
+        "status": "stale",
+        "activity": "Нужна повторная проверка",
+        "eta": "Нужна новая проверка",
+        "label": "Проект изменён; приёмка устарела · пример"
+      },
+      {
+        "status": "accepted",
+        "activity": "Принято",
+        "eta": "Прогон завершён",
+        "label": "Все действующие требования приняты · пример"
+      }
+    ]
+  },
+  "ci": {
+    "headSha": "48082c663f52ecb899759bb653ef12499d6ec107",
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "python (windows-latest, 3.11)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417357"
+      },
+      {
+        "name": "python (macos-latest, 3.13)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417585"
+      },
+      {
+        "name": "python (macos-latest, 3.11)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417727"
+      },
+      {
+        "name": "python (windows-latest, 3.13)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417755"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.13)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417792"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.11)",
+        "conclusion": "success",
+        "url": "https://github.com/alexfisenkov/aispa/actions/runs/39839191200/job/120035417943"
+      }
+    ]
+  },
+  "fullModelProjectRuns": 0,
+  "released": false,
+  "mergedToMain": false,
+  "installed": false
+}
