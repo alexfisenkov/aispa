@@ -28,5 +28,44 @@ read-only совместимости добавлены 0.3.3 и 0.3.4: след
 [Квитанция локального запуска](pilots/0.3.5/local-verification.json),
 [точное сравнение с принятым HTML](pilots/0.3.5/approved-ui-comparison.json).
 Независимые tech/reality проверки — OK; [вердикты](pilots/0.3.5/review.json).
-Финальный адресный CI, публикация и установка пока выполняются.
-Выпуск ещё не подтверждён.
+
+## CI и выпуск
+
+[Одна финальная адресная CI](https://github.com/alexfisenkov/aispa/actions/runs/39897081847)
+прошла во всех шести jobs: macOS/Linux/Windows × Python 3.11/3.13.
+Проверенный commit `37e454d4181757a2515a31d35ef56fc3543b0821` и merge commit
+`d1da9cd205b0df86f3d129a5d175340b21e0f1ac` имеют одинаковое дерево.
+
+[PR №9](https://github.com/alexfisenkov/aispa/pull/9) слит в main.
+[Release v0.3.5](https://github.com/alexfisenkov/aispa/releases/tag/v0.3.5)
+опубликован как stable. [Workflow ресурсов](https://github.com/alexfisenkov/aispa/actions/runs/39897468504)
+завершился успешно. ZIP, manifest и install.py скачаны и побайтово совпали
+с локальной сборкой точного source commit. Сверены все 89 файлов пакета.
+[Квитанция выпуска](pilots/0.3.5/release-verification.json).
+
+## Установки на Mac
+
+Исходные четыре пакета совпали с опубликованной 0.3.4. Именно их старый CLI
+выполнил обычные update-check → update-prepare → update-apply; подмен ответов
+GitHub и установки из рабочего дерева не было. Все кандидаты до apply
+сверены с опубликованным commit, архивом и manifest 0.3.5.
+
+| Установка | Среды | Итог |
+|---|---|---|
+| shared | Codex, OpenClaw, Gemini CLI | 0.3.5, current, 89 файлов совпали |
+| claude | Claude Code | 0.3.5, current, 89 файлов совпали |
+| cursor | Cursor | 0.3.5, current, 89 файлов совпали |
+| antigravity | Antigravity app/IDE | 0.3.5, current, 89 файлов совпали |
+
+Для каждой копии проверены SHA/размеры/права, общий digest и сохранённый
+backup 0.3.4. После apply запущен CLI уже установленной 0.3.5: четыре раза
+`current`, найден Release 0.3.5, код завершения 0.
+[Квитанция установок](pilots/0.3.5/installation-verification.json).
+
+## Границы проверки
+
+Полных модельных прогонов нет. Нативные модельные сессии шести сред заново
+не запускались: проверены установленные файлы и их CLI. Уже начатые проекты,
+закреплённые runtime и их viewer не менялись. Совместимость старых журналов
+проверена адресными синтетическими сценариями, без миграции реальных проектов.
+

@@ -68,7 +68,7 @@ python3 -B tools/preview_dashboard_compare.py --before 68225daa2dd2a0619562d0bf8
 прошёл: шесть jobs — macOS/Linux/Windows × Python 3.11/3.13.
 Точный проверенный commit: `48082c663f52ecb899759bb653ef12499d6ec107`.
 Последующая запись результатов меняет только документацию и снимки.
-[PR №9](https://github.com/alexfisenkov/aispa/pull/9) подготовлен к разрешённому владельцем слиянию.
+[PR №9](https://github.com/alexfisenkov/aispa/pull/9) слит по разрешению владельца; принятая панель выпущена в 0.3.5.
 
 ![Было и стало рядом](previews/dashboard-compact/comparison-final.jpg)
 Команды: `node --test tests/dashboard.test.cjs` и

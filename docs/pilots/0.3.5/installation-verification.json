@@ -1,0 +1,69 @@
+{
+  "verifiedAt": "2026-10-23T03:57:14.506708+00:00",
+  "source": "Installed 0.3.4 CLI check/prepare/apply from official published Release, then installed 0.3.5 CLI check",
+  "commit": "d1da9cd205b0df86f3d129a5d175340b21e0f1ac",
+  "installations": [
+    {
+      "installation": "shared",
+      "previousVersion": "0.3.4",
+      "version": "0.3.5",
+      "filesVerified": 89,
+      "packageDigest": "35d531014a00806479696d1ce948ec495f6be614a1f48f890425bf25a5f89c0b",
+      "backupVerified": true,
+      "updateCheck": "current",
+      "detectedRelease": "0.3.5",
+      "cliExitCode": 0
+    },
+    {
+      "installation": "claude",
+      "previousVersion": "0.3.4",
+      "version": "0.3.5",
+      "filesVerified": 89,
+      "packageDigest": "35d531014a00806479696d1ce948ec495f6be614a1f48f890425bf25a5f89c0b",
+      "backupVerified": true,
+      "updateCheck": "current",
+      "detectedRelease": "0.3.5",
+      "cliExitCode": 0
+    },
+    {
+      "installation": "cursor",
+      "previousVersion": "0.3.4",
+      "version": "0.3.5",
+      "filesVerified": 89,
+      "packageDigest": "35d531014a00806479696d1ce948ec495f6be614a1f48f890425bf25a5f89c0b",
+      "backupVerified": true,
+      "updateCheck": "current",
+      "detectedRelease": "0.3.5",
+      "cliExitCode": 0
+    },
+    {
+      "installation": "antigravity",
+      "previousVersion": "0.3.4",
+      "version": "0.3.5",
+      "filesVerified": 89,
+      "packageDigest": "35d531014a00806479696d1ce948ec495f6be614a1f48f890425bf25a5f89c0b",
+      "backupVerified": true,
+      "updateCheck": "current",
+      "detectedRelease": "0.3.5",
+      "cliExitCode": 0
+    }
+  ],
+  "activePinnedRuntimes": "not modified",
+  "nativeModelSessions": "not restarted",
+  "hostMapping": {
+    "shared": [
+      "Codex",
+      "OpenClaw",
+      "Gemini CLI"
+    ],
+    "claude": [
+      "Claude Code"
+    ],
+    "cursor": [
+      "Cursor"
+    ],
+    "antigravity": [
+      "Antigravity app/IDE"
+    ]
+  }
+}
