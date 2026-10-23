@@ -4,6 +4,7 @@
 Codex, Claude Code, Cursor, OpenClaw, Gemini CLI и Antigravity app/IDE.
 Целевые проверки обновления и установки прошли на macOS, Linux и Windows;
 [подтверждённые проверки](validation-0.3.5.md).
+[Оставшиеся нативные проверки](status.md#что-ещё-не-подтверждено) перечислены отдельно.
 
 Всегда берите `install.py`, `aispa.zip` и `aispa-update.json` из одного выбранного
 Release. Установщик из старого выпуска может не знать новые значения runtime.
@@ -34,7 +35,7 @@ Project-пути отсчитываются от `--project-root`. Для global
 python3 install.py preview --runtime claude-code --scope project --project-root <абсолютный-корень-проекта>
 ```
 
-Установщик выпуска 0.3.0 принимает:
+С выпуска 0.3.0 установщик также принимает:
 
 ```text
 python3 install.py preview --runtime openclaw --scope global
@@ -42,8 +43,8 @@ python3 install.py preview --runtime gemini --scope global
 python3 install.py preview --runtime antigravity --scope global
 ```
 
-Это альтернативы: выберите нужную среду. Пока подходящего выпуска нет,
-новый установщик отклоняет пакет, в котором выбранный runtime не объявлен.
+Это альтернативы: выберите нужную среду. Установщик отклоняет пакет,
+в котором выбранный runtime не объявлен.
 Номер версии и новый путь сами по себе не доказывают поддержку.
 Вместо runtime/scope можно задать свободный абсолютный `--destination`;
 он не выбирает и не доказывает совместимость среды.
@@ -70,9 +71,9 @@ python3 install.py apply --candidate <candidateId> --confirm
 Обновление существующего пакета и откат — [updates.md](updates.md).
 Активный прогон продолжает работать собственным закреплённым runtime.
 
-Проверенная доставка 0.2.0 описана в [validation-0.2.0.md](validation-0.2.0.md).
-Адресные тесты выпуска — [validation-agent-runtimes.md](validation-agent-runtimes.md).
-Они не подтверждают полное модельное исполнение во всех приложениях.
+Текущая проверенная доставка — [validation-0.3.5.md](validation-0.3.5.md).
+Первоначальные тесты адаптеров — [validation-agent-runtimes.md](validation-agent-runtimes.md).
+Эти свидетельства не подтверждают полное модельное исполнение во всех приложениях.
 
 ## Выбор опубликованного выпуска с 0.3.4
 
