@@ -1,0 +1,72 @@
+{
+  "version": "0.3.6",
+  "releaseUrl": "https://github.com/alexfisenkov/aispa/releases/tag/v0.3.6",
+  "publishedAt": "2026-10-24T07:39:05Z",
+  "sourceCommit": "f8a829ab3dc76a05de8ef92821266122ef3a516f",
+  "ciCandidate": "6dcdd80554915666b3a00580bc675d5a60c25a2f",
+  "sameTree": true,
+  "ci": {
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40074690295",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "python (macos-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (macos-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (windows-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (windows-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.11)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "assetWorkflow": {
+    "conclusion": "success",
+    "headSha": "f8a829ab3dc76a05de8ef92821266122ef3a516f",
+    "status": "completed",
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40074974358"
+  },
+  "assets": [
+    {
+      "name": "aispa.zip",
+      "size": 473400,
+      "sha256": "f83b5e7da13c78cccfbc753c0181d64492b88edbacd8766af81269054d8b3ee6"
+    },
+    {
+      "name": "aispa-update.json",
+      "size": 16931,
+      "sha256": "f010faee12730cd31a2ca8f88c6dc6321399370b6f03ba0907415cdff66248bb"
+    },
+    {
+      "name": "install.py",
+      "size": 35250,
+      "sha256": "0456061c68a68d93d1d61e5995d6033da468cb04472c967f379dfcdc257014cd"
+    }
+  ],
+  "filesVerified": 92,
+  "assetsMatchExactCommitBuild": true,
+  "installedSkillsModified": false,
+  "activeRunsModifiedByThisReleaseTask": false,
+  "fullModelRuns": 0,
+  "updateDiscovery": {
+    "installedVersion": "0.3.5",
+    "status": "available",
+    "offeredVersion": "0.3.6",
+    "installApplied": false
+  }
+}
