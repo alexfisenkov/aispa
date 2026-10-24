@@ -1,0 +1,40 @@
+{
+  "conclusion": "failure",
+  "databaseId": 40074453795,
+  "headSha": "206ddedfa9ebd7ec47c6f30a3758860527d0d042",
+  "jobs": [
+    {
+      "name": "python (ubuntu-latest, 3.11)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (macos-latest, 3.13)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (windows-latest, 3.13)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "python (windows-latest, 3.11)",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "name": "python (macos-latest, 3.11)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "python (ubuntu-latest, 3.13)",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/alexfisenkov/aispa/actions/runs/40074453795",
+  "failureReason": "Windows legacy console encoding in new repair CLI; POSIX-only path assertion in repair test."
+}

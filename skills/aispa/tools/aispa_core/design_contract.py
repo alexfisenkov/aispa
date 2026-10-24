@@ -127,7 +127,9 @@ def _features(store, state, report, mode=None):
         anchor = req if kind == "requested" else reqs.get(req.get("parent"))
         _need(isinstance(anchor, dict) and anchor.get("brief") in sources,
               "функция не связана с исходным брифом")
-        quote = _text(row["sourceQuote"], "цитата исходного брифа")
+        # Exact registered evidence is bounded by the report cap, not the prose field limit.
+        quote = row["sourceQuote"]
+        _need(nonempty(quote), "цитата исходного брифа: нужен конкретный текст")
         _need(quote == anchor.get("quote") and quote in sources[anchor["brief"]],
               "цитата должна совпадать с зарегистрированным источником")
         _need(_text(row["specQuote"], "цитата спецификации", 3000) in spec,

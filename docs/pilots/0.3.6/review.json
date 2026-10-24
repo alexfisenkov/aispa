@@ -1,0 +1,25 @@
+{
+  "technical": {
+    "model": "gpt-6.1-sol",
+    "reasoning": "high",
+    "rounds": 2,
+    "verdict": "OK",
+    "resolved": [
+      "Full CI fetches required v0.3.5 fixture tag",
+      "Guide distinguishes unpatched original runtime from an already identical exact patch"
+    ]
+  },
+  "evidence": {
+    "model": "gpt-6.1-sol",
+    "reasoning": "high",
+    "verdict": "OK",
+    "rounds": 1
+  },
+  "scope": "Independent read-only code and evidence review; not CI or publication proof",
+  "postReviewWindowsFix": {
+    "scope": "Match existing main CLI UTF-8 streams; compare path components; add cp1252 regression",
+    "verifiedBy": "Primary agent and targeted tests; no third model review round",
+    "tests": 21,
+    "passed": 21
+  }
+}

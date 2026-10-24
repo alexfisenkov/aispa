@@ -1,0 +1,23 @@
+{
+  "official035": "REJECTED",
+  "candidate036": "PASS",
+  "features": 31,
+  "quotesOver1600": 3,
+  "maxQuoteCharacters": 2422,
+  "changedQuote": "REJECTED",
+  "staleBasis": "REJECTED",
+  "journalBytesUnchanged": true,
+  "projectMutated": false,
+  "fullModelRun": false,
+  "repairInspection": {
+    "version": "0.3.5",
+    "alreadyRepaired": false,
+    "oldRuntimeDigest": "731a9f14499fadd6e0e8e3630830cab7d33a22c274d060d4641e0ea248a3619f",
+    "sourceRuntimeDigest": "731a9f14499fadd6e0e8e3630830cab7d33a22c274d060d4641e0ea248a3619f",
+    "newRuntimeDigest": "4d1505637aee31af605ff753af7927971c8037f255ae210dea6686a9fd364a41",
+    "sourceDesignSha256": "8923008daa21ce945090c8293730d8afd54075cb15dde4cc9c0ce8cd0b8732e5",
+    "verifiedRunArtifacts": 108,
+    "externalReferencesNotRevalidated": 1,
+    "approvalSemanticsVerified": false
+  }
+}
