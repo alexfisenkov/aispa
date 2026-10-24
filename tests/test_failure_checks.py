@@ -94,5 +94,32 @@ class FailureCheckTests(unittest.TestCase):
             self.save(report)
 
 
+    def test_cli_mixed_template_bootstrap_is_explicit_policy_gated_and_read_only(self):
+        import argparse
+        from aispa_core import controls
+        parser = argparse.ArgumentParser()
+        controls.parsers(parser.add_subparsers(dest="action", required=True))
+        def execute(*args):
+            return controls.execute(self.fx.store, self.fx.state, self.fx.flow, parser.parse_args(args))
+        before = copy.deepcopy(self.fx.state)
+        self.assertEqual(execute('template', 'failure-checks'), failure_checks.template())
+        with self.assertRaisesRegex(Invalid, 'mixedEvidence'):
+            execute('template', 'failure-checks', '--mode', 'mixed')
+        self.assertEqual(self.fx.state, before)
+        self.fx.state['policy']['mixedEvidence'] = True
+        before = copy.deepcopy(self.fx.state)
+        paths = sorted(str(path) for path in self.fx.store.run.rglob('*'))
+        mixed = execute('template', 'failure-checks', '--mode', 'mixed')
+        self.assertEqual(mixed, failure_checks.template(mode='mixed'))
+        self.assertEqual(self.fx.state, before)
+        self.assertEqual(paths, sorted(str(path) for path in self.fx.store.run.rglob('*')))
+        for forbidden in (('--task', 'T01'), ('--actor', 'fixture'), ('--write',)):
+            with self.assertRaises(Invalid):
+                execute('template', 'failure-checks', '--mode', 'mixed', *forbidden)
+        for kind in ('interfaces', 'scenarios', 'worker'):
+            with self.assertRaisesRegex(Invalid, '--mode'):
+                execute('template', kind, '--mode', 'mixed')
+
+
 if __name__ == "__main__":
     unittest.main()

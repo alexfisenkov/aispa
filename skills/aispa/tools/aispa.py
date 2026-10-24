@@ -288,7 +288,7 @@ def execute(args):
                                    "planReview": True, "projectKnowledge": True, "productChallenge": True,
                                    "deliveryPlan": True, "repairDiagnosis": True, "deliveryDocs": True,
                                    "sourceAccounting": True, "designContract": True, "allRoleUsage": True,
-                                   "integrationReview": True, "testIntent": True,
+                                   "integrationReview": True, "testIntent": True, "mixedEvidence": True,
                                    "adaptiveCritique": True, "phaseReceipts": True,
                                    "executionObligations": True, "finalWaveReuse": True,
                                    "errorBoundaryChecks": True, "taskTiers": True,

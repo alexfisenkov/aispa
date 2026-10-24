@@ -19,6 +19,7 @@ def parsers(sub):
     t.add_argument("kind", choices=(*task_reports.PREPARATION_KINDS, "failure-checks", *task_reports.ROLES))
     t.add_argument("--actor")
     t.add_argument("--task")
+    t.add_argument("--mode", choices=("mixed",), help="Типизированный шаблон только для failure-checks")
     t.add_argument("--write", action="store_true")
     test = sub.add_parser("test-intent")
     test.add_argument("--task", required=True)
@@ -73,11 +74,15 @@ def execute(store, state, flow, args):
     if action == "preparation":
         return {"brief": briefmap.view(store, state, actor_check), "design": design_contract.view(store, state)}
     if action == "template":
+        mode = getattr(args, "mode", None)
+        require(mode is None or args.kind == "failure-checks", "--mode поддерживается только для failure-checks")
         if args.kind == "failure-checks":
             require(args.task is None and args.actor is None and not args.write,
                     "Шаблон failure-checks выводится без --task, --actor и --write")
+            require(mode is None or (mode == "mixed" and state.get("policy", {}).get("mixedEvidence") is True),
+                    "Шаблон mixed требует новой политики mixedEvidence")
             from . import failure_checks
-            return failure_checks.template()
+            return failure_checks.template(mode=mode)
         if args.kind in task_reports.ROLES:
             require(args.task, "Для шаблона роли нужен --task")
             require(args.actor is None, "Actor шаблона задачи берётся из назначенной роли; --actor не нужен")

@@ -1,0 +1,9 @@
+{
+  "surface": "Synthetic mixed routes appended to existing demo data only",
+  "visualScope": "RU labels visible in expanded task; EN labels checked via accessibility tree",
+  "screenshot": "ru.png",
+  "screenshotSha256": "07c037eb793c70c077802067811f385d09004a2ac6727ecf31d4d5e4dc519982",
+  "realProjectAcceptance": false,
+  "mobileViewportTested": false,
+  "fullModelRuns": 0
+}

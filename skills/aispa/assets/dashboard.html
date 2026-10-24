@@ -864,6 +864,7 @@ function renderTask(t,d){
  var criteria=Array.isArray(t.criteriaDetails)?t.criteriaDetails:(t.criteria||[]).map(function(text){return {text:text,status:'pending',source:'task_state'}});
  if(criteria.length){var cb=h('div');cb.append(h('h3',null,tr('Критерии результата')));criteria.forEach(function(c){var cr=h('div','detail-row'),ct=h('div');
   ct.append(h('span',null,c.text));ct.append(h('small',null,tr(c.provisional?'Независимая проверка ещё впереди':c.checkedBy==='worker'?'Проверка исполнителя по маршруту задачи':c.source==='checked_report'?'По сохранённому отчёту проверки':'Отдельная проверка критерия ещё не записана')));
+  if(t.evidenceSummary){var badges=h('small');t.evidenceSummary.routes.filter(function(r){return r.criterion===c.text}).forEach(function(r){badges.append(chip('pending',evidenceLabel(r.kind)))});ct.append(badges);}
   cr.append(ct,chip(c.status));cb.append(cr)});detail.append(cb);}
  row.append(detail);return row;
 }
@@ -950,9 +951,12 @@ function object(x){return x!==null&&typeof x==='object'&&!Array.isArray(x)}
 function strings(x){return Array.isArray(x)&&x.every(function(v){return typeof v==='string'})}
 function optionalObject(x){return x==null||object(x)}
 function goodProgress(x){return optionalObject(x)&&(x==null||typeof x.status==='string'&&Number.isFinite(x.completed)&&Number.isFinite(x.total)&&x.completed>=0&&x.total>=x.completed&&optionalObject(x.acceptance))}
+function evidenceLabel(kind){return ({automated:locale==='en'?'Automated':'Автотест',browser:locale==='en'?'Browser':'Браузер',process:locale==='en'?'Process':'Процесс'})[kind]}
+function goodEvidence(x){if(x===undefined)return true;if(!object(x)||x.mode!=='mixed'||!object(x.counts)||!Array.isArray(x.routes)||!x.routes.length)return false;
+ var kinds=['automated','browser','process'];return x.routes.every(function(r){return object(r)&&typeof r.criterion==='string'&&r.criterion.length>0&&kinds.includes(r.kind)})&&kinds.every(function(k){return Number.isInteger(x.counts[k])&&x.counts[k]>=0&&x.counts[k]===x.routes.filter(function(r){return r.kind===k}).length});}
 function goodRequirement(r){return object(r)&&typeof r.id==='string'&&typeof r.text==='string'&&goodProgress(r.progress)}
 function valid(d){return object(d)&&typeof d.status==='string'&&Array.isArray(d.requirements)&&d.requirements.every(goodRequirement)&&
- Array.isArray(d.tasks)&&d.tasks.every(function(t){return object(t)&&typeof t.id==='string'&&strings(t.requirements)&&
+ Array.isArray(d.tasks)&&d.tasks.every(function(t){return object(t)&&typeof t.id==='string'&&strings(t.requirements)&&goodEvidence(t.evidenceSummary)&&
   (t.title===undefined||typeof t.title==='string')&&(t.criteria===undefined||strings(t.criteria))&&optionalObject(t.assignment)&&optionalObject(t.phaseTiming)&&
   (t.phaseSteps===undefined||Array.isArray(t.phaseSteps)&&t.phaseSteps.every(function(p){return object(p)&&typeof p.id==='string'&&typeof p.status==='string'}))&&
   (t.requirementsDetails===undefined||Array.isArray(t.requirementsDetails)&&t.requirementsDetails.every(goodRequirement))&&
@@ -1026,7 +1030,7 @@ function demoSteps(states){return Object.keys(PHASE_LABEL).map(function(id,i){re
 function makeDemo(requested){
  var status=LABELS[requested]?requested:'running',now=new Date().toISOString();
  var terminal=finalStatus(status)||status==='stale';
- var d={version:'0.3.6',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
+ var d={version:'0.4.0',title:'Онлайн-запись в студию',run:'demo',status:status,stage:terminal?'acceptance':'build',
   displayStage:terminal?'acceptance':'build',updatedAt:now,observedAt:now,elapsedSeconds:3480,
   gates:{coverage:true,plan:true,acceptance:finalStatus(status)},remainingAssessed:finalStatus(status),
   requirements:[

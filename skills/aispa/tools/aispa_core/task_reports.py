@@ -34,6 +34,10 @@ def template(pipeline, tid, role):
                    for rid, criterion in sorted(pipeline.expected_checks(tid, role))],
         "testSourceChanges": test_intent.source_changes(store, state, tid),
     }
+    from . import mixed_evidence
+    route_checks = mixed_evidence.report_template(store, state, tid)
+    if route_checks:
+        report["routeChecks"] = route_checks
     if role != "worker" and review_policy.adaptive(attempt):
         report["verdict"] = None
     if role == "worker":

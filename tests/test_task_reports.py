@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
-from aispa_core import controls, integration, preparation, task_reports, test_intent
+from aispa_core import controls, integration, packets, preparation, task_reports, test_intent
 from aispa_core.contracts import task_basis
 from aispa_core.store import Invalid, file_hash
 import test_team as helpers
@@ -95,6 +95,51 @@ class TaskReportTests(unittest.TestCase):
         self.assertTrue(self.team.review("T01", 2, self.input(self.assessed(second))))
         accepted = self.reject_untouched("acceptor", lambda path: self.team.accept("T01", path))
         self.assertTrue(self.team.accept("T01", self.input(self.assessed(accepted))))
+
+    def test_mixed_context_keeps_original_contract_checks_and_trace(self):
+        from aispa_core import mixed_evidence
+        self.start()
+        original = packets.build(self.store, self.state, self.team, "task", "T01", "worker")
+        summary = {"mode": "mixed", "counts": {"automated": 0, "browser": 1, "process": 0},
+                   "routes": [{"criterion": "T01 works", "kind": "browser", "reason": "visible", "procedure": "open", "expected": "works"}]}
+        observations = [{"schema": 1, "observed": "", "procedure": "", "source": {}, "attachments": []}]
+        with patch.object(test_intent, "route_summary", return_value=summary), patch.object(
+                mixed_evidence, "observation_templates", return_value=observations):
+            packet = self.unchanged(lambda: packets.build(self.store, self.state, self.team, "task", "T01", "worker"))
+        self.assertEqual(packet["evidenceSummary"], summary)
+        self.assertEqual(packet["observationTemplates"], observations)
+        for key in ("testIntent", "tasks", "expectedChecks", "traceRequirements", "inheritedProofs"):
+            self.assertEqual(packet[key], original[key])
+        self.assertNotIn("evidenceSummary", original)
+        self.assertNotIn("observationTemplates", original)
+        self.state.setdefault("policy", {})["errorBoundaryChecks"] = True
+        from aispa_core import failure_checks
+        with patch.object(test_intent, "route_summary", return_value=summary), patch.object(
+                mixed_evidence, "observation_templates", return_value=observations):
+            guarded = self.unchanged(lambda: packets.build(self.store, self.state, self.team, "task", "T01", "worker"))
+        self.assertEqual(guarded["failureChecksTemplate"], failure_checks.template(mode="mixed"))
+        self.assertEqual(set(guarded["failureChecksTemplate"]["caseShapes"]), {"automated", "browser", "process"})
+        self.assertNotIn("failureChecksTemplate", packet)
+
+
+    def test_mixed_drafts_include_unassessed_routes_without_changing_legacy(self):
+        from aispa_core import mixed_evidence
+        self.start()
+        routes = [{"criterion": "T01 works", "kind": kind, "status": "not_tested", "note": "", "artifact": ""}
+                  for kind in ("automated", "browser", "process")]
+        for role in ("worker", "critic1", "critic2", "acceptor"):
+            if role == "critic1":
+                self.team.submit("T01", self.input(self.assessed(self.draft())))
+            elif role == "critic2":
+                self.team.review("T01", 1, self.input(self.assessed(self.draft("critic1"))))
+            elif role == "acceptor":
+                self.team.review("T01", 2, self.input(self.assessed(self.draft("critic2"))))
+            with patch.object(mixed_evidence, "report_template", return_value=copy.deepcopy(routes)):
+                draft = self.unchanged(lambda: self.draft(role))
+            self.assertEqual(draft["routeChecks"], routes)
+            self.assertIs(draft["independent"], False)
+            self.assertTrue(all(row["status"] == "not_tested" for row in draft["routeChecks"]))
+            self.assertNotIn("routeChecks", self.draft(role))
 
     def test_missing_task_actor_and_stage_fail_without_writing(self):
         self.host.task("T01")["status"] = "running"

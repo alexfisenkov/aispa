@@ -89,11 +89,13 @@ def skipped_checks(state):
     """Names of the checks the owner's fast mode left out, for the final report."""
     if not enabled(state):
         return []
-    fast_attempts = any(((state.get("taskHistory", {}).get(t["id"]) or [{}])[-1]).get("tier") == "fast" for t in state["tasks"])
+    from . import test_intent  # resolved at call time: team imports check_modes
+    fast_attempts = [attempt for t in state["tasks"]
+                     if (attempt := (state.get("taskHistory", {}).get(t["id"]) or [{}])[-1]).get("tier") == "fast"]
     policy, rows = state.get("policy", {}), []
     if fast_attempts:
         rows.append("Проверка задач критиками")
-        if policy.get("testIntent"):
+        if policy.get("testIntent") and any(not test_intent.required(state, attempt) for attempt in fast_attempts):
             rows.append("Тестовый контракт RED")
     if any(wave_unchecked(state, n) for n in {t["wave"] for t in state["tasks"]}):
         rows.append("Сверка волн с полным брифом")

@@ -19,6 +19,28 @@ LABELS = {"running": "В работе", "paused": "Приостановлено"
           "delivered_with_remaining": "Основная часть готова, есть остатки"}
 
 
+def _evidence_summary(store, state, tid):
+    """Expose route types only; procedures, paths and observations stay private."""
+    from . import test_intent
+    try:
+        summary = test_intent.route_summary(store, state, tid)
+        if not isinstance(summary, dict) or summary.get("mode") != "mixed":
+            return None
+        routes = summary.get("routes")
+        if not isinstance(routes, list) or not routes:
+            return None
+        public = []
+        for row in routes:
+            if (not isinstance(row, dict) or not isinstance(row.get("criterion"), str)
+                    or not row["criterion"] or row.get("kind") not in ("automated", "browser", "process")):
+                return None
+            public.append({"criterion": row["criterion"], "kind": row["kind"]})
+        return {"mode": "mixed", "counts": {kind: sum(r["kind"] == kind for r in public)
+                for kind in ("automated", "browser", "process")}, "routes": public}
+    except (Invalid, KeyError, OSError, TypeError, ValueError):
+        return None
+
+
 def _record_intact(store, record):
     try:
         return isinstance(record, dict) and _record_valid(store, record)
@@ -215,6 +237,9 @@ def project(store, state):
     for task in tasks:
         task["requirementsDetails"] = [dict(row) for row in rows if row["id"] in task["requirements"]]
         task["criteriaDetails"] = display_details.criteria(store, state, task)
+        summary = _evidence_summary(store, state, task["id"])
+        if summary is not None:
+            task["evidenceSummary"] = summary
     mode = check_modes.current(state)
     stage_now = display_stage(state, gates)
     feed = display_feed.tail(store)

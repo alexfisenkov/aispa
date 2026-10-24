@@ -10,7 +10,7 @@ from aispa_core.dashboard_reader import DisplayJournal
 
 class LabelReleaseCompatibilityTests(unittest.TestCase):
     def test_previous_patch_runs_have_read_only_view_and_terminal_handoff(self):
-        for version in ('0.3.2', '0.3.3', '0.3.4', '0.3.5'):
+        for version in ('0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6'):
             with self.subTest(version=version), tempfile.TemporaryDirectory() as root:
                 store=Journal(root)
                 with patch('aispa_core.store.VERSION',version):
