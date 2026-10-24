@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence]
+        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
 permissions:
   contents: read
 jobs:
@@ -113,6 +113,13 @@ jobs:
           test_team test_lean_control test_adaptive_review test_adaptive_acceptance
           test_task_tiers test_check_modes test_check_mode_views test_workflow test_execution_source_timing
           test_execution_dispositions test_label_release_compat test_updates test_install
+      - name: Mixed evidence Windows fixture regression
+        if: inputs.scope == 'mixed-evidence-fix'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_mixed_evidence test_failure_checks test_check_mode_views
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan

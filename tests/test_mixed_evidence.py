@@ -357,7 +357,7 @@ class MixedEvidenceTests(unittest.TestCase):
         def task_report(role, rows=None, failed=False, **extra):
             path = fx.task_report('T01', role, routeChecks=rows if rows is not None else route_rows(), **extra)
             if failed:
-                value = json.loads(path.read_text())
+                value = json.loads(path.read_text(encoding='utf-8'))
                 for row in value['checks']:
                     if row['requirement']=='T01' and row['criterion']=='Выводит ready':
                         row['status']='failed'

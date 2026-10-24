@@ -26,5 +26,11 @@
   "nodePassed": 84,
   "nodeLogSha256": "86e2fb8f08355488e0ea6e4f1cf1033ce5e59e3625f1d4ddc2165cc936e3b0cd",
   "nativePlatform": "macOS",
-  "fullModelRuns": 0
+  "fullModelRuns": 0,
+  "windowsFixtureFix": {
+    "sourceOnly": "tests/test_mixed_evidence.py read_text encoding",
+    "targetedTestPass": true,
+    "logSha256": "4a93b87a126359902605d2e350991067c4df644f4fb5472bac091d3934b787cb",
+    "productCodeUnchanged": true
+  }
 }
