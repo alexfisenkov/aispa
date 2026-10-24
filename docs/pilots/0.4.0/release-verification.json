@@ -1,0 +1,72 @@
+{
+  "version": "0.4.0",
+  "releaseUrl": "https://github.com/alexfisenkov/aispa/releases/tag/v0.4.0",
+  "publishedAt": "2026-10-24T08:33:11Z",
+  "sourceCommit": "0977f893106312a87068fb6533e03f1ca9ad8633",
+  "ciCandidate": "012c9b99a05676c649cc6548bfd806896bf6aaeb",
+  "sameTree": true,
+  "productCodeUnchangedFromInitialCI": true,
+  "initialCI": {
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40077364126",
+    "scope": "383 tests per job",
+    "windowsFixtureReadErrorPreserved": true
+  },
+  "finalCI": {
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40078303225",
+    "scope": "mixed-evidence-fix after UTF-8 test fixture correction; production code unchanged",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "python (windows-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (windows-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (macos-latest, 3.13)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (macos-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "name": "python (ubuntu-latest, 3.13)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "assetWorkflow": {
+    "conclusion": "success",
+    "headSha": "0977f893106312a87068fb6533e03f1ca9ad8633",
+    "status": "completed",
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40078488830"
+  },
+  "assets": [
+    {
+      "name": "aispa.zip",
+      "size": 485513,
+      "sha256": "ab0e1e6998cf5acd9c4328e5290f814688368e4216941df3599dcead9c6bd56b"
+    },
+    {
+      "name": "aispa-update.json",
+      "size": 17119,
+      "sha256": "9895d1366937128f7b90d01fd22ff105ea4e52cc13fb3e352cda578238bc8cac"
+    },
+    {
+      "name": "install.py",
+      "size": 35250,
+      "sha256": "0456061c68a68d93d1d61e5995d6033da468cb04472c967f379dfcdc257014cd"
+    }
+  ],
+  "filesVerified": 93,
+  "assetsMatchExactCommitBuild": true,
+  "activePinnedRuntimes": "not modified",
+  "fullModelRuns": 0
+}

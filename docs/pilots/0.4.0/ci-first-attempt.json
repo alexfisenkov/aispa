@@ -1,5 +1,5 @@
 {
-  "conclusion": "",
+  "conclusion": "failure",
   "headSha": "4beb76c66d9c41d1ad7c00762087f76d46693133",
   "jobs": [
     {
@@ -19,8 +19,8 @@
     },
     {
       "name": "python (windows-latest, 3.13)",
-      "status": "in_progress",
-      "conclusion": ""
+      "status": "completed",
+      "conclusion": "failure"
     },
     {
       "name": "python (macos-latest, 3.13)",
@@ -33,7 +33,7 @@
       "conclusion": "success"
     }
   ],
-  "status": "in_progress",
+  "status": "completed",
   "url": "https://github.com/alexfisenkov/aispa/actions/runs/40077364126",
-  "reason": "New UTF-8 report fixture used system encoding in read_text on Windows; product code unchanged by correction."
+  "reason": "Both Windows jobs:382/383 passed; one UTF-8 fixture read_text error. Product code unchanged by correction."
 }

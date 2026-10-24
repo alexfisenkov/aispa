@@ -1,0 +1,14 @@
+{
+  "openclaw": {
+    "source": "agents-skills-personal",
+    "eligible": true,
+    "userInvocable": true,
+    "commandVisible": true,
+    "sourcePath": "~/.agents/skills/aispa/SKILL.md"
+  },
+  "gemini": {
+    "enabled": true,
+    "sourcePath": "~/.agents/skills/aispa/SKILL.md"
+  },
+  "scope": "Local catalogs only; no model sessions or full projects launched"
+}
