@@ -15,5 +15,11 @@
     "verdict": "OK",
     "rounds": 1
   },
-  "scope": "Independent read-only code and evidence review; not CI or publication proof"
+  "scope": "Independent read-only code and evidence review; not CI or publication proof",
+  "postReviewWindowsFix": {
+    "scope": "Match existing main CLI UTF-8 streams; compare path components; add cp1252 regression",
+    "verifiedBy": "Primary agent and targeted tests; no third model review round",
+    "tests": 21,
+    "passed": 21
+  }
 }

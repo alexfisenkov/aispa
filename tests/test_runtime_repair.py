@@ -124,7 +124,7 @@ class RuntimeRepairTests(unittest.TestCase):
         receipt = state["runtimeRepairs"][0]
         self.assertEqual((self.run / receipt["beforeJournal"]["file"]).read_bytes(), self.before)
         self.assertEqual((self.run / receipt["approval"]["file"]).read_bytes(), self.approval.read_bytes())
-        self.assertTrue(result["cli"].endswith("runtime/tools/aispa.py"))
+        self.assertEqual(Path(result["cli"]).parts[-3:], ("runtime", "tools", "aispa.py"))
         self.assertEqual(subprocess.check_output([sys.executable, "-B", result["cli"], "--version"]).decode().strip(), "0.3.5")
 
     def test_repaired_pinned_cli_can_make_regular_write_and_original_cannot(self):
@@ -359,6 +359,18 @@ class RuntimeRepairTests(unittest.TestCase):
         self.assertEqual(value["version"], "0.3.5")
         self.assertTrue(Path(value["cli"]).is_file())
         self.assertTrue(self.history.read_bytes().startswith(self.before))
+
+    def test_cli_json_and_diagnostics_are_utf8_even_with_legacy_pipe_encoding(self):
+        env = dict(os.environ, PYTHONIOENCODING="cp1252")
+        command = [sys.executable, "-B", str(CLI), "--root", str(self.root)]
+        result = subprocess.run(command, env=env, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertEqual(json.loads(result.stdout.decode("utf-8"))["originalRuntime"], str(self.original))
+        denied = subprocess.run(command + ["--apply"], env=env, capture_output=True, timeout=30)
+        self.assertEqual(denied.returncode, 2)
+        self.assertIn("требуется", denied.stderr.decode("utf-8"))
+        self.assertNotIn("Traceback", denied.stderr.decode("utf-8"))
+        self.assertEqual(self.before, self.history.read_bytes())
 
 
 if __name__ == "__main__":

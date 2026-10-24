@@ -9,6 +9,10 @@ from aispa_core.store import Invalid
 
 
 def main(argv=None):
+    # Match the regular CLI's UTF-8 JSON/diagnostic contract in Windows pipes.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
     parser.add_argument("--apply", action="store_true", help="Stage repair and append one journal event")

@@ -1,7 +1,7 @@
 {
   "python": {
-    "tests": 179,
-    "passed": 179,
+    "tests": 180,
+    "passed": 180,
     "failed": 0,
     "suites": [
       {
@@ -32,12 +32,16 @@
           "-B",
           "-m",
           "unittest",
-          "test_runtime_repair",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_runtime_repair.py",
           "-v"
         ],
-        "cwd": "tests",
+        "cwd": ".",
         "exitCode": 0,
-        "seconds": 13.27
+        "tests": 21
       }
     ]
   },
@@ -52,6 +56,7 @@
   "logSha256": {
     "local-tests.log": "444d81d36bfb230e8a78028565ec17d289000bb6d6e70e19df77e0ad9bab1fb7",
     "runtime-repair-tests.log": "3810fc6f4bb261ca53bc4890c44f1dc5a137e4093889bbf84297baf967ba9a76",
-    "node-tests.log": "b8316659136a6c4994002e750cd545a6dac9ed9ae74435cb23232b9970b2739a"
+    "node-tests.log": "b8316659136a6c4994002e750cd545a6dac9ed9ae74435cb23232b9970b2739a",
+    "runtime-repair-tests-windows-fix.log": "dac16750497a0cd1c9c13c74277d376b355619efaec6d6438143aa4ef4863144"
   }
 }
