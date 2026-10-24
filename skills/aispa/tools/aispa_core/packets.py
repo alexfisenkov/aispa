@@ -251,6 +251,14 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                       inheritedProofs=pipeline.inherited_proofs(task_id),
                       neighbors=[{"id": t["id"], "zones": t["zones"], "status": t["status"]}
                                  for t in state["tasks"] if t["id"] != task_id])
+        from . import mixed_evidence
+        summary = test_intent.route_summary(store, state, task_id)
+        if summary.get("mode") == "mixed":
+            packet["evidenceSummary"] = summary
+            packet["observationTemplates"] = mixed_evidence.observation_templates(store, state, task_id)
+            if state.get("policy", {}).get("errorBoundaryChecks"):
+                from . import failure_checks
+                packet["failureChecksTemplate"] = failure_checks.template(mode="mixed")
         if role and role.startswith("critic") and review_policy.lean(current):
             from . import integration
             # Read what changed first; the rest stays addressable for a finding.

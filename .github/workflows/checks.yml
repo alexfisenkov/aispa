@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters or dashboard startup)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes]
+        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
 permissions:
   contents: read
 jobs:
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: ${{ (inputs.scope == 'full' || inputs.scope == 'dashboard-preview' || inputs.scope == 'dashboard-release' || inputs.scope == 'source-quotes') && '0' || '1' }}
+          fetch-depth: ${{ (inputs.scope == 'full' || inputs.scope == 'dashboard-preview' || inputs.scope == 'dashboard-release' || inputs.scope == 'source-quotes' || inputs.scope == 'mixed-evidence') && '0' || '1' }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -102,6 +102,24 @@ jobs:
           test_design_contract test_preparation_workflow test_briefmap
           test_ideas test_task_reports test_packets test_carryover
           test_runtime_repair test_label_release_compat test_updates test_install
+      - name: Mixed evidence, review history and acceptance
+        if: inputs.scope == 'mixed-evidence'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_mixed_evidence test_test_intent test_failure_checks
+          test_task_reports test_display_details test_packets
+          test_team test_lean_control test_adaptive_review test_adaptive_acceptance
+          test_task_tiers test_check_modes test_check_mode_views test_workflow test_execution_source_timing
+          test_execution_dispositions test_label_release_compat test_updates test_install
+      - name: Mixed evidence Windows fixture regression
+        if: inputs.scope == 'mixed-evidence-fix'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_mixed_evidence test_failure_checks test_check_mode_views
       - name: Study-plan pilot example tests
         if: inputs.scope == 'full'
         working-directory: examples/study-plan

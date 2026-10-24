@@ -250,5 +250,55 @@ class DisplayModeTests(unittest.TestCase):
         self.assertEqual((task["tier"], task["plannedTier"]), ("fast", "heavy"))
 
 
+class MixedProtocolModeTests(unittest.TestCase):
+    def test_fast_explicit_contract_is_required_and_not_reported_as_skipped_red(self):
+        import copy
+        from aispa_core import check_modes, test_intent, task_tiers
+        state = {'policy': {'leanControl': True, 'testIntent': True, 'mixedEvidence': True},
+                 'checkMode': 'fast', 'briefs': [], 'requirements': [], 'spec': None,
+                 'tasks': [{'id': 'T01', 'title': 'Task', 'requirements': [], 'dependsOn': [],
+                            'zones': ['app.py'], 'criteria': ['works'], 'wave': 1}],
+                 'taskHistory': {'T01': [{'tier': 'fast'}]}}
+        self.assertIn('Тестовый контракт RED', check_modes.skipped_checks(state))
+        attempt = state['taskHistory']['T01'][-1]
+        attempt['testIntent'] = {'file': 'test-intent/current.json', 'sha256': 'a' * 64}
+        self.assertTrue(test_intent.required(state, attempt))
+        self.assertNotIn('Тестовый контракт RED', check_modes.skipped_checks(state))
+        self.assertIn('Проверка задач критиками', check_modes.skipped_checks(state))
+        self.assertEqual(task_tiers.roles(attempt), ('worker',))
+        mixed_tasks = copy.deepcopy(state)
+        mixed_tasks['tasks'].append(dict(state['tasks'][0], id='T02'))
+        mixed_tasks['taskHistory']['T02'] = [{'tier': 'fast'}]
+        self.assertIn('Тестовый контракт RED', check_modes.skipped_checks(mixed_tasks))
+        old_policy = copy.deepcopy(state)
+        old_policy['policy'].pop('mixedEvidence')
+        self.assertIn('Тестовый контракт RED', check_modes.skipped_checks(old_policy))
+
+    def test_failure_template_preserves_legacy_and_exposes_exact_mixed_shapes(self):
+        from aispa_core import failure_checks
+        legacy = {'requiredBoundaries': sorted(failure_checks.BOUNDARIES),
+                  'failureChecks': {'cases': [], 'notApplicable': []},
+                  'caseShape': {'id': 'E01', 'boundary': None, 'scenario': None, 'expected': None,
+                                'criterion': None, 'test': {'path': None, 'sha256': None}},
+                  'notApplicableShape': {'boundaries': [], 'reason': None,
+                                         'source': {'path': None, 'sha256': None}},
+                  'status': 'draft-not-evidence'}
+        self.assertEqual(failure_checks.template(), legacy)
+        self.assertEqual(failure_checks.template(mode='behavior_change'), legacy)
+        self.assertEqual(failure_checks.template(mode='not_applicable'), legacy)
+        mixed = failure_checks.template(mode='mixed')
+        self.assertEqual(mixed['failureChecks'], {'cases': [], 'notApplicable': []})
+        self.assertEqual(mixed['caseShape'], dict(legacy['caseShape'], kind='automated'))
+        self.assertEqual(set(mixed['caseShapes']), {'automated', 'browser', 'process'})
+        base = {'id': 'E01', 'boundary': None, 'scenario': None, 'expected': None, 'criterion': None}
+        for kind, shape in mixed['caseShapes'].items():
+            source_key = 'test' if kind == 'automated' else 'source'
+            self.assertEqual(shape, dict(base, kind=kind, **{source_key: {'path': None, 'sha256': None}}))
+        mixed['caseShapes']['browser']['source']['path'] = 'modified'
+        self.assertIsNone(mixed['caseShapes']['process']['source']['path'])
+        with self.assertRaises(Invalid):
+            failure_checks.template(mode='guess')
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,8 @@ SCHEMA = 1
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 PURPOSES = frozenset({"docs", "config", "integration", "existing_behavior"})
 MAX_TESTS = 32
+KINDS = frozenset({"automated", "browser", "process"})
+MAX_ROUTES = 4096
 MAX_REVISIONS = 16
 MAX_REASON = 1600
 MAX_TEST_BYTES = 2 * 1024 * 1024
@@ -140,16 +142,85 @@ def _saved(store, ref):
     return value
 
 
+def _routes(report, expected):
+    routes = report.get("routes")
+    require(isinstance(routes, list) and 0 < len(routes) <= MAX_ROUTES,
+            "Test intent: нужны способы проверки каждого критерия")
+    seen = set()
+    for row in routes:
+        require(isinstance(row, dict) and set(row) == {"criterion", "kind", "reason", "procedure", "expected"},
+                "Test intent: неверная схема способа проверки")
+        require(isinstance(row["criterion"], str) and row["criterion"] in expected
+                and isinstance(row["kind"], str) and row["kind"] in KINDS,
+                "Test intent: неизвестный критерий или способ проверки")
+        pair = (row["criterion"], row["kind"])
+        require(pair not in seen, "Test intent: повторный способ проверки критерия")
+        seen.add(pair)
+        for key in ("reason", "procedure", "expected"):
+            _text(row[key], key)
+    require({c for c, _ in seen} == expected, "Test intent: способы покрывают не все критерии")
+    return {c for c, kind in seen if kind == "automated"}
+
+
+def _has_red(report):
+    return report.get("mode") == "behavior_change" or (report.get("mode") == "mixed" and bool(report.get("newTestFiles")))
+
+
+def _transition(previous, report, submitted):
+    old = previous["report"]
+    if old["mode"] == "mixed":
+        require(report["mode"] == "mixed", "Test intent: объявленные способы нельзя отменить")
+        old_routes = {(r["criterion"], r["kind"]): r for r in old["routes"]}
+        new_routes = {(r["criterion"], r["kind"]): r for r in report["routes"]}
+        require(all(new_routes.get(k) == v for k, v in old_routes.items())
+                and (not submitted or old_routes == new_routes),
+                "Test intent: способы неизменны; добавления допустимы только до сдачи")
+    if old["mode"] == "behavior_change" and report["mode"] == "mixed":
+        require({r["criterion"] for r in report["routes"] if r["kind"] == "automated"} == set(old["criteria"]),
+                "Test intent: прежнюю автоматическую проверку нельзя понизить")
+
+
+def route_summary(store, state, task_id):
+    empty = {"mode": None, "counts": {k: 0 for k in sorted(KINDS)}, "routes": []}
+    try:
+        _task, attempt = _attempt(state, task_id)
+        value = _saved(store, attempt.get("testIntent"))
+        if value["mode"] != "mixed" or not state.get("policy", {}).get("mixedEvidence"):
+            return empty
+        if (value.get("run") != state.get("run") or value.get("task") != task_id
+                or value.get("attempt") != attempt["id"]
+                or value.get("taskContract") != task_contract(state, task_id)):
+            return empty
+        routes = value["report"]["routes"]
+        _routes(value["report"], set(_task["criteria"]))
+        return {"mode": "mixed", "counts": {k: sum(r["kind"] == k for r in routes) for k in sorted(KINDS)},
+                "routes": copy.deepcopy(routes)}
+    except (Invalid, OSError, ValueError, TypeError, KeyError):
+        return empty
+
+
 def _report(store, state, task, attempt, report):
-    require(isinstance(report, dict) and report.get("mode") in ("behavior_change", "not_applicable")
+    require(isinstance(report, dict) and report.get("mode") in ("behavior_change", "not_applicable", "mixed")
             and report.get("attempt") == attempt["id"]
             and report.get("basis") == task_basis(store, state, task["id"]),
             "Test intent: отчёт относится к другой попытке или снимку")
     expected = _criteria(task, report)
     extra = {"failureChecks"} if state.get("policy", {}).get("errorBoundaryChecks") else set()
-    if report["mode"] == "behavior_change":
-        require(set(report) == {"mode", "attempt", "basis", "criteria", "redExecution", "newTestFiles"} | extra,
-                "Test intent: неверная схема RED")
+    if report["mode"] == "mixed":
+        require(state.get("policy", {}).get("mixedEvidence") is True, "Test intent: mixed требует новой политики")
+        expected = _routes(report, expected)
+    if report["mode"] in ("behavior_change", "mixed"):
+        shape = {"mode", "attempt", "basis", "criteria", "redExecution", "newTestFiles"} | extra
+        if report["mode"] == "mixed":
+            shape.add("routes")
+        require(set(report) == shape, "Test intent: неверная схема RED")
+        if not expected:
+            require(report["newTestFiles"] == [] and report["redExecution"] is None,
+                    "Test intent: без automated RED и тесты отсутствуют")
+            if extra:
+                from . import failure_checks
+                failure_checks.validate(task, report, lambda source: _file(store, source))
+            return
         tests = report["newTestFiles"]
         require(isinstance(tests, list) and 0 < len(tests) <= MAX_TESTS,
                 "Test intent: нужны новые тесты с SHA")
@@ -243,15 +314,22 @@ def record(store, state, task_id, report):
                 "Test intent: прежний контракт повреждён или устарел")
         require(previous["mode"] == report["mode"] or first_submit is None,
                 "Test intent: режим после первой сдачи менять нельзя")
-    red = _red(store, state, task_id, attempt["id"], report) if report["mode"] == "behavior_change" else None
+    if previous:
+        _transition(previous, report, first_submit is not None)
+    if state.get("policy", {}).get("mixedEvidence") and report["mode"] == "mixed":
+        for prior_ref in previous_refs:
+            prior = _saved(store, prior_ref)
+            if prior["mode"] == "behavior_change":
+                _transition(prior, report, first_submit is not None)
+    red = _red(store, state, task_id, attempt["id"], report) if _has_red(report) else None
     if red:
-        changed_tests = (previous is None or previous["mode"] != "behavior_change"
+        changed_tests = (previous is None or not _has_red(previous["report"])
                          or [(r["path"], r["sha256"]) for r in previous["report"]["newTestFiles"]]
                          != [(r["path"], r["sha256"]) for r in report["newTestFiles"]])
         if changed_tests:
             require(red["candidate"] == task_basis(store, state, task_id),
                     "Test intent: новый RED должен предшествовать следующей реализации")
-            if previous and previous["mode"] == "behavior_change":
+            if previous and _has_red(previous["report"]):
                 previous_event = _intent_event(journal["events"], task_id, attempt["id"], previous_refs[-1])
                 require(red["id"] != previous["redExecutionId"]
                         and type(previous_event) is int and red["journal"]["sequence"] > previous_event,
@@ -305,7 +383,7 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
                 and contract.get("recordedAfterSequence", 0) < event_sequences[index]
                 and contract.get("initialSourceBasis") == contracts[0].get("initialSourceBasis"),
                 "Test intent: история контракта расходится с журналом")
-        if contract["mode"] == "behavior_change":
+        if _has_red(contract["report"]):
             historical_red = _red(store, state, task_id, attempt["id"], contract["report"])
             require(historical_red["id"] == contract.get("redExecutionId")
                     and historical_red["candidate"] == contract.get("sourceBasis")
@@ -315,29 +393,44 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
         previous_tests = ([(r["path"], r["sha256"]) for r in contracts[index - 1]["report"].get("newTestFiles", [])]
                           if index else [])
         current_tests = [(r["path"], r["sha256"]) for r in contract["report"].get("newTestFiles", [])]
-        if index and contract["mode"] == "behavior_change" and current_tests != previous_tests:
+        if index:
+            submitted = first_submit is not None and event_sequences[index] > first_submit
+            _transition(contracts[index - 1], contract["report"], submitted)
+            if contract["mode"] == "mixed":
+                for prior in contracts[:index]:
+                    if prior["mode"] == "behavior_change":
+                        _transition(prior, contract["report"], submitted)
+        if index and _has_red(contract["report"]) and current_tests != previous_tests:
             require(contract.get("redExecutionId") != contracts[index - 1].get("redExecutionId")
                     and contract.get("redJournalSequence", 0) > event_sequences[index - 1],
                     "Test intent: изменённые тесты не прошли новый RED")
     latest = contracts[-1]
     require(latest.get("taskContract") == task_contract(state, task_id)
-            and latest.get("mode") in ("behavior_change", "not_applicable")
+            and latest.get("mode") in ("behavior_change", "not_applicable", "mixed")
             and latest.get("report", {}).get("criteria") == task.get("criteria"),
             "Test intent: контракт задачи изменился")
     report = latest["report"]
+    if latest["mode"] == "mixed":
+        require(state.get("policy", {}).get("mixedEvidence") is True, "Test intent: mixed требует новой политики")
+        automatic = _routes(report, set(task["criteria"]))
+        require(bool(automatic) == _has_red(report), "Test intent: автоматическим критериям нужен RED")
+        if not automatic:
+            require(report.get("redExecution") is None and report.get("newTestFiles") == [], "Test intent: лишний RED")
+        covered = {c for row in report.get("newTestFiles", []) for c in row["criteria"]}
+        require(covered == automatic, "Test intent: неверное покрытие automated")
     if state.get("policy", {}).get("errorBoundaryChecks"):
         from . import failure_checks
         failure_checks.validate(task, report)
     if latest["mode"] == "not_applicable" and not historical:
         _na_guard(store, state, task, attempt, report)
-    sources = (report["newTestFiles"] if latest["mode"] == "behavior_change" else
+    sources = (report["newTestFiles"] if latest["mode"] in ("behavior_change", "mixed") else
                [row["source"] for row in report["notApplicable"]])
     if state.get("policy", {}).get("errorBoundaryChecks"):
         sources = [*sources, *failure_checks.sources(report["failureChecks"])]
     if not allow_source_changes:
         for source in sources:
             _file(store, {key: source[key] for key in ("path", "sha256")})
-    if latest["mode"] == "behavior_change":
+    if _has_red(report):
         red = _red(store, state, task_id, attempt["id"], report)
         require(red["id"] == latest["redExecutionId"]
                 and red["candidate"] == latest["sourceBasis"],
@@ -351,8 +444,10 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
 
 
 def required(state, attempt):
-    """Fast attempts are checked by the worker's own run, without RED proof."""
-    return bool(state.get("policy", {}).get("testIntent")) and (attempt or {}).get("tier") != "fast"
+    """Fast stays worker-only; an explicit new-policy contract still binds its evidence."""
+    attempt = attempt or {}
+    explicit = state.get("policy", {}).get("mixedEvidence") and attempt.get("testIntent")
+    return bool(state.get("policy", {}).get("testIntent")) and (attempt.get("tier") != "fast" or bool(explicit))
 
 
 def _required_for(state, task_id):
@@ -387,7 +482,7 @@ def source_changes(store, state, task_id):
         return []
     value = _saved(store, ref)
     report = value["report"]
-    sources = (report["newTestFiles"] if value["mode"] == "behavior_change"
+    sources = (report["newTestFiles"] if value["mode"] in ("behavior_change", "mixed")
                else [row["source"] for row in report["notApplicable"]])
     if state.get("policy", {}).get("errorBoundaryChecks"):
         from . import failure_checks
@@ -411,11 +506,12 @@ def view(store, state, task_id):
     try:
         contract = _saved(store, ref)
         mode = contract["mode"]
-        sources = (contract["report"].get("newTestFiles", []) if mode == "behavior_change" else
+        sources = (contract["report"].get("newTestFiles", []) if mode in ("behavior_change", "mixed") else
                    contract["report"].get("notApplicable", []))
         return {"present": True, "valid": valid(store, state, task_id), "mode": mode,
                 "attempt": attempt["id"], "revision": contract["revision"],
                 "sourceBasis": contract["sourceBasis"], "sourceCount": len(sources),
-                "failureCaseCount": len(contract["report"].get("failureChecks", {}).get("cases", []))}
+                "failureCaseCount": len(contract["report"].get("failureChecks", {}).get("cases", [])),
+                "counts": route_summary(store, state, task_id)["counts"]}
     except (Invalid, OSError, ValueError, TypeError, KeyError):
         return {"present": True, "valid": False, "mode": None, "attempt": attempt["id"]}

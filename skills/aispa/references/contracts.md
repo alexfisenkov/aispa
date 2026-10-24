@@ -711,7 +711,7 @@ addition; пустой набор функций разрешён только �
 ## Дополнения alpha.10: RED, интеграция и расход
 
 `test-intent --task T01 --file …` записывается до первой сдачи активной
-попытки. В обоих режимах обязательны `mode`, `attempt`, текущий `basis` и
+попытки. В прежних режимах обязательны `mode`, `attempt`, текущий `basis` и
 **все точные** `criteria` задачи. Для `behavior_change` добавь `newTestFiles`
 с `path`, `sha256`, `expectedFailure`, `criteria` и `redExecution` — ссылку
 на настоящий task receipt из `commands`: purpose check, exit > 0,
@@ -927,3 +927,43 @@ ISO 8601 с зоной, нормализуемый в UTC; `budgetSeconds` — �
 и сохраняются в историческом execution-архиве. Это расширение не разрешает
 изменять frozen blind-наблюдение, пересматривать срок после первого seal или
 считать внешний host handoff состоявшимся по событию engine finish.
+
+## Смешанные свидетельства (`mixed`)
+
+Новые `init` с политикой `mixedEvidence` поддерживают `mode: mixed` в
+`test-intent`. Закреплённые runtime и история активных проектов не мигрируют;
+`behavior_change` и `not_applicable` сохраняют прежние контракты.
+В `criteria` остаётся полный точный список критериев задачи. `routes` содержит
+строки `{criterion,kind,reason,procedure,expected}`, где `kind` —
+`automated|browser|process`. Каждому критерию нужны один или несколько способов;
+пара `criterion/kind` уникальна. Причина, процедура и ожидаемый результат
+обязательны. Процедура описывает намерение, а не уже полученный PASS.
+
+Новые тесты `newTestFiles` и настоящий `redExecution` покрывают только критерии
+с маршрутом `automated`. Без них поля имеют значения `[]` и `null`; выдумывать
+RED для ручной проверки нельзя. Свежий `verify --task` кандидата перед сдачей
+обязателен также без automated. Сборка или smoke с exit 0 сами по себе не
+подтверждают браузерный либо процессный результат.
+
+Контекст сохраняет неизменную ссылку `testIntent`, все критерии и trace;
+`evidenceSummary` объясняет маршруты, `observationTemplates` даёт незаполненные
+формы browser/process. В каждом отчёте worker, критика и приёмщика обязательны
+все `routeChecks`: `{criterion,kind,status,note,artifact}`. Заготовки содержат
+`not_tested`, пустые note/artifact. Общему критерию нельзя присвоить passed,
+пока любой его маршрут имеет non-PASS. Недоступное наблюдение отражается честно.
+
+Browser/process artifact — JSON `schema: 1`, привязанный к текущим `run`,
+`task`, `attempt`, `candidate`, `kind`, `criteria`, `intentSha256`. Заполни
+`procedure`, `observed`, `source` (browser: URL и viewport; process: reference
+и scope), `attachments` с `file` и `sha256`. SHA подтверждает связь и сохранность
+файла; смысл наблюдения независимо оценивают существующие критики/приёмщик.
+Новая роль или интервью не создаётся. Старое наблюдение другого кандидата,
+попытки или намерения не подтверждает текущий результат.
+
+Первичная классификация записывается до первой сдачи. Объявленные маршруты
+нельзя удалять или понижать через revisions; добавления допустимы только до
+первого submit. Карточки, участники, попытки, раунды и прежние свидетельства
+сохраняются. В mixed каждая строка `failureChecks.cases` содержит `kind`, прежние
+`id,boundary,scenario,expected,criterion` и `test:{path,sha256}` для automated
+либо `source:{path,sha256}` для browser/process; пять отказных границ сохраняются. Сквозной trace к брифу,
+clean clone и независимая итоговая приёмка проекта остаются обязательными.

@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import unittest
 from urllib.request import urlopen
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import dashboard_server, display_details
@@ -30,6 +31,25 @@ class DetailsTests(unittest.TestCase):
         for role in ("worker", "critic1", "critic2", "acceptor"):
             fx.flow.pipeline.assign("T01", role, "codex", "details-" + role, "fixture")
         fx.verify("T01")
+
+    def test_mixed_summary_exposes_only_route_types_and_recomputes_counts(self):
+        from aispa_core import test_intent
+        fx = self.fx
+        fx.prepare()
+        criterion = fx.state["tasks"][0]["criteria"][0]
+        summary = {"mode": "mixed", "counts": {"automated": 999}, "routes": [
+            {"criterion": criterion, "kind": kind, "reason": "private", "procedure": "/private/path", "expected": "raw output"}
+            for kind in ("automated", "browser", "process")]}
+        with patch.object(test_intent, "route_summary", return_value=summary):
+            projected = self.view()["tasks"][0]["evidenceSummary"]
+        self.assertEqual(projected["counts"], {"automated": 1, "browser": 1, "process": 1})
+        self.assertEqual(projected["routes"], [{"criterion": criterion, "kind": k}
+                                             for k in ("automated", "browser", "process")])
+        for malformed in (None, {}, {"mode": "mixed", "routes": [None]},
+                          {"mode": "mixed", "routes": [{"criterion": criterion, "kind": "future"}]}):
+            with self.subTest(summary=malformed), patch.object(test_intent, "route_summary", return_value=malformed):
+                self.assertNotIn("evidenceSummary", self.view()["tasks"][0])
+        self.assertNotIn("evidenceSummary", self.view()["tasks"][0])
 
     def test_gate_missing_running_passed_failed_and_stale_are_distinct(self):
         fx = self.fx

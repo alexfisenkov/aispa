@@ -8,7 +8,7 @@ import copy
 import json
 import uuid
 
-from . import autonomy, timing, repairs, participants, integration, test_intent, review_policy, task_tiers, check_modes
+from . import autonomy, timing, repairs, participants, integration, test_intent, mixed_evidence, review_policy, task_tiers, check_modes
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -169,6 +169,8 @@ def _record_valid(store, record):
         return False
     if record.get("testIntent") and not artifact_valid(store, record["testIntent"]):
         return False
+    if not mixed_evidence.record_valid(store, record):
+        return False
     report = _json(store.text(record["report"]))
     return (report.get("basis") == record.get("basis") and report.get("reviewer") == record.get("actor")
             and _verification_valid(store, record.get("verification"), record.get("basis")))
@@ -277,6 +279,11 @@ def _historical_light(store, state, task, attempt):
     expected = {(task["id"], c) for c in card["checks"]}
     expected |= {(r["id"], c) for r in card["constraints"] for c in r["acceptance"]}
     artifacts, failures = evidence_rows(store, report, expected)
+    intent_ref = accepted.get("testIntent")
+    extra_artifacts, extra_failures = (mixed_evidence.check_contract(store, test_intent._saved(store, intent_ref), intent_ref, report)
+                                      if intent_ref else ([], []))
+    artifacts.extend(extra_artifacts)
+    failures.extend(extra_failures)
     if failures or report.get("unmapped") or artifacts != accepted.get("artifacts"):
         return None
     if set((row["requirement"], row["criterion"]) for row in accepted.get("coverage", [])) != expected:
@@ -576,6 +583,8 @@ class TaskPipeline:
             all_checks = list(dict.fromkeys(task["criteria"] + lenses + checks))
             if test_intent.required(self.s, attempt) and role.startswith("critic"):
                 all_checks.append("Тестовый контракт и изменения тестов действительно проверяют критерии задачи")
+                if self.s.get("policy", {}).get("mixedEvidence"):
+                    all_checks.append("Выбор automated/browser/process обоснован; наблюдения и свидетельства каждого способа действительно проверяют критерии")
             if self.s.get("policy", {}).get("errorBoundaryChecks") and role != "worker":
                 all_checks.append("Проверены применимые отказные границы failureChecks, сохранность данных и реальные отрицательные сценарии")
             if self.s.get("policy", {}).get("integrationReview") and tid == self.s.get("integrationTask") and role.startswith("critic"):
@@ -726,6 +735,9 @@ class TaskPipeline:
             require(report.get("testSourceChanges", []) == changes,
                     "Критик должен явно сверить изменения тестовых источников после RED")
         artifacts, failures = evidence_rows(self.store, report, self.expected_checks(tid, role))
+        route_artifacts, route_failures = mixed_evidence.check(self.store, self.s, tid, report)
+        artifacts.extend(route_artifacts)
+        failures.extend(route_failures)
         if self.s.get("policy", {}).get("integrationReview") and role.startswith("critic"):
             extra_artifacts, extra_failures = integration.check(self.store, self.s, tid, role, report)
             artifacts.extend(extra_artifacts)

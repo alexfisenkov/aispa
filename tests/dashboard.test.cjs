@@ -787,3 +787,20 @@ test('task disclosures have a visible translated details label and a full access
  assert.match(html,/\.task-detail \.task-time\{font-size:13px\}/);
  assert.match(html,/\.phase-step\{[^}]*font-size:13px/);
 });
+
+
+test('mixed evidence badges describe every criterion route in Russian and English',async()=>{
+ const d=sample(),t=d.tasks[0];t.criteriaDetails=[{text:'Открывает форму',status:'pending',source:'task_state'}];
+ t.evidenceSummary={mode:'mixed',counts:{automated:1,browser:1,process:1},routes:['automated','browser','process'].map(kind=>({criterion:'Открывает форму',kind}))};
+ const f=await fixture('',d);assert.match(f.text('waves'),/Автотест/);assert.match(f.text('waves'),/Браузер/);assert.match(f.text('waves'),/Процесс/);
+ f.el('language').change('en');assert.match(f.text('waves'),/Automated/);assert.match(f.text('waves'),/Browser/);assert.match(f.text('waves'),/Process/);
+ delete t.evidenceSummary;await f.update(d);assert.doesNotMatch(f.text('waves'),/Automated|Browser|Process/);
+});
+
+test('malformed evidence summaries cannot replace a known dashboard snapshot',async()=>{
+ const cases=[null,[],{}, {mode:'mixed',counts:{automated:0,browser:0,process:0},routes:[null]},
+  {mode:'mixed',counts:{automated:0,browser:1,process:0},routes:[{criterion:'x',kind:'future'}]},
+  {mode:'mixed',counts:{automated:2,browser:0,process:0},routes:[{criterion:'x',kind:'automated'}]}];
+ for(const summary of cases){const f=await fixture(),d=sample();d.title='BAD MIXED';d.tasks[0].evidenceSummary=summary;await f.update(d);
+  assert.equal(f.text('title'),'Тестовый проект');assert.equal(f.text('label'),'Состояние не подтверждено');}
+});

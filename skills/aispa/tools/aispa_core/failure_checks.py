@@ -32,7 +32,7 @@ def _source(value, source_check):
 
 
 def sources(value):
-    return [row["test"] for row in value.get("cases", [])] + [
+    return [row.get("test", row.get("source")) for row in value.get("cases", [])] + [
         row["source"] for row in value.get("notApplicable", [])]
 
 
@@ -46,19 +46,28 @@ def validate(task, report, source_check=None):
             "Failure checks: неверный список сценариев")
     expected = set(task["criteria"])
     tests = {(row["path"], row["sha256"]) for row in report.get("newTestFiles", [])}
+    mixed = report["mode"] == "mixed"
+    routes = {(r["criterion"], r["kind"]) for r in report.get("routes", [])}
     ids, covered, omitted = set(), set(), set()
     for row in cases:
-        require(isinstance(row, dict) and set(row) == {
-            "id", "boundary", "scenario", "expected", "criterion", "test"},
+        kind = row.get("kind") if isinstance(row, dict) else None
+        source_key = "source" if mixed and kind in ("browser", "process") else "test"
+        shape = {"id", "boundary", "scenario", "expected", "criterion", source_key}
+        if mixed:
+            shape.add("kind")
+        require(isinstance(row, dict) and set(row) == shape,
             "Failure checks: неверная схема сценария")
         for key in ("id", "scenario", "expected", "criterion"):
             _text(row[key], key)
         require(row["id"] not in ids and isinstance(row["boundary"], str)
                 and row["boundary"] in BOUNDARIES and row["criterion"] in expected,
                 "Failure checks: повторный сценарий или чужой критерий")
-        _source(row["test"], source_check)
-        if report["mode"] == "behavior_change":
-            require((row["test"]["path"], row["test"]["sha256"]) in tests,
+        if mixed:
+            require(isinstance(kind, str) and (row["criterion"], kind) in routes,
+                    "Failure checks: сценарий не соответствует объявленному способу")
+        _source(row[source_key], source_check)
+        if report["mode"] == "behavior_change" or (mixed and kind == "automated"):
+            require((row[source_key]["path"], row[source_key]["sha256"]) in tests,
                     "Failure checks: сценарий не связан с RED-тестовым источником")
         ids.add(row["id"])
         covered.add(row["boundary"])
@@ -79,8 +88,11 @@ def validate(task, report, source_check=None):
             "interpretation": "Test intent only; execution and semantic coverage require independent review"}
 
 
-def template():
-    return {"requiredBoundaries": sorted(BOUNDARIES),
+def template(mode=None):
+    """Legacy by default; mixed exposes each typed source shape, never evidence."""
+    require(mode in (None, "behavior_change", "not_applicable", "mixed"),
+            "Failure checks: неизвестный режим шаблона")
+    value = {"requiredBoundaries": sorted(BOUNDARIES),
             "failureChecks": {"cases": [], "notApplicable": []},
             "caseShape": {"id": "E01", "boundary": None, "scenario": None,
                           "expected": None, "criterion": None,
@@ -88,3 +100,15 @@ def template():
             "notApplicableShape": {"boundaries": [], "reason": None,
                                    "source": {"path": None, "sha256": None}},
             "status": "draft-not-evidence"}
+
+    if mode == "mixed":
+        import copy
+        automatic = dict(value["caseShape"], kind="automated")
+        manual = {key: item for key, item in value["caseShape"].items() if key != "test"}
+        manual["source"] = {"path": None, "sha256": None}
+        value["caseShape"] = automatic
+        value["caseShapes"] = {
+            "automated": copy.deepcopy(automatic),
+            "browser": dict(copy.deepcopy(manual), kind="browser"),
+            "process": dict(copy.deepcopy(manual), kind="process")}
+    return value
