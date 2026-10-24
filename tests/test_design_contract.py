@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -7,6 +8,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import design_contract as design
+from aispa_core.contracts import add_requirements
 from aispa_core.store import Invalid, Journal
 
 
@@ -52,6 +54,25 @@ class DesignContractTests(unittest.TestCase):
              "references": [{"file": "README.md", "sha256": hashlib.sha256(self.reference.read_bytes()).hexdigest()}],
              "referenceReason": "Existing adapter in the repository explains local CSV behavior."}]}
 
+    def registered_feature(self, quote, addition=False):
+        source = quote + "\nUnregistered sentence.\n"
+        self.state["briefs"] = [{**self.store.artifact("briefs", source.encode("utf-8"), ".md"),
+                                 "id": "B001"}]
+        self.state["requirements"] = []
+        items = [{"id": "R01", "text": "Build export", "brief": "B001", "quote": quote,
+                  "acceptance": ["Export works"]}]
+        if addition:
+            items.append({"id": "A01", "kind": "addition", "parent": "R01",
+                          "text": "Add a preview", "acceptance": ["Preview works"]})
+        self.state["requirements"] = add_requirements(self.store, self.state, items)
+        report = self.feature()
+        report["features"][0]["sourceQuote"] = quote
+        if addition:
+            extra = copy.deepcopy(report["features"][0])
+            extra.update(requirement="A01", changeKind="addition")
+            report["features"].append(extra)
+        return report
+
     def tasks(self, depends=True):
         return [
             {"id": "T01", "zones": ["src/export.py"], "readZones": [],
@@ -84,6 +105,82 @@ class DesignContractTests(unittest.TestCase):
         report["features"][0]["sourceQuote"] = "Keep data private."
         with self.assertRaises(Invalid):
             design.record_scenarios(self.store, self.state, report)
+
+    def test_registered_unicode_quotes_at_and_above_1600_round_trip(self):
+        for length in (1600, 1601, 4096):
+            for addition in (False, True):
+                with self.subTest(length=length, addition=addition):
+                    quote = ("Экспорт 🦊 e\u0301.\n" * length)[:length]
+                    report = self.registered_feature(quote, addition)
+                    receipt = design.record_scenarios(self.store, self.state, report)
+                    self.assertTrue(design.valid_scenarios(self.store, self.state))
+                    saved = json.loads(self.store.text(receipt))["report"]
+                    self.assertEqual([row["sourceQuote"] for row in saved["features"]],
+                                     [quote] * (2 if addition else 1))
+
+    def test_long_quotes_reject_alteration_truncation_and_unregistered_source_text(self):
+        quote = "Дословная цитата 🦊. " * 100
+        for addition in (False, True):
+            report = self.registered_feature(quote, addition)
+            for value in (quote[:-1], "X" + quote[1:], "Unregistered sentence.", "", None, []):
+                with self.subTest(addition=addition, value_type=type(value).__name__):
+                    bad = copy.deepcopy(report)
+                    bad["features"][-1]["sourceQuote"] = value
+                    with self.assertRaises(Invalid):
+                        design.record_scenarios(self.store, self.state, bad)
+
+    def test_long_quote_still_requires_actual_source_inclusion(self):
+        report = self.registered_feature("Исходная цитата 🦊. " * 100)
+        forged = "Absent from the immutable brief. " * 100
+        self.state["requirements"][0]["quote"] = forged
+        report["basis"] = design.scenario_basis(self.state)
+        report["features"][0]["sourceQuote"] = forged
+        with self.assertRaisesRegex(Invalid, "зарегистрированным источником"):
+            design.record_scenarios(self.store, self.state, report)
+
+    def test_long_quote_does_not_bypass_stale_basis_or_brief_hash(self):
+        quote = "Исходная цитата 🦊. " * 100
+        report = self.registered_feature(quote)
+        design.record_scenarios(self.store, self.state, report)
+        self.state["requirements"][0]["acceptance"].append("Preview works")
+        with self.assertRaisesRegex(Invalid, "сценарии устарели"):
+            design.record_scenarios(self.store, self.state, report)
+        self.assertFalse(design.valid_scenarios(self.store, self.state))
+        report = self.registered_feature(quote)
+        design.record_scenarios(self.store, self.state, report)
+        brief = self.store.run / self.state["briefs"][0]["file"]
+        brief.write_text(quote + "\nTampered suffix.\n", encoding="utf-8")
+        with self.assertRaisesRegex(Invalid, "исходный бриф изменён"):
+            design.record_scenarios(self.store, self.state, report)
+        self.assertFalse(design.valid_scenarios(self.store, self.state))
+
+    def test_registered_quote_preserves_overall_report_size_boundary(self):
+        report = self.registered_feature("Я")
+        overhead = len(json.dumps(report, ensure_ascii=False, allow_nan=False)) - 1
+        for excess in (0, 1):
+            with self.subTest(excess=excess):
+                report = self.registered_feature("Я" * (design.MAX_REPORT_CHARS - overhead + excess))
+                self.assertEqual(len(json.dumps(report, ensure_ascii=False, allow_nan=False)),
+                                 design.MAX_REPORT_CHARS + excess)
+                if excess:
+                    with self.assertRaisesRegex(Invalid, "слишком большой отчёт"):
+                        design.record_scenarios(self.store, self.state, report)
+                else:
+                    design.record_scenarios(self.store, self.state, report)
+                    self.assertTrue(design.valid_scenarios(self.store, self.state))
+
+    def test_long_source_quote_keeps_other_text_limits(self):
+        report = self.registered_feature("Исходная цитата 🦊. " * 100)
+        for field, limit in (("depthReason", 600), ("specQuote", 3000),
+                             ("scenario", 1600), ("verification", 1600), ("counterexample", 1600)):
+            with self.subTest(field=field):
+                bad = copy.deepcopy(report)
+                target = bad if field == "depthReason" else bad["features"][0]
+                if field in ("scenario", "verification", "counterexample"):
+                    target = target["dimensions"][0]
+                target[field] = "Я" * (limit + 1)
+                with self.assertRaises(Invalid):
+                    design.record_scenarios(self.store, self.state, bad)
 
     def test_deep_requires_counterexample_and_strict_rejects_addition_as_refinement(self):
         deep = self.feature("deep")
@@ -120,6 +217,11 @@ class DesignContractTests(unittest.TestCase):
         self.assertTrue(design.valid_interfaces(self.store, self.state, check_sources=False))
 
     def test_interfaces_reject_missing_owner_wrong_requirement_and_broken_reference(self):
+        report = self.interfaces()
+        reference = report["interfaces"][0]["references"][0]
+        reference["path"] = reference.pop("file")
+        with self.assertRaisesRegex(Invalid, "указатель материала требует путь и SHA-256"):
+            design.record_interfaces(self.store, self.state, report)
         report = self.interfaces()
         report["interfaces"][0]["references"][0]["sha256"] = "0" * 64
         with self.assertRaises(Invalid):
