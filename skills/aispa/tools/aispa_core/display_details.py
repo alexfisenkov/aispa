@@ -8,7 +8,7 @@ import json
 from . import check_modes
 from .contracts import active, artifact_valid, basis, gate_valid, plan_basis, task_basis
 from .store import Invalid
-from .team import _record_valid
+from .team import _record_valid, proof_provenance
 
 
 TASK_STATES = ("queued", "implementation", "review", "repair", "blocked", "completed", "stale")
@@ -20,7 +20,7 @@ def _read_report(store, ref):
     try:
         if not artifact_valid(store, ref):
             return None
-        value = json.loads(store.text(ref))
+        value = store.json(ref)
         return value if isinstance(value, (dict, list)) else None
     except (Invalid, OSError, ValueError, KeyError, TypeError):
         return None
@@ -33,10 +33,10 @@ def _working(state, phase):
 
 
 def task_status(task):
-    if task.get("phaseStale") or task.get("status") == "completed" and not task.get("proofCurrent"):
-        return "stale"
     if task.get("status") == "completed":
-        return "completed"
+        return "completed" if task.get("proofCurrent") else "stale"
+    if task.get("phaseStale"):
+        return "stale"
     if task.get("status") == "blocked":
         return "blocked"
     if task.get("status") == "pending":
@@ -164,6 +164,15 @@ def criteria(store, state, task):
               for text in task.get("criteria", [])]
     if phase == "stale":
         return result
+    if task.get("status") == "completed" and task.get("proofCurrent"):
+        confirmation = proof_provenance(store, state, task["id"])
+        if confirmation and confirmation["kind"] == "descendant":
+            # The shared domain predicate already checked exact ancestor
+            # criterion coverage, inherited identity and the complete DAG.
+            for row in result:
+                row.update(status="passed", source="descendant_proof", checkedBy="critic",
+                           provisional=False, confirmedBy=confirmation["task"])
+            return result
     attempt = (state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]
     rounds = attempt.get("rounds", [])
     candidates = ((attempt.get("verifiedCompletion"), "worker", False),
@@ -212,6 +221,10 @@ def waves(store, state, tasks):
         elif checkpoint:
             try:
                 report = _read_report(store, checkpoint.get("report", {}))
+                checks = report.get("checks", []) if isinstance(report, dict) else []
+                if isinstance(checks, list):
+                    review["counts"] = {name: sum(isinstance(row, dict) and row.get("status") == name for row in checks)
+                                        for name in ("passed", "failed", "blocked", "not_tested")}
                 same_basis = checkpoint.get("basis") == basis(store, state, "wave")
                 # The engine preserves an earlier checked checkpoint after a
                 # later wave was opened under this exact plan. It is historical

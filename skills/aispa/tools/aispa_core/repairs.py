@@ -74,7 +74,7 @@ def read(store, state, tid):
     require(isinstance(ref, dict) and attempt.get("repairPlans") and attempt["repairPlans"][-1] == ref,
             "До ремонта нужна записанная диагностика repair-plan")
     require(all(artifact_valid(store, r) for r in attempt["repairPlans"]), "История диагностики повреждена")
-    value = json.loads(store.text(ref))
+    value = store.json(ref)
     require(value.get("schema") == 1 and value.get("run") == state["run"] and value.get("task") == tid,
             "Диагностика относится к другому прогону или задаче")
     return _validate(state, tid, value.get("report"))

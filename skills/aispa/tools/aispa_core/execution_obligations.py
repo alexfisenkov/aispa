@@ -113,7 +113,7 @@ def source_timing(store, state, rows, refs):
     reports = []
     for key, role in (("extraction", "brief-analyst"), ("review", "brief-reviewer")):
         require(artifact_valid(store, refs[key]), "Исходный отчёт срока повреждён")
-        saved = json.loads(store.text(refs[key]))
+        saved = store.json(refs[key])
         require(isinstance(saved, dict) and saved.get("schema") == 1 and saved.get("run") == state["run"]
                 and isinstance(saved.get("report"), dict), "Чужой исходный отчёт срока")
         report = saved["report"]
@@ -139,7 +139,7 @@ def _validate(store, state, value):
     require(isinstance(evidence, dict) and isinstance(evidence.get("file"), str)
             and evidence["file"].startswith("evidence/") and artifact_valid(store, evidence),
             "Нужно неизменное свидетельство начала из evidence/")
-    saved = json.loads(store.text(evidence))
+    saved = store.json(evidence)
     require(isinstance(saved, dict) and saved.get("event") == "execution-start"
             and saved.get("at") == value["startedAt"] and isinstance(saved.get("note"), str)
             and saved["note"].strip(), "Свидетельство начала требует event=execution-start, at и note")
@@ -177,7 +177,7 @@ def obligations(store, state, *, sealed=False):
     for row in rows:
         require(isinstance(row, dict) and row.get("run") == state["run"]
                 and artifact_valid(store, row.get("record", {})), "Повреждено обязательство исполнения")
-        require(json.loads(store.text(row["record"])) == {k: v for k, v in row.items() if k != "record"},
+        require(store.json(row["record"]) == {k: v for k, v in row.items() if k != "record"},
                 "Обязательство исполнения изменено после записи")
         _validate(store, state, {k: row[k] for k in FIELDS})
         require(row["id"] not in seen, "Повторный ID обязательства исполнения")
@@ -185,7 +185,7 @@ def obligations(store, state, *, sealed=False):
     if sealed:
         seal = state.get("executionSeal")
         require(seal and artifact_valid(store, seal), "Обязательства исполнения не зафиксированы до разработки")
-        value = json.loads(store.text(seal))
+        value = store.json(seal)
         require(value.get("run") == state["run"] and value.get("obligations") == rows,
                 "Состав обязательств изменён после фиксации")
         require(not rows or artifact_valid(store, value.get("briefMap", {})),

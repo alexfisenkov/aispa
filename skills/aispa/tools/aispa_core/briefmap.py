@@ -124,7 +124,7 @@ def _saved(store, state, key, history, group):
           and state[history] and state[history][-1] == ref, "нет последнего отчёта: " + key)
     _need(isinstance(ref.get("file"), str) and ref["file"].startswith(group + "/")
           and artifact_valid(store, ref), "отчёт изменён: " + key)
-    saved = json.loads(store.text(ref))
+    saved = store.json(ref)
     _need(isinstance(saved, dict) and saved.get("schema") == SCHEMA
           and saved.get("run") == state["run"] and isinstance(saved.get("report"), dict),
           "чужая схема отчёта: " + key)

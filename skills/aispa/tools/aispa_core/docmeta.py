@@ -113,6 +113,7 @@ def _original(store, state, name):
 
 
 def _source(store, state, name, *, names=None):
+    from .verified_reads import bounded_read
     from .discovery import _kind, _names, _safe_path
     original = _original(store, state, name)
     if original is None:
@@ -122,10 +123,11 @@ def _source(store, state, name, *, names=None):
     else:
         kind = "document"
     path = _safe_path(store.root, name)
-    maximum = scale.Budget().max_bytes if scale.enabled(state) else MAX_FILE_BYTES
+    budget = scale.Budget() if scale.enabled(state) else None
+    maximum = budget.max_bytes if budget is not None else MAX_FILE_BYTES
     before = path.stat()
     if scale.enabled(state):
-        scale.Budget().check(before.st_size, path=name)
+        budget.check(before.st_size, path=name)
     _require(stat.S_ISREG(before.st_mode), "источник не является обычным файлом")
     _require(before.st_size <= maximum, "источник превышает лимит размера")
     # O_NOFOLLOW protects the leaf on POSIX; path components are rechecked after
@@ -135,7 +137,7 @@ def _source(store, state, name, *, names=None):
         opened = os.fstat(stream.fileno())
         _require(stat.S_ISREG(opened.st_mode) and opened.st_ino == before.st_ino
                  and opened.st_dev == before.st_dev, "источник изменился во время чтения")
-        raw = stream.read(maximum + 1)
+        raw = bounded_read(stream, maximum, budget=budget, path=name)
     _safe_path(store.root, name)
     after = path.stat()
     _require((after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
@@ -186,14 +188,21 @@ def _extract(text):
 
 def _read(store, state, name, ref):
     from .discovery import _safe_path
+    from .verified_reads import current_scope
     _require(isinstance(ref, dict) and isinstance(ref.get("file"), str)
              and re.fullmatch(r"documents/[0-9a-f]{32}\.json", ref["file"]), "неверная ссылка каталога")
     path = _safe_path(store.run, ref["file"])
     _require(path.is_file() and path.stat().st_size <= MAX_ARTIFACT_BYTES, "артефакт отсутствует или слишком велик")
-    with path.open("rb") as stream:
-        raw = stream.read(MAX_ARTIFACT_BYTES + 1)
-    _require(len(raw) <= MAX_ARTIFACT_BYTES and _hash(raw) == ref.get("sha256"), "артефакт каталога изменён")
-    value = json.loads(raw)
+    scope = current_scope()
+    if scope is not None:
+        raw = scope.artifact(path, ref.get("sha256"), literal=True, maximum=MAX_ARTIFACT_BYTES)
+        _safe_path(store.run, ref["file"])
+    else:
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_ARTIFACT_BYTES + 1)
+    sha = scope.value_hash(raw) if scope is not None else _hash(raw)
+    _require(len(raw) <= MAX_ARTIFACT_BYTES and sha == ref.get("sha256"), "артефакт каталога изменён")
+    value = scope.json(raw) if scope is not None else json.loads(raw.decode("utf-8"))
     _require(isinstance(value, dict) and value.get("schema") == SCHEMA and value.get("run") == state["run"]
              and value.get("path") == name, "чужая запись каталога")
     for key in ("sourceSha256", "bodySha256"):

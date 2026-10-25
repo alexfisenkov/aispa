@@ -240,7 +240,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 
 .verification-note{font-size:12px;line-height:1.45;max-width:240px;overflow-wrap:anywhere}
 .verification-note.stale{color:var(--warning)}.verification-note.current{color:var(--success)}
-.phase-step.recorded{background:var(--paper);color:var(--ink);border-color:var(--line)}
+.phase-step.historical{background:var(--paper);color:var(--ink);border-color:var(--line);flex-wrap:wrap}.phase-step time{font-size:11px}.phase-step.recorded{background:var(--paper);color:var(--ink);border-color:var(--line)}
 .meter.implementation-meter>i{background:var(--active)}
 </style>
 </head>
@@ -564,6 +564,15 @@ Object.assign(EN,{
  'Исключено из текущей работы':'Excluded from current scope','Пройдено':'Passed','Есть замечания':'Findings remain',
  'Выполняется':'In progress','Не требуется':'Not required','Задачи волны выполнены':'Completed tasks in this wave'
 });
+Object.assign(EN,{'Снимок рассчитывается':'Snapshot is calculating','Ошибка источника':'Source error','Нет связи':'Disconnected',
+ 'Снимок проверен: ':'Snapshot verified: ','Последний снимок: ':'Last snapshot: ','Историческая проверка':'Historical check',
+ 'Результат подтверждён последующей задачей':'Result confirmed by a later task',
+ 'Расчёт начат. Подтверждённого снимка пока нет.':'Calculation started. No verified snapshot is available yet.',
+ 'Не удалось проверить источник. Дождитесь нового проверенного снимка.':'The source could not be verified. Wait for a newly verified snapshot.',
+ 'Рассчитывается':'Calculating','Исправление':'Repair','По подтверждению последующей задачей':'Confirmed by a later task',
+ 'Новый снимок рассчитывается. Ниже последний подтверждённый снимок; текущая готовность ещё не подтверждена.':'A new snapshot is calculating. The last verified snapshot is shown below; current readiness is not yet confirmed.',
+ 'Оценка обновится после завершения расчёта.':'The estimate will update after calculation finishes.',
+ 'Оценка обновится после успешной проверки источника.':'The estimate will update after the source is successfully verified.'});
 var locale='ru',theme='system';
 function tr(value){return locale==='en'&&EN[value]?EN[value]:value}
 function stored(key){try{return localStorage.getItem(key)}catch(error){return null}}
@@ -571,7 +580,7 @@ function savePref(key,value){try{localStorage.setItem(key,value)}catch(error){}}
 var params=new URLSearchParams(location.search),archiveData=typeof window!=='undefined'?window.AISPA_ARCHIVE:null;
 var archiveMode=!!(archiveData&&archiveData.archive===true),demoMode=params.has('demo')&&!archiveMode;
 var previewStatus=demoMode?params.get('status'):null;
-var filter='all',last=null,source='loading',receivedAt=0,inFlight=false,tabButtons={},taskExpanded={},renderedRun;
+var filter='all',last=null,lastCapturedAt=null,pendingCalculation=null,source='loading',receivedAt=0,inFlight=false,tabButtons={},taskExpanded={},renderedRun;
 function $(id){return document.getElementById(id)}
 function h(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
 function applyTheme(){var mode=theme;
@@ -598,6 +607,7 @@ function duration(s){if(!Number.isFinite(s))return tr('Время не запи�
   hours?hours+' ч '+pad(minutes)+' мин':minutes?minutes+' мин '+pad(seconds)+' с':seconds+' с'}
 function active(r){return r.scope!=='dropped'&&r.scope!=='deferred'}
 function isAdd(r){return r.kind==='addition'}
+function unavailableSource(){return ['offline','disconnected','calculating','source_error'].includes(source)}
 function connected(){return source==='live'||source==='demo'||source==='archive'}
 function finalStatus(s){return s==='accepted'||s==='delivered_with_remaining'}
 function ownerWaiting(d){var w=d.waiting;return !!(w&&typeof w==='object'&&/^(owner_question|question|owner)$/.test(w.kind)&&typeof w.note==='string'&&w.note.trim());}
@@ -606,11 +616,11 @@ function viewStatus(d){if(!connected())return 'unavailable';var status=previewSt
 function delta(){if(last&&ownerWaiting(last))return 0;
  return source==='live'||source==='demo'?Math.max(0,(performance.now()-receivedAt)/1000):0}
 function sourceSuffix(){return source==='archive'?' · '+tr('на дату снимка'):
- source==='offline'?' · '+tr('последний снимок'):source==='demo'?' · '+tr('пример'):''}
+ unavailableSource()?' · '+tr('последний снимок'):source==='demo'?' · '+tr('пример'):''}
 function taskLabel(t,d){
  var label=t.status==='completed'?tr('Реализовано'):
   t.phaseStale?tr('Проверки устарели'):
-  (source==='archive'||source==='offline')&&t.status==='running'?tr('Была в работе'):
+  (source==='archive'||unavailableSource())&&t.status==='running'?tr('Была в работе'):
   t.status==='running'&&(d.status!=='running'||ownerWaiting(d))?tr('Приостановлена'):
   t.status==='running'&&phaseName(t)?phaseName(t):
   t.status==='pending'&&t.assignment?tr('Исполнитель назначен'):
@@ -618,13 +628,13 @@ function taskLabel(t,d){
  return label+sourceSuffix();
 }
 function verificationNote(t){if(t.status!=='completed')return null;
- if(source==='offline')return tr('Актуальность проверки не подтверждена');
- if(t.phaseStale||t.proofCurrent===false)return tr('Проверку нужно обновить');
+ if(unavailableSource())return tr('Актуальность проверки не подтверждена');
+ if(t.proofCurrent!==true&&(t.phaseStale||t.proofCurrent===false))return tr('Проверку нужно обновить');
  if(t.proofCurrent===true)return tr(source==='archive'?'Проверено на дату снимка':'Проверка актуальна');
  return tr('Проверка не подтверждена');}
 function shortVerificationNote(t){if(t.status!=='completed')return null;
- if(source==='offline')return tr('Нет подтверждения');
- if(t.phaseStale||t.proofCurrent===false)return tr('Проверку обновить');
+ if(unavailableSource())return tr('Нет подтверждения');
+ if(t.proofCurrent!==true&&(t.phaseStale||t.proofCurrent===false))return tr('Проверку обновить');
  if(t.proofCurrent===true)return tr(source==='archive'?'На дату снимка':'Проверено');
  return tr('Нет подтверждения');}
 function taskTime(t,d){return t.elapsedSeconds==null?null:t.elapsedSeconds+
@@ -640,25 +650,29 @@ function versionLabel(version){
 function phaseSteps(t){if(!Array.isArray(t.phaseSteps)||!t.phaseSteps.length)return null;
  var row=h('div','phase-steps');row.setAttribute('role','list');row.setAttribute('aria-label',tr('Этапы задачи'));
  t.phaseSteps.forEach(function(step){if(!step||!PHASE_STATUS[step.status])return;
-  var effective=step.status==='done'&&t.status==='completed'&&(t.phaseStale||t.proofCurrent===false)?'stale':step.status;
+  var effective=step.status==='done'&&t.status==='completed'&&t.proofCurrent!==true&&(t.phaseStale||t.proofCurrent===false)?'stale':step.status;
   var state=PHASE_STATUS[effective],name=tr(step.label||PHASE_LABEL[step.id]||step.id||'Этап');
   var recorded=t.status==='completed'&&step.id==='implementation'&&effective==='stale';
   var item=h('span','phase-step '+(recorded?'recorded':effective),(recorded?'•':state[0])+' '+(recorded?tr('Реализовано'):name));item.setAttribute('role','listitem');
-  item.setAttribute('aria-label',name+' — '+tr(recorded?'Выполнено; проверку нужно обновить':state[1]));if(step.status==='current')item.className+=step.id==='repair'?' repairing':/^(critic_|task_acceptance|verified_completion)/.test(step.id)?' review':'';row.append(item)});
+  item.setAttribute('aria-label',name+' — '+tr(recorded?'Выполнено; проверку нужно обновить':state[1]));if(step.status==='current')item.className+=step.id==='repair'?' repairing':/^(critic_|task_acceptance|verified_completion)/.test(step.id)?' review':'';if(step.historical||unavailableSource()&&step.status==='done'){item.className='phase-step historical';item.append(h('span',null,tr('Историческая проверка')));item.setAttribute('aria-label',name+' — '+tr('Историческая проверка'));}
+  if(step.recordedAt){var date=h('time',null,fmt(step.recordedAt));date.setAttribute('datetime',step.recordedAt);item.append(date);}
+  row.append(item)});
  return row.children.length?row:null}
 var FILTERS={all:['Все',function(){return true}],core:['Ядро',function(r){return r.core&&active(r)}],
- additions:['Добавления',isAdd],open:['Требуют внимания',function(r){return active(r)&&(source==='offline'||r.implementation!=='implemented'||r.progress&&(r.progress.status==='stale'||r.progress.acceptance&&r.progress.acceptance.status==='stale'))}]};
+ additions:['Добавления',isAdd],open:['Требуют внимания',function(r){return active(r)&&(unavailableSource()||r.implementation!=='implemented'||r.progress&&(r.progress.status==='stale'||r.progress.acceptance&&r.progress.acceptance.status==='stale'))}]};
 
 function renderSource(){
  var m={loading:['#C7C9CC','Загрузка…'],demo:['#C7C9CC','Демо-данные · пример'],live:['#1F8A5B','Живые данные · локальный сервер'],
  archive:['#8A8D92','Архивный снимок'],
  'archive-invalid':['#55585E','Архивный снимок недоступен'],
- offline:['#55585E','Нет актуальных данных — последний снимок'],none:['#55585E','Состояние недоступно']}[source];
+ offline:['#55585E','Нет актуальных данных — последний снимок'],disconnected:['#55585E','Нет связи'],
+ calculating:['#8A8D92','Снимок рассчитывается'],source_error:['#55585E','Ошибка источника'],none:['#55585E','Состояние недоступно']}[source];
+ if(lastCapturedAt&&!archiveMode&&!demoMode)$('refreshText').textContent=tr(source==='live'?'Снимок проверен: ':'Последний снимок: ')+fmt(lastCapturedAt);
  $('sourceDot').style.background=m[0];$('sourceLabel').textContent=tr(m[1])+(source==='archive'?' · '+fmt(last.archivedAt):'');
 }
 function renderEmpty(){
- $('title').textContent='AISpa';$('label').textContent=tr('Состояние недоступно');
- $('hint').textContent=tr(source==='archive-invalid'?'Встроенный архивный снимок повреждён или неполон.':'Запустите локальный сервер AISpa командой serve. Отсутствие данных не означает готовность.');
+ $('title').textContent='AISpa';$('label').textContent=tr(source==='calculating'?'Снимок рассчитывается':source==='source_error'?'Ошибка источника':'Состояние недоступно');
+ $('hint').textContent=tr(source==='calculating'?'Расчёт начат. Подтверждённого снимка пока нет.':source==='source_error'?'Не удалось проверить источник. Дождитесь нового проверенного снимка.':source==='archive-invalid'?'Встроенный архивный снимок повреждён или неполон.':'Запустите локальный сервер AISpa командой serve. Отсутствие данных не означает готовность.');
  $('statusShort').textContent=tr('Нет данных');$('statusDot').style.background='transparent';$('statusDot').style.border='2px dashed #C7C9CC';
  $('currentActivity').replaceChildren(h('div','note',tr('Жду подтверждённое состояние прогона.')));
  $('overviewCounts').replaceChildren();
@@ -666,7 +680,7 @@ function renderEmpty(){
 }
 function etaText(d){
  if(source==='archive')return [tr(finalStatus(d.status)?'На дату снимка завершён':'Исторический снимок'),tr('Оценка не обновляется.')];
- if(!connected())return [tr('Не подтверждено'),tr('Оценка обновится после восстановления связи.')];
+ if(!connected())return [tr('Не подтверждено'),tr(source==='calculating'?'Оценка обновится после завершения расчёта.':source==='source_error'?'Оценка обновится после успешной проверки источника.':'Оценка обновится после восстановления связи.')];
  if(ownerWaiting(d))return [tr('Ожидает ответа владельца'),tr('Пока нет оценки')];
  if(finalStatus(d.status))return [tr('Прогон завершён'),tr(d.status==='delivered_with_remaining'?'Остатки перечислены отдельно.':'Все действующие требования приняты.')];
  var e=d.estimate||{},reason=e.reason;
@@ -703,7 +717,7 @@ function tick(){
  var e=d.estimate||{};$('etaQualifier').textContent=connected()&&source!=='archive'&&viewStatus(d)==='running'&&e.reason==='estimate'?tr(e.waitingForBlockers?'Ожидание блокеров не учтено':e.basis==='plan_assumption'?'Ориентир по плану':e.basis==='mixed'?'По замерам и плану':'По завершённым задачам'):'';journalNotice(d);
 }
 function assignmentText(t){var a=t.assignment;if(!a||typeof a.roleLabel!=='string')return null;
- return tr(source==='archive'||source==='offline'?'Назначение на момент снимка: ':'Назначен: ')+tr(a.roleLabel)+(a.runtime?' · '+a.runtime:'')+(a.model?' · '+a.model:'');}
+ return tr(source==='archive'||unavailableSource()?'Назначение на момент снимка: ':'Назначен: ')+tr(a.roleLabel)+(a.runtime?' · '+a.runtime:'')+(a.model?' · '+a.model:'');}
 function wholeTaskLabel(t){return tr(t.attemptNumber>1?'Всего по всем попыткам':'Вся задача')}
 function agoText(seconds){seconds=Math.max(0,Math.floor(seconds));
  if(seconds<10)return tr('только что');if(seconds<60)return seconds+' '+tr('с назад');
@@ -744,7 +758,7 @@ function renderOverview(d){
  d.tasks.forEach(function(t){var key=t.phaseStale&&t.status==='running'?'stale':taskTone(t);counts[key]++;if(t.phaseStale||t.status==='completed'&&t.proofCurrent!==true)needsCheck++;});
  function add(kind,label,value){var item=h('span','overview-count '+kind);item.append(h('b',null,value),h('span',null,tr(label)));box.append(item);}
  add('completed','Реализовано задач',counts.completed+' / '+d.tasks.length);
- var historical=source==='offline'||source==='archive',waiting=ownerWaiting(d);
+ var historical=unavailableSource()||source==='archive',waiting=ownerWaiting(d);
  if(historical||d.status!=='running'||waiting){var recorded=counts.implementation+counts.review+counts.repair;
   if(recorded)add('queued',historical?'Активность на момент снимка':'Сохранённая активность',recorded);
  }else{[['implementation','Реализация'],['review','На проверке'],['repair','На ремонте']].forEach(function(entry){if(counts[entry[0]])add(entry[0],entry[1],counts[entry[0]]);});}
@@ -807,7 +821,7 @@ function chip(status,label){return h('span','status-chip '+status,tr(label||PROG
 function taskPhaseKind(t){var phase=t.phaseTiming&&t.phaseTiming.phase||t.phase||'';
  return /^repair/.test(phase)?'repair':/^(critic_?\d|task_acceptance|verified_completion|review)/.test(phase)?'review':'implementation';}
 function taskTone(t){return t.status==='completed'?'completed':t.status==='blocked'?'blocked':t.status==='running'?taskPhaseKind(t):t.status==='pending'?'queued':'unknown';}
-function taskProgressStatus(t){if(t.phaseStale||t.status==='completed'&&t.proofCurrent===false)return 'stale';
+function taskProgressStatus(t){if(t.status==='completed'&&t.proofCurrent===true)return 'completed';if(t.phaseStale||t.status==='completed'&&t.proofCurrent===false)return 'stale';
  if(t.status==='completed')return t.proofCurrent===true?'completed':'partial';if(t.status==='blocked')return 'blocked';
  if(t.status==='running')return taskPhaseKind(t);return 'queued';}
 function requirementProgress(r,tasks){if(r.progress)return r.progress;
@@ -820,10 +834,10 @@ function reqStatus(p){return p.acceptance&&p.acceptance.status==='passed'?'accep
 function recordedRequirements(r,tasks){var holders=tasks.filter(function(t){return (t.requirements||[]).includes(r.id)});
  return {total:holders.length,implemented:holders.filter(function(t){return t.status==='completed'}).length};}
 function requirementLabel(r,p,tasks){var count=recordedRequirements(r,tasks);
- if(active(r)&&(p.status==='stale'||p.acceptance&&p.acceptance.status==='stale'||source==='offline')&&count.implemented)return tr(count.implemented===Math.max(count.total,p.total)?'Реализовано':'Частично реализовано')+sourceSuffix();
+ if(active(r)&&(p.status==='stale'||p.acceptance&&p.acceptance.status==='stale'||unavailableSource())&&count.implemented)return tr(count.implemented===Math.max(count.total,p.total)?'Реализовано':'Частично реализовано')+sourceSuffix();
  return tr(PROGRESS_TEXT[reqStatus(p)]||UNKNOWN)+sourceSuffix();}
-function requirementCheckNote(r,p,tasks){return active(r)&&(p.status==='stale'||p.acceptance&&p.acceptance.status==='stale'||source==='offline')&&recordedRequirements(r,tasks).implemented?
- tr(source==='offline'?'Актуальность проверки не подтверждена':p.status!=='stale'&&p.acceptance&&p.acceptance.status==='stale'?'Итоговую приёмку нужно обновить':'Проверку нужно обновить'):null;}
+function requirementCheckNote(r,p,tasks){return active(r)&&(p.status==='stale'||p.acceptance&&p.acceptance.status==='stale'||unavailableSource())&&recordedRequirements(r,tasks).implemented?
+ tr(unavailableSource()?'Актуальность проверки не подтверждена':p.status!=='stale'&&p.acceptance&&p.acceptance.status==='stale'?'Итоговую приёмку нужно обновить':'Проверку нужно обновить'):null;}
 function reqProgressText(p,r,tasks){var count=recordedRequirements(r,tasks);
  return (locale==='en'?'Implemented tasks: ':'Реализовано задач: ')+count.implemented+' / '+Math.max(count.total,p.total)+
   (locale==='en'?' · currently verified: ':' · актуально проверено: ')+(connected()?p.completed:0)+' / '+p.total;}
@@ -831,13 +845,13 @@ function reqProgressText(p,r,tasks){var count=recordedRequirements(r,tasks);
 function meter(done,total,label){var el=h('div','meter'),bar=h('i');var value=total?Math.max(0,Math.min(100,done/total*100)):0;
  el.setAttribute('role','progressbar');el.setAttribute('aria-label',label);el.setAttribute('aria-valuemin','0');el.setAttribute('aria-valuemax',String(total||1));el.setAttribute('aria-valuenow',String(done));bar.style.width=value+'%';el.append(bar);return el;}
 function renderTask(t,d){
- var tone=taskTone(t),stale=t.phaseStale||t.status==='completed'&&t.proofCurrent===false;
+ var tone=taskTone(t),stale=t.status==='completed'?t.proofCurrent!==true:!!t.phaseStale;
  var row=h('details','task '+t.status+(tone!==t.status?' '+tone:'')+(stale?' proof-stale':''));row.id='task-'+t.id;
  row.open=taskExpanded[t.id]===true;row.addEventListener('toggle',function(){if($('task-'+t.id)===row)taskExpanded[t.id]=row.open});
  var summary=h('summary'),line=h('div','task-summary'),body=h('div','task-body'),right=h('div','task-right');summary.id='task-summary-'+t.id;
  body.append(h('b',null,t.title||t.id));
  var state=h('span','task-state');state.append(h('span','dot'),document.createTextNode(taskLabel(t,d)));right.append(state);
- var checkNote=verificationNote(t);if(checkNote){var check=h('span','verification-note '+(stale||t.proofCurrent!==true||source==='offline'?'stale':'current'),shortVerificationNote(t));check.setAttribute('title',checkNote);right.append(check);}
+ var checkNote=verificationNote(t);if(checkNote){var check=h('span','verification-note '+(stale||t.proofCurrent!==true||unavailableSource()?'stale':'current'),shortVerificationNote(t));check.setAttribute('title',checkNote);right.append(check);}
  var elapsed=h('div','task-elapsed'),time=h('span','mono task-time');time.id='time-'+t.id;elapsed.append(h('small',null,wholeTaskLabel(t)),time);
  var toggle=h('span','task-toggle'),toggleLabel=h('span','task-toggle-label',tr('Детали'));toggleLabel.setAttribute('aria-hidden','true');toggle.append(toggleLabel,h('span','sr-only',tr('Детали задачи')));
  line.append(h('span','task-id mono',t.id),body,right,elapsed,toggle);summary.append(line);row.append(summary);
@@ -847,11 +861,13 @@ function renderTask(t,d){
   if(steps){var strip=h('div','task-steps');strip.id='task-phases-'+t.id;strip.append(steps);phases.append(strip);}
   if(!t.phaseStale&&t.phaseTiming&&Number.isFinite(t.phaseTiming.elapsedSeconds)){
    var interval=h('div','task-timing'),clock=h('span','mono task-time');clock.id='phase-time-'+t.id;
-   interval.append(h('span',null,tr(source==='archive'?'Фаза на дату снимка: ':source==='offline'?'Фаза на момент снимка: ':'Интервал этапа: ')+phase),clock);phases.append(interval);}
+   interval.append(h('span',null,tr(source==='archive'?'Фаза на дату снимка: ':unavailableSource()?'Фаза на момент снимка: ':'Интервал этапа: ')+phase),clock);phases.append(interval);}
   detail.append(phases);
  }
  var assignment=assignmentText(t);if(assignment)detail.append(h('span','note',assignment));
- if(checkNote)detail.append(h('span','verification-note '+(stale||t.proofCurrent!==true||source==='offline'?'stale':'current'),checkNote));
+ if(checkNote)detail.append(h('span','verification-note '+(stale||t.proofCurrent!==true||unavailableSource()?'stale':'current'),checkNote));
+ if(connected()&&t.status==='completed'&&t.proofCurrent===true&&t.proofProvenance&&t.proofProvenance.kind==='descendant'){
+  var confirmed=h('span','verification-note current',tr('Результат подтверждён последующей задачей')+' '),link=h('a',null,t.proofProvenance.task);link.setAttribute('href','#task-'+t.proofProvenance.task);confirmed.append(link);detail.append(confirmed);}
  if(TIER[t.tier])detail.append(h('span','note',tr(TIER[t.tier][0])+' · '+tr(t.tier==='heavy'&&t.reviewPolicy==='lean'?'PASS критика закрывает задачу':TIER[t.tier][1])));
  if(t.tierReason)detail.append(h('span','note',t.tierReason));if(t.attemptNote)detail.append(h('span','note',t.attemptNote));
  if(t.assignment&&t.assignment.assignedAt)detail.append(h('span','note',tr('Назначение: ')+fmt(t.assignment.assignedAt)));
@@ -863,9 +879,9 @@ function renderTask(t,d){
  if(!reqs.length)reqBox.append(h('span','note',tr('Без привязки к требованиям')));detail.append(reqBox);
  var criteria=Array.isArray(t.criteriaDetails)?t.criteriaDetails:(t.criteria||[]).map(function(text){return {text:text,status:'pending',source:'task_state'}});
  if(criteria.length){var cb=h('div');cb.append(h('h3',null,tr('Критерии результата')));criteria.forEach(function(c){var cr=h('div','detail-row'),ct=h('div');
-  ct.append(h('span',null,c.text));ct.append(h('small',null,tr(c.provisional?'Независимая проверка ещё впереди':c.checkedBy==='worker'?'Проверка исполнителя по маршруту задачи':c.source==='checked_report'?'По сохранённому отчёту проверки':'Отдельная проверка критерия ещё не записана')));
+  ct.append(h('span',null,c.text));ct.append(h('small',null,tr(c.provisional?'Независимая проверка ещё впереди':c.checkedBy==='worker'?'Проверка исполнителя по маршруту задачи':c.source==='checked_report'?'По сохранённому отчёту проверки':c.source==='descendant_proof'?'По подтверждению последующей задачей':'Отдельная проверка критерия ещё не записана')));
   if(t.evidenceSummary){var badges=h('small');t.evidenceSummary.routes.filter(function(r){return r.criterion===c.text}).forEach(function(r){badges.append(chip('pending',evidenceLabel(r.kind)))});ct.append(badges);}
-  cr.append(ct,chip(c.status));cb.append(cr)});detail.append(cb);}
+  var historical=unavailableSource();cr.append(ct,chip(historical?'historical':c.status,historical?tr(PROGRESS_TEXT[c.status]||UNKNOWN)+' · '+tr('последний снимок'):null));cb.append(cr)});detail.append(cb);}
  row.append(detail);return row;
 }
 function journalNotice(d){var node=$('journalNotice'),age=(new Date(d.observedAt)-new Date(d.updatedAt))/1000+delta();
@@ -877,12 +893,12 @@ function render(d){
  var status=viewStatus(d),reqs=d.requirements,tasks=d.tasks,rem=d.remaining||{};
  $('title').textContent=d.title||tr('Без названия');$('version').textContent=versionLabel(d.dashboardVersion||d.version);
  if(d.dashboardVersion&&d.dashboardVersion!==d.version)$('version').textContent+=' · '+tr('проект')+' '+d.version;
- $('label').textContent=source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
+ $('label').textContent=source==='calculating'?tr('Снимок рассчитывается'):source==='source_error'?tr('Ошибка источника'):source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
   tr(LABELS[status]||UNKNOWN)+(source==='archive'||source==='demo'?sourceSuffix():'');
- $('hint').textContent=source==='archive'?tr('Это историческое состояние. Текущий статус проекта здесь не проверяется.'):
+ $('hint').textContent=source==='calculating'?tr('Новый снимок рассчитывается. Ниже последний подтверждённый снимок; текущая готовность ещё не подтверждена.'):source==='source_error'?tr('Не удалось проверить источник. Дождитесь нового проверенного снимка.'):source==='archive'?tr('Это историческое состояние. Текущий статус проекта здесь не проверяется.'):
   tr(HINT[status]||'Обновите состояние или проверьте совместимость версии.');
  $('heroStatus').hidden=status==='running';$('runExplanation').hidden=status!=='running';$('runExplanation').textContent=status==='running'?tr(HINT.running):'';
- $('statusShort').textContent=source==='archive'?tr('Архив'):tr(SHORT[status]||UNKNOWN)+(source==='demo'?sourceSuffix():'');
+ $('statusShort').textContent=source==='calculating'?tr('Рассчитывается'):source==='source_error'?tr('Ошибка источника'):source==='archive'?tr('Архив'):tr(SHORT[status]||UNKNOWN)+(source==='demo'?sourceSuffix():'');
  var dot=DOT[status]||DOT.unavailable;$('statusDot').style.background=dot[0];$('statusDot').style.border=dot[1];
  var note=$('wavesNote');if(note){var noteKey=d.checkMode==='fast'?'wavesNoteFast':'wavesNote';note.setAttribute('data-i18n',noteKey);note.textContent=I18N[noteKey][locale==='en'?1:0]}
  var modeBox=$('checkModeBox');modeBox.hidden=!d.checkMode;
@@ -928,7 +944,7 @@ function render(d){
    (hasProof?(locale==='en'?' · currently verified: ':' · актуально проверено: ')+(connected()?accepted:0)+' / '+ts.length:'')+sourceSuffix()));var box=h('div','tasks');
   var wd=Array.isArray(d.waveDetails)?d.waveDetails.find(function(x){return x.wave===n}):null;
   var meta=h('div','wave-meta');meta.append(h('span',null,locale==='en'?'Parallel tasks within this wave':'Задачи этой волны могут выполняться параллельно'));
-  if(wd&&wd.review){var review=wd.review,historical=review.status==='passed'&&(review.reason==='accepted_checkpoint'||review.basisCurrent===false);meta.append(chip(historical?'historical':review.status,(locale==='en'?'Wave review: ':'Сверка волны: ')+tr(historical?'Пройдена на границе волны':PROGRESS_TEXT[review.status]||UNKNOWN)));}
+  if(wd&&wd.review){var review=wd.review,historical=review.status==='passed'&&(review.reason==='accepted_checkpoint'||review.basisCurrent===false||review.counts&&(review.counts.failed||review.counts.blocked||review.counts.not_tested));meta.append(chip(historical?'historical':review.status,(locale==='en'?'Wave review: ':'Сверка волны: ')+tr(historical?'Пройдена на границе волны':PROGRESS_TEXT[review.status]||UNKNOWN)));}
   ts.forEach(function(t){box.append(renderTask(t,d))});var bar=meter(c,ts.length,tr('Реализованные задачи волны'));bar.className+=' implementation-meter';w.append(hd,bar,meta,box);wv.append(w)});
  journalNotice(d);
  var rb=$('remaining');rb.replaceChildren();var any=false;
@@ -957,6 +973,7 @@ function goodEvidence(x){if(x===undefined)return true;if(!object(x)||x.mode!=='m
 function goodRequirement(r){return object(r)&&typeof r.id==='string'&&typeof r.text==='string'&&goodProgress(r.progress)}
 function valid(d){return object(d)&&typeof d.status==='string'&&Array.isArray(d.requirements)&&d.requirements.every(goodRequirement)&&
  Array.isArray(d.tasks)&&d.tasks.every(function(t){return object(t)&&typeof t.id==='string'&&strings(t.requirements)&&goodEvidence(t.evidenceSummary)&&
+  (t.proofProvenance==null||object(t.proofProvenance)&&['direct','descendant'].includes(t.proofProvenance.kind)&&typeof t.proofProvenance.task==='string'&&/^T[0-9]+$/.test(t.proofProvenance.task))&&
   (t.title===undefined||typeof t.title==='string')&&(t.criteria===undefined||strings(t.criteria))&&optionalObject(t.assignment)&&optionalObject(t.phaseTiming)&&
   (t.phaseSteps===undefined||Array.isArray(t.phaseSteps)&&t.phaseSteps.every(function(p){return object(p)&&typeof p.id==='string'&&typeof p.status==='string'}))&&
   (t.requirementsDetails===undefined||Array.isArray(t.requirementsDetails)&&t.requirementsDetails.every(goodRequirement))&&
@@ -1019,10 +1036,23 @@ async function refresh(){
  }
  if(demoMode){source='demo';last=makeDemo(previewStatus);receivedAt=performance.now();renderSource();render(last);return;}
  if(inFlight)return;inFlight=true;var controller=new AbortController(),timer=setTimeout(function(){controller.abort()},10000);
- try{var response=await fetch('status.json',{cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error('HTTP '+response.status);
-  var d=await response.json();if(!valid(d))throw new Error('shape');
-  source='live';render(d);last=d;receivedAt=performance.now();renderSource();tick();
- }catch(error){source=last?'offline':'none';renderSource();if(last)render(last);else renderEmpty();}
+ try{var endpoint='status.json'+(pendingCalculation?'?calculation='+encodeURIComponent(pendingCalculation):'');
+  var response=await fetch(endpoint,{cache:'no-store',signal:controller.signal}),d=await response.json();
+  if(object(d)&&object(d.calculation)&&['calculating','source_error'].includes(d.calculation.state)){
+   if(typeof d.calculation.id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(d.calculation.id))throw new Error('generation');
+   var retained=d.lastSnapshot;
+   if(retained!=null){if(!object(retained)||retained.freshness!=='historical'||!archiveDate(retained.capturedAt)||!valid(retained.view))throw new Error('snapshot');
+    last=retained.view;lastCapturedAt=retained.capturedAt;}
+   pendingCalculation=d.calculation.state==='calculating'?d.calculation.id:null;
+   source=d.calculation.state;renderSource();if(last)render(last);else renderEmpty();return;
+  }
+  if(response.status===410){pendingCalculation=null;source='source_error';renderSource();if(last)render(last);else renderEmpty();return;}
+  if(!response.ok||!valid(d))throw new Error('shape');
+  if(d.calculation&&d.calculation.state!=='ready')throw new Error('generation');
+  if(d.snapshot&&(!object(d.snapshot)||d.snapshot.freshness!=='current'||!archiveDate(d.snapshot.capturedAt)))throw new Error('snapshot');
+  pendingCalculation=null;source='live';lastCapturedAt=d.snapshot?d.snapshot.capturedAt:d.observedAt||d.updatedAt;
+  render(d);last=d;receivedAt=performance.now();renderSource();tick();
+ }catch(error){source='disconnected';renderSource();if(last)render(last);else renderEmpty();}
  finally{clearTimeout(timer);inFlight=false;}
 }
 /* Демонстрационные данные не используются при чтении реального status.json. */

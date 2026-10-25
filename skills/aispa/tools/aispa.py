@@ -13,7 +13,7 @@ from aispa_core.store import Invalid, Journal, digest, file_hash, timestamp
 from aispa_core.portable import is_link
 from aispa_core.workflow import Workflow
 from aispa_core import check_modes, project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
-from aispa_core.cli_output import emit
+from aispa_core.cli_output import emit, saved_without_view
 from aispa_core import phase_receipts, dashboard_host, work_progress
 from aispa_core import autonomy, project_documents
 
@@ -348,11 +348,17 @@ def execute(args):
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
             project_context.refresh(store, state)
-            output = {**publish(store, state), "autonomy": autonomy.view(state),
-                      "requiredHostActions": dashboard_host.start_request()}
+            try:
+                output = {**publish(store, state), "autonomy": autonomy.view(state),
+                          "requiredHostActions": dashboard_host.start_request()}
+            except (Invalid, OSError, ValueError, KeyError, TypeError):
+                output = saved_without_view(store, state, {"run": state["run"]}, ok=True)
+                if output is None:
+                    raise
             emit(store, output, compact_mode=args.compact)
             return 0
         state = store.load()
+        previous_sequence = store.read_journal()["count"]
         preparation_write = (args.action in ("template", "brief-source", "brief-map-context") and args.write
                              or args.action == "context" and args.with_template)
         read_only = not preparation_write and (
@@ -612,7 +618,14 @@ def execute(args):
             flow.close(args.status, args.note)
         elif action == "decision":
             flow.decision(args.text)
-        view = publish(store, state)
+        try:
+            view = publish(store, state)
+        except (Invalid, OSError, ValueError, KeyError, TypeError):
+            output = saved_without_view(store, state, receipt, ok=ok, previous_sequence=previous_sequence)
+            if output is None:
+                raise
+            emit(store, output, compact_mode=args.compact)
+            return 0 if ok else 2
         output = view if action == "status" else {
             "ok": ok, "run": state["run"], "runDirectory": view["runDirectory"], "status": view["status"],
             "stage": view["displayStage"], "gates": view["gates"], "receipt": receipt,

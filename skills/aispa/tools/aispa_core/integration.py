@@ -86,7 +86,7 @@ def _baseline(store, state):
     _need(isinstance(ref, dict) and isinstance(ref.get("file"), str)
           and ref["file"].startswith("integration-baselines/")
           and artifact_valid(store, ref), "исходный снимок проекта отсутствует или изменён")
-    payload = json.loads(store.text(ref))
+    payload = store.json(ref)
     _need(isinstance(payload, dict) and set(payload) == {"schema", "run", "head", "records", "code"}
           and payload["schema"] == SCHEMA and payload["run"] == state["run"],
           "исходный снимок относится к другому прогону")
@@ -252,7 +252,7 @@ def record_valid(store, state, tid, role, record):
         baseline = _baseline(store, state)
         _need(isinstance(record, dict) and artifact_valid(store, record.get("report", {})),
               "критический отчёт изменён")
-        report = json.loads(store.text(record["report"]))
+        report = store.json(record["report"])
         _need(isinstance(report, dict) and report.get("basis") == record.get("basis"),
               "исторический отчёт относится к другому кандидату")
         branch = report.get("branchReview")
@@ -304,7 +304,7 @@ def _project_actor(store, state, actor=None, *, optional=False):
     acceptance = state.get("gates", {}).get("acceptance") or {}
     if acceptance.get("report"):
         _need(artifact_valid(store, acceptance["report"]), "итоговый отчёт изменён")
-        final_report = json.loads(store.text(acceptance["report"]))
+        final_report = store.json(acceptance["report"])
         _need(isinstance(final_report, dict), "повреждён итоговый отчёт")
         used.update(final_report.get(key) for key in ("reviewer", "actor"))
     _need(actor not in used and who["nativeId"] not in used,
@@ -376,7 +376,7 @@ def _project_history(store, state):
               "повреждена неизменная запись общего ревью")
         who = _project_actor(store, state, record.get("actor"))
         _need(record.get("participant") == who["record"], "изменена личность общего проверяющего")
-        report = json.loads(store.text(record["report"]))
+        report = store.json(record["report"])
         artifacts, failures = _project_report(store, report, state)
         branch = report["branchReview"]
         code = _reconstructed_code(baseline["records"], branch["changes"])
@@ -459,7 +459,7 @@ def proof_valid(store, state):
             return _project_proof(store, state, tid, attempt)
         final = acceptance_chain(store, state, tid, attempt)
         view = context(store, state, tid)
-        branch = json.loads(store.text(final["report"]))["branchReview"]
+        branch = store.json(final["report"])["branchReview"]
         _need(branch["code"] == view["code"] and branch["basis"] == view["basis"],
               "после последнего обязательного общего ревью полный код изменён")
         return True

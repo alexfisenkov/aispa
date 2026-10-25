@@ -26,6 +26,11 @@ LENSES = {
 ACCEPTANCE_LENS = LENSES["acceptor"][0]
 
 
+def _object(value):
+    require(isinstance(value, dict), "Нужен объект JSON")
+    return value
+
+
 def _json(text):
     try:
         value = json.loads(text)
@@ -48,7 +53,7 @@ def _seal(store, record):
 def _sealed_valid(store, record):
     if not isinstance(record, dict) or not artifact_valid(store, record.get("record", {})):
         return False
-    return _json(store.text(record["record"])) == {k: v for k, v in record.items() if k != "record"}
+    return _object(store.json(record["record"])) == {k: v for k, v in record.items() if k != "record"}
 
 
 def _declared(attempt):
@@ -65,7 +70,7 @@ def _latest(state, tid):
 def _role_data(store, attempt, role):
     record = attempt.get("roles", {}).get(role)
     require(record and artifact_valid(store, record), "Повреждена карточка роли")
-    card = _json(store.text(record))
+    card = _object(store.json(record))
     require(card.get("role") == role and card.get("attempt") == attempt["id"]
             and card.get("contract") == attempt.get("contract")
             and card.get("checks") == record.get("checks")
@@ -171,7 +176,7 @@ def _record_valid(store, record):
         return False
     if not mixed_evidence.record_valid(store, record):
         return False
-    report = _json(store.text(record["report"]))
+    report = _object(store.json(record["report"]))
     return (report.get("basis") == record.get("basis") and report.get("reviewer") == record.get("actor")
             and _verification_valid(store, record.get("verification"), record.get("basis")))
 
@@ -218,7 +223,7 @@ def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
     for number, record in enumerate(rounds, 1):
         require(record["actor"] == attempt["actors"]["critic" + str(number)], "Отчёт критика подписан другим actor")
         if adaptive:
-            report = _json(store.text(record["report"]))
+            report = _object(store.json(record["report"]))
             failures = [row for row in report.get("checks", []) if row.get("status") != "passed"]
             failures += [row for row in report.get("branchReview", {}).get("axes", []) if row.get("status") != "passed"]
             clean = not failures and not report.get("unmapped") and not review_policy.required_ids(report)
@@ -246,7 +251,7 @@ def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
                     "Исправление потеряло диагностику")
     if len(rounds) == 2:
         require(final.get("previousReport") == first["report"]["sha256"], "Второй раунд не связан с первым")
-        resolutions = _json(store.text(final["report"])).get("resolutions", [])
+        resolutions = _object(store.json(final["report"])).get("resolutions", [])
         require({row["id"] for row in resolutions} == review_policy.required_ids(first)
                 and all(row["status"] in ("resolved", "rejected") for row in resolutions),
                 "Второй критик не закрыл обязательные замечания")
@@ -275,7 +280,7 @@ def _historical_light(store, state, task, attempt):
             or submitted.get("report", {}).get("sha256") != accepted["report"]["sha256"]):
         return None
     card = _role_data(store, attempt, "worker")
-    report = _json(store.text(accepted["report"]))
+    report = _object(store.json(accepted["report"]))
     expected = {(task["id"], c) for c in card["checks"]}
     expected |= {(r["id"], c) for r in card["constraints"] for c in r["acceptance"]}
     artifacts, failures = evidence_rows(store, report, expected)
@@ -323,7 +328,7 @@ def _historical_one(store, state, tid):
     if test_intent.required(state, attempt) and accepted.get("testIntent") != attempt.get("testIntent"):
         return None
     if review_policy.adaptive(attempt):
-        report = _json(store.text(accepted["report"]))
+        report = _object(store.json(accepted["report"]))
         clean = (not report.get("unmapped") and not review_policy.required_ids(report)
                  and all(r.get("status") == "passed" for r in report.get("checks", []))
                  and all(r.get("result") == "aligned" for r in report.get("trace", [])))
@@ -366,7 +371,7 @@ def _historical_lean(store, state, task, attempt, accepted):
     if test_intent.required(state, attempt) and accepted.get("testIntent") != attempt.get("testIntent"):
         return None
     card = _role_data(store, attempt, role)
-    report = _json(store.text(accepted["report"]))
+    report = _object(store.json(accepted["report"]))
     if (not all(row.get("result") == "aligned" for row in report.get("trace", []))
             or {row.get("requirement") for row in report.get("trace", [])}
             != {r["id"] for r in _card_sources(card)}):
@@ -431,7 +436,7 @@ def direct_proof_current(store, state, tid):
             if not test_intent.valid(store, state, tid, allow_source_changes=repaired):
                 return False
             receipt = attempt.get("verifiedCompletion") if task_tiers.worker_only(attempt) else attempt.get("acceptance")
-            accepted = _json(store.text(receipt["report"]))
+            accepted = _object(store.json(receipt["report"]))
             if accepted.get("testSourceChanges", []) != test_intent.source_changes(store, state, tid):
                 return False
         return (attempt["contract"] == task_contract(state, tid)
@@ -441,12 +446,14 @@ def direct_proof_current(store, state, tid):
         return False
 
 
-def task_proof_valid(store, state, tid, allowed_task_ids=None):
-    """Accept a fresh proof or a fresh explicit descendant rechecking this task."""
+def proof_provenance(store, state, tid, allowed_task_ids=None):
+    """Return the actual valid confirmer, under the existing proof guards."""
     if direct_proof_current(store, state, tid):
-        return True
+        attempt = _latest(state, tid)
+        receipt = attempt.get("verifiedCompletion") if task_tiers.worker_only(attempt) else attempt["acceptance"]
+        return {"kind": "direct", "task": tid, "attempt": attempt["id"], "recordedAt": store.receipt_time(receipt)}
     if not historical_proof_valid(store, state, tid):
-        return False
+        return None
     allowed = set(allowed_task_ids) if allowed_task_ids is not None else {t["id"] for t in state["tasks"]}
     for candidate in state["tasks"]:
         descendant = candidate["id"]
@@ -467,10 +474,16 @@ def task_proof_valid(store, state, tid, allowed_task_ids=None):
             expected = {(tid, c) for c in ancestor["criteria"]}
             expected |= {(r["id"], c) for r in active(state) if r["kind"] == "constraint" for c in r["acceptance"]}
             if expected <= coverage:
-                return True
+                return {"kind": "descendant", "task": descendant, "attempt": descendant_attempt["id"],
+                        "recordedAt": store.receipt_time(accepted)}
         except (Invalid, KeyError, TypeError, ValueError, OSError):
             continue
-    return False
+    return None
+
+
+def task_proof_valid(store, state, tid, allowed_task_ids=None):
+    """Boolean compatibility API for the same provenance/acceptance predicate."""
+    return proof_provenance(store, state, tid, allowed_task_ids) is not None
 
 
 class TaskPipeline:

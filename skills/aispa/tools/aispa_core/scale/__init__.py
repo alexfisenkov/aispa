@@ -14,6 +14,7 @@ import time
 import uuid
 
 from ..store import Invalid, confined, digest
+from ..verified_reads import physical_read, resource_limit
 
 _SHA = re.compile(r'[a-f0-9]{64}\Z')
 _PRIVATE = re.compile(r'(?:^|[._-])(?:env|secrets?|credentials?|passwords?|tokens?|private|keys?)(?:$|[._-])', re.I)
@@ -47,20 +48,20 @@ class Budget:
     def check_memory(self, size, *, path='', progress=0):
         size += self.base_memory
         if size > self.memory_bytes:
-            raise Invalid(f'RESOURCE_LIMIT maxMemoryBytes: accountedBytes={size}, completedItems={progress}, path={path}; continuation: increase AISPA_MAX_MEMORY_BYTES and retry complete input')
+            raise resource_limit(f'RESOURCE_LIMIT maxMemoryBytes: accountedBytes={size}, completedItems={progress}, path={path}; continuation: increase AISPA_MAX_MEMORY_BYTES and retry complete input')
         self.check(0, path=path, progress=progress)
 
     def check_metadata(self, size, *, path='', progress=0):
         self.check(size, path=path, progress=progress)
         if size > self.manifest_bytes:
-            raise Invalid(f'RESOURCE_LIMIT manifestBytes: bytes={size}, completedBytes={progress}, path={path}; continuation: increase AISPA_MAX_MANIFEST_BYTES or use larger chunks and retry complete input')
+            raise resource_limit(f'RESOURCE_LIMIT manifestBytes: bytes={size}, completedBytes={progress}, path={path}; continuation: increase AISPA_MAX_MANIFEST_BYTES or use larger chunks and retry complete input')
 
     def check(self, size=0, *, path='', progress=0):
         field = ('maxInputBytes' if size > self.max_bytes else
                  'maxMemoryBytes' if size * 4 > self.memory_bytes else
                  'operationSeconds' if time.monotonic() > self.deadline else None)
         if field:
-            raise Invalid(f'RESOURCE_LIMIT {field}: bytes={size}, completedBytes={progress}, path={path}; '
+            raise resource_limit(f'RESOURCE_LIMIT {field}: bytes={size}, completedBytes={progress}, path={path}; '
                           'continuation: increase the named operation budget and retry the complete input; scope unchanged')
 
 
@@ -77,65 +78,40 @@ def check_value(value, state):
     return None
 
 
-def _read(path, budget, limit=None):
-    path = Path(path)
-    if path.is_symlink() or not path.is_file():
-        raise Invalid('AISpa scale: missing or symlink input: ' + str(path))
-    size = path.stat().st_size
-    if limit is None:
-        budget.check(size, path=str(path))
-        limit = budget.max_bytes
-    elif size > limit:
-        raise Invalid('RESOURCE_LIMIT chunkBytes: ' + str(path) + '; continuation: increase AISPA_CHUNK_BYTES and retry complete input')
-    budget.check_memory(size * 4, path=str(path))
-    allocation_limit = min(limit, (budget.memory_bytes - budget.base_memory) // 4)
-    data = bytearray()
-    with path.open('rb') as stream:
-        while True:
-            budget.check(0, path=str(path), progress=len(data))
-            # One sentinel byte detects post-stat growth without allocating the
-            # rest of a source that no longer fits the materialization budget.
-            part = stream.read(min(65536, allocation_limit - len(data) + 1))
-            if not part:
-                break
-            total = len(data) + len(part)
-            budget.check_memory(total * 4, path=str(path), progress=len(data))
-            if total > limit:
-                raise Invalid('RESOURCE_LIMIT maxInputBytes: ' + str(path) + '; continuation: increase operation budget and retry complete input')
-            data.extend(part)
-    return bytes(data)
+def _read(path, budget, limit=None, cache=None):
+    return cache.read(path, budget, limit) if cache is not None else physical_read(path, budget, limit)
 
 
-def _object(raw):
+def _object(raw, cache=None):
     try:
-        return json.loads(raw)
+        return cache.parse(raw) if cache is not None else json.loads(raw)
     except (ValueError, UnicodeError, RecursionError) as error:
         raise Invalid('AISpa scale: malformed manifest or chunk JSON') from error
 
 
-def is_manifest(raw):
+def is_manifest(raw, cache=None):
     # Only the reserved transport marker changes interpretation of ordinary data.
     if not raw.lstrip().startswith(b'{'):
         return False
     try:
-        value = json.loads(raw)
+        value = cache.parse(raw) if cache is not None else json.loads(raw)
     except (ValueError, UnicodeError, RecursionError):
         return False
     return isinstance(value, dict) and 'aispaManifest' in value
 
 
-def read_file(path, *, allow_manifest=True, budget=None, expected_sha256=None, verify_plain=True):
+def read_file(path, *, allow_manifest=True, budget=None, expected_sha256=None, verify_plain=True, cache=None):
     budget = budget or Budget()
-    raw = _read(path, budget)
-    if expected_sha256 is not None and (verify_plain or is_manifest(raw)) and hashlib.sha256(raw).hexdigest() != expected_sha256:
+    raw = _read(path, budget, cache=cache)
+    if expected_sha256 is not None and (verify_plain or is_manifest(raw, cache=cache)) and (cache.sha256(path, raw) if cache is not None else hashlib.sha256(raw).hexdigest()) != expected_sha256:
         raise Invalid('AISpa scale: immutable artifact SHA mismatch')
-    if not is_manifest(raw):
+    if not is_manifest(raw, cache=cache):
         budget.check(len(raw), path=str(path), progress=len(raw))
         return raw
     if not allow_manifest:
         raise Invalid('AISpa scale: manifest requires a new scalableInputs init; historical policy unchanged')
     budget.check_metadata(len(raw), path=str(path))
-    value = _object(raw)
+    value = _object(raw, cache=cache)
     fields = {'aispaManifest', 'schema', 'kind', 'basis', 'digest', 'totalBytes', 'chunks'}
     if (set(value) != fields or type(value['aispaManifest']) is not int or value['aispaManifest'] != 1
             or type(value['schema']) is not int or value['schema'] != 1
@@ -159,10 +135,10 @@ def read_file(path, *, allow_manifest=True, budget=None, expected_sha256=None, v
             raise Invalid('AISpa scale: private or hidden chunk path')
         seen.add(ref['file'])
         source = confined(Path(path).parent, ref['file'])
-        encoded = _read(source, budget, budget.chunk_bytes * 2 + 8192)
-        if hashlib.sha256(encoded).hexdigest() != ref['sha256']:
+        encoded = _read(source, budget, budget.chunk_bytes * 2 + 8192, cache=cache)
+        if (cache.sha256(source, encoded) if cache is not None else hashlib.sha256(encoded).hexdigest()) != ref['sha256']:
             raise Invalid('AISpa scale: chunk SHA mismatch')
-        chunk = _object(encoded)
+        chunk = _object(encoded, cache=cache)
         if (not isinstance(chunk, dict) or set(chunk) != {'schema', 'kind', 'basis', 'digest', 'index', 'total', 'content'}
                 or type(chunk['schema']) is not int or chunk['schema'] != 1
                 or chunk['kind'] != value['kind'] or chunk['basis'] != value['basis']
@@ -175,21 +151,21 @@ def read_file(path, *, allow_manifest=True, budget=None, expected_sha256=None, v
         except (ValueError, UnicodeError) as error:
             raise Invalid('AISpa scale: invalid chunk encoding') from error
         if len(part) != ref['bytes'] or len(part) > budget.chunk_bytes:
-            raise Invalid('RESOURCE_LIMIT chunkBytes or invalid chunk length; continuation: increase AISPA_CHUNK_BYTES and retry complete input')
+            raise resource_limit('RESOURCE_LIMIT chunkBytes or invalid chunk length; continuation: increase AISPA_CHUNK_BYTES and retry complete input')
         size += len(part)
         budget.check(size, path=str(path), progress=size)
         if size > value['totalBytes']:
             raise Invalid('AISpa scale: manifest byte overflow')
         chunks.append(part)
     decoded = b''.join(chunks)
-    if size != value['totalBytes'] or hashlib.sha256(decoded).hexdigest() != value['digest']:
+    if size != value['totalBytes'] or (cache.value_hash(decoded) if cache is not None else hashlib.sha256(decoded).hexdigest()) != value['digest']:
         raise Invalid('AISpa scale: missing payload or full digest mismatch')
     try:
         decoded.decode('utf-8')
     except UnicodeError as error:
         raise Invalid('AISpa scale: payload must be UTF-8') from error
     if value['kind'] == 'json':
-        _object(decoded)
+        _object(decoded, cache=cache)
     budget.check(size, path=str(path), progress=size)
     return decoded
 
@@ -203,7 +179,7 @@ def write_manifest(path, raw, *, kind, basis, chunk_bytes=None):
             or not isinstance(basis, str) or not _SHA.fullmatch(basis) or not isinstance(raw, bytes) or not raw):
         raise Invalid('AISpa scale: invalid producer input')
     if chunk_bytes > budget.chunk_bytes:
-        raise Invalid(f'RESOURCE_LIMIT chunkBytes: requestedChunkBytes={chunk_bytes}, '
+        raise resource_limit(f'RESOURCE_LIMIT chunkBytes: requestedChunkBytes={chunk_bytes}, '
                       f'limit={budget.chunk_bytes}, completedBytes=0, path={path}; '
                       'continuation: increase AISPA_CHUNK_BYTES or reduce --chunk-bytes '
                       'and retry complete input; scope unchanged')

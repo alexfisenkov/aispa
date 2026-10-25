@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import sys
+import time
 import unittest
 from urllib.request import urlopen
 from unittest.mock import patch
@@ -12,6 +13,90 @@ from aispa_core import dashboard_server, display_details
 from aispa_core.contracts import basis
 from aispa_core.display import project
 from tests import test_workflow as workflow_tests
+from tests import test_team as team_tests
+from aispa_core.team import direct_proof_current, task_proof_valid
+
+
+class DescendantProjectionTests(unittest.TestCase):
+    def setUp(self):
+        self.fx = team_tests.TeamTests("test_fresh_descendant_can_reconfirm_ancestor_only_within_allowed_set")
+        self.fx.setUp()
+        fx = self.fx
+        fx.host.task("T02").update(dependsOn=["T01"], zones=["a.txt", "b.txt"], wave=2)
+        fx.team.prepare()
+        fx.complete("T01")
+        fx.start("T02")
+        (fx.root / "a.txt").write_text("Intentional descendant integration", encoding="utf-8")
+        fx.verify("T02")
+        fx.reviews("T02")
+        self.assertTrue(fx.accept("T02"))
+
+    def tearDown(self):
+        self.fx.tearDown()
+
+    def test_valid_descendant_result_is_completed_in_task_requirement_and_wave(self):
+        fx = self.fx
+        before = copy.deepcopy(fx.state)
+        journal = (fx.store.run / "events.jsonl").read_bytes()
+        self.assertFalse(direct_proof_current(fx.store, fx.state, "T01"))
+        self.assertTrue(task_proof_valid(fx.store, fx.state, "T01"))
+        view = project(fx.store, fx.state)
+        task = next(row for row in view["tasks"] if row["id"] == "T01")
+        self.assertEqual(display_details.task_status(task), "completed")
+        self.assertEqual(view["waveDetails"][0]["status"], "completed")
+        self.assertEqual(view["waveDetails"][0]["completed"], 1)
+        self.assertEqual(view["requirements"][0]["progress"]["status"], "completed")
+        self.assertEqual(task["criteriaDetails"][0]["status"], "passed")
+        self.assertEqual(task["criteriaDetails"][0]["source"], "descendant_proof")
+        self.assertEqual(task["proofProvenance"]["kind"], "descendant")
+        self.assertEqual(task["proofProvenance"]["task"], "T02")
+        self.assertEqual(task["proofProvenance"]["attempt"], fx.attempt("T02")["id"])
+        self.assertEqual(fx.state, before)
+        self.assertEqual((fx.store.run / "events.jsonl").read_bytes(), journal)
+
+    def test_confirmed_result_keeps_historical_phase_basis_and_recorded_dates(self):
+        fx = self.fx
+        records = fx.attempt("T01")
+        historical = {"implementation": records["submitted"], "critic_1": records["rounds"][0],
+                      "critic_2": records["rounds"][1], "task_acceptance": records["acceptance"]}
+        events = fx.store.read_journal(include_events=True)["events"]
+
+        def receipt_at(record):
+            # These sealed phase records have no own timestamp. Their actual
+            # recorded date is the first verified event containing this exact
+            # receipt, rather than today's projection time or a fabricated at.
+            for event in events:
+                for attempt in event["state"].get("taskHistory", {}).get("T01", []):
+                    saved = [attempt.get("submitted"), attempt.get("acceptance"), *attempt.get("rounds", [])]
+                    if record in saved:
+                        return event["at"]
+            self.fail("Historical phase has no matching verified journal event")
+
+        task = project(fx.store, fx.state)["tasks"][0]
+        self.assertTrue(task["proofCurrent"])
+        steps = {row["id"]: row for row in task["phaseSteps"]}
+        for phase, record in historical.items():
+            with self.subTest(phase=phase):
+                self.assertEqual(steps[phase].get("basis"), record["basis"])
+                self.assertEqual(steps[phase].get("recordedAt"), receipt_at(record))
+                self.assertFalse(steps[phase].get("basisCurrent"))
+                self.assertTrue(steps[phase].get("historical"))
+
+    def test_later_code_or_corrupt_descendant_revokes_task_and_wave_together(self):
+        fx = self.fx
+        report = fx.attempt("T02")["acceptance"]["report"]
+        path = fx.store.run / report["file"]
+        original = path.read_bytes()
+        path.write_bytes(b"Corrupted descendant acceptance")
+        view = project(fx.store, fx.state)
+        self.assertFalse(view["tasks"][0]["proofCurrent"])
+        self.assertEqual(display_details.task_status(view["tasks"][0]), "stale")
+        self.assertEqual(view["waveDetails"][0]["status"], "stale")
+        path.write_bytes(original)
+        (fx.root / "a.txt").write_text("Later unverified change", encoding="utf-8")
+        view = project(fx.store, fx.state)
+        self.assertFalse(view["tasks"][0]["proofCurrent"])
+        self.assertEqual(view["waveDetails"][0]["status"], "stale")
 
 
 class DetailsTests(unittest.TestCase):
@@ -204,8 +289,22 @@ class DetailsTests(unittest.TestCase):
         # detached HTTP service, including the projected null clock from T04.
         service = dashboard_server.start(fx.store)
         try:
-            with urlopen(service["url"].replace("dashboard.html", "status.json"), timeout=10) as response:
-                view = json.load(response)
+            status_url = service["url"].replace("dashboard.html", "status.json")
+            requested_url, deadline = status_url, time.monotonic() + 10
+            while time.monotonic() < deadline:
+                with urlopen(requested_url, timeout=max(.1, deadline - time.monotonic())) as response:
+                    view = json.load(response)
+                    if response.code == 200:
+                        self.assertEqual(view["calculation"]["state"], "ready")
+                        break
+                    self.assertEqual(response.code, 202)
+                    self.assertEqual(view["calculation"]["state"], "calculating")
+                    calculation_id = view["calculation"]["id"]
+                    self.assertRegex(calculation_id, r"^[0-9a-f]{32}$")
+                    requested_url = status_url + "?calculation=" + calculation_id
+                time.sleep(.01)
+            else:
+                self.fail("Addressed dashboard calculation did not become ready within 10 seconds")
             self.assertEqual(view["estimate"]["reason"], "estimate")
             self.assertEqual(view["estimate"]["sampleCount"], 2)
             self.assertIsNone(view["tasks"][3]["elapsedSeconds"])

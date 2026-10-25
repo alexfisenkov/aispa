@@ -82,7 +82,7 @@ def _na_guard(store, state, task, attempt, report):
     from pathlib import PurePosixPath
     ref = attempt.get("testBaseline")
     require(ref and artifact_valid(store, ref), "Test intent: нет исходного снимка запуска задачи")
-    base = json.loads(store.text(ref))
+    base = store.json(ref)
     require(base.get("run") == state["run"] and base.get("task") == task["id"]
             and base.get("attempt") == attempt["id"], "Test intent: чужой исходный снимок")
     old = dict(base["records"])
@@ -144,7 +144,7 @@ def _saved(store, ref):
             and isinstance(ref.get("file"), str) and ref["file"].startswith("test-intent/"),
             "Test intent: изменён сохранённый контракт")
     try:
-        value = json.loads(store.text(ref))
+        value = store.json(ref)
     except (ValueError, OSError, TypeError) as exc:
         raise Invalid("Test intent: повреждён JSON контракта") from exc
     require(isinstance(value, dict) and value.get("schema") == SCHEMA,
@@ -393,7 +393,7 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
     scale.check_value(contracts, state)
     baseline_ref = attempt.get("testBaseline")
     require(baseline_ref and artifact_valid(store, baseline_ref), "Test intent: исходный снимок изменён")
-    baseline = json.loads(store.text(baseline_ref))
+    baseline = store.json(baseline_ref)
     require(baseline.get("run") == state["run"] and baseline.get("task") == task_id
             and baseline.get("attempt") == attempt["id"], "Test intent: чужой исходный снимок")
     first_submit = _first_submit(journal["events"], task_id, attempt["id"])

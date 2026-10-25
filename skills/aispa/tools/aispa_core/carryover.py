@@ -15,6 +15,7 @@ from . import execution_history
 from .store import Invalid, digest, timestamp
 from .portable import is_link, relative_name
 from .team import historical_proof_valid, task_proof_valid
+from .verified_reads import current_scope
 
 
 SCHEMA = 1
@@ -65,8 +66,11 @@ def _read(store, artifact, limit=MAX_HANDOFF_BYTES):
             "Carryover: некорректный источник")
     path = _safe(_run(store), artifact["file"])
     require(path.is_file() and path.stat().st_size <= limit, "Carryover: источник отсутствует или слишком велик")
-    raw = path.read_bytes()
-    require(hashlib.sha256(raw).hexdigest() == artifact.get("sha256"),
+    scope = current_scope()
+    raw = (scope.artifact(path, artifact.get("sha256"), literal=True, maximum=limit)
+           if scope is not None else path.read_bytes())
+    _safe(_run(store), artifact["file"])
+    require((scope.value_hash(raw) if scope is not None else hashlib.sha256(raw).hexdigest()) == artifact.get("sha256"),
             "Carryover: изменён неизменный источник: " + artifact["file"])
     return raw
 
@@ -82,7 +86,10 @@ def _text(raw):
 
 def _load(store, artifact):
     try:
-        value = json.loads(_text(_read(store, artifact)))
+        raw = _read(store, artifact)
+        text = _text(raw)
+        scope = current_scope()
+        value = scope.json(raw) if scope is not None else json.loads(text)
     except (ValueError, UnicodeError) as exc:
         raise Invalid("Carryover: повреждён JSON источника") from exc
     require(isinstance(value, dict), "Carryover: ожидается объект")

@@ -22,7 +22,7 @@ def map_context(store, state):
     for key in ("briefExtraction", "briefReview"):
         ref = state.get(key)
         require(isinstance(ref, dict) and artifact_valid(store, ref), "Сначала два независимых исходных разбора")
-        result[key] = json.loads(store.text(ref))["report"]
+        result[key] = store.json(ref)["report"]
     return result
 
 

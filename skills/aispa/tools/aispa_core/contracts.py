@@ -112,13 +112,13 @@ def basis(store, state, kind, task_id=None):
 def artifact_valid(store, artifact):
     try:
         p = confined(store.run, artifact["file"])
-        from . import scale
-        if not p.is_file() or file_hash(p) != artifact["sha256"]:
+        if not p.is_file():
             return False
         # The outer SHA binds ordered chunk identities; verify their bytes too.
         if p.suffix in (".json", ".md"):
-            scale.read_file(p, expected_sha256=artifact["sha256"])
-        return True
+            store.artifact_bytes(artifact)
+            return True
+        return store.artifact_hash_valid(artifact)
     except (Invalid, KeyError, OSError):
         return False
 

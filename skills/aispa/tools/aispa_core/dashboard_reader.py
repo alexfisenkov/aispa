@@ -1,25 +1,47 @@
 """Explicit compatible dashboard reader. It never upgrades a run or writes proofs."""
 from . import VERSION
-from .store import Invalid, Journal, canonical_zone
+import json
+
+from .store import Invalid, Journal, canonical_zone, confined, digest
+from .verified_reads import ContextChanged, VerifiedReads
 
 
 SUPPORTED_VERSIONS = frozenset({"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", "0.3.5", "0.3.6", VERSION})
 
 
 class SnapshotJournal(Journal):
-    """Strict reader with code digests reused only within one HTTP request.
-
-    Each status GET constructs a new instance. Journal and evidence reads retain
-    their original byte checks; no result is shared between HTTP requests.
-    """
+    """Strict calculation-scoped reader; a new load discards all cached bytes."""
 
     def __init__(self, root):
         super().__init__(root)
         self._code_snapshots = {}
+        self._reads = VerifiedReads()
 
     def load(self, *, handoff_only=False):
         self._code_snapshots.clear()
+        self._reads = VerifiedReads()
         return super().load(handoff_only=handoff_only)
+
+    def _verify_sources(self, state):
+        for ref in state["briefs"] + ([state["spec"]] if state["spec"] else []):
+            self.artifact_bytes(ref)
+
+    def finish_snapshot(self):
+        """Recheck the defined read generation; no stat/TTL integrity shortcuts."""
+        pointer = json.loads(confined(self.home, "active.json").read_bytes())
+        if pointer.get("run") != self.run.name:
+            raise ContextChanged("Dashboard active run changed")
+        self._reads.revalidate()
+        for (zones, common), expected in self._code_snapshots.items():
+            if Journal.code(self, zones, include_common=common) != expected:
+                raise Invalid("Dashboard code generation changed")
+        journal = self.read_journal()
+        pointer = json.loads(confined(self.home, "active.json").read_bytes())
+        if pointer.get("run") != self.run.name:
+            raise ContextChanged("Dashboard active run changed")
+        return {"journalSha256": journal["sha256"], "journalEvents": journal["count"],
+                "candidateSha256": digest([(zones, common, sha)
+                                           for (zones, common), sha in self._code_snapshots.items()])}
 
     def code(self, zones=None, include_common=False):
         selected = None if zones is None else tuple(sorted({canonical_zone(zone) for zone in zones}))

@@ -1,16 +1,20 @@
 import hashlib
+from contextlib import redirect_stderr, redirect_stdout
+import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 CLI = Path(__file__).resolve().parents[1] / "skills/aispa/tools/aispa.py"
 sys.path.insert(0, str(CLI.parent))
 
 from aispa_core.cli_output import compact
-from aispa_core.store import Journal
+from aispa_core.store import Invalid, Journal
 
 
 class CliOutputTests(unittest.TestCase):
@@ -55,6 +59,94 @@ class CliOutputTests(unittest.TestCase):
         self.assertEqual(len(raw), receipt["bytes"])
         self.assertEqual(path, self.run / receipt["file"])
         return json.loads(raw)
+
+    def saved_mutation_with_broken_view(self, compact_mode):
+        self.init()
+        spec = importlib.util.spec_from_file_location("aispa_saved_receipt_fixture", self.cli)
+        candidate_cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(candidate_cli)
+        reader = Journal(self.root)
+        reader.load()
+        before = reader.read_journal()["count"]
+        args = candidate_cli.parser().parse_args([
+            "--root", str(self.root), *(["--compact"] if compact_mode else []),
+            "participant", "--role", "brief-analyst", "--runtime", "codex",
+            "--native-id", "actual-saved-fixture", "--session", "fixture-session"])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr), patch.object(
+                candidate_cli, "publish", side_effect=Invalid("Private view failure /local/private/path")):
+            try:
+                code = candidate_cli.execute(args)
+            except (Invalid, OSError, ValueError):
+                code = 2
+        state = reader.load()
+        journal = reader.read_journal()
+        self.assertEqual(journal["count"], before + 1, "The actual mutation must be saved exactly once")
+        self.assertEqual(len(state["participants"]), 1)
+        self.assertEqual(code, 0, "A view failure hid the successfully saved mutation")
+        output = json.loads(stdout.getvalue())
+        self.assertTrue(output["ok"])
+        self.assertTrue(output["committed"])
+        self.assertTrue(output["doNotRepeat"])
+        self.assertEqual(output["receipt"]["actor"], next(iter(state["participants"])))
+        self.assertEqual(output["viewError"], {"code": "projection_unavailable"})
+        self.assertEqual(output["committedEvent"], {
+            key: journal["last"][key] for key in ("sequence", "hash", "event")})
+        self.assertNotIn("gates", output, "No projection means current gates have not been checked")
+        self.assertNotIn("/local/private", stdout.getvalue() + stderr.getvalue())
+        if compact_mode:
+            full = self.full_response(output)
+            self.assertEqual(full["receipt"], output["receipt"])
+            self.assertEqual(full["committedEvent"], output["committedEvent"])
+        self.assertEqual(reader.read_journal()["count"], before + 1)
+
+    def test_saved_mutation_receipt_survives_projection_failure(self):
+        self.saved_mutation_with_broken_view(False)
+
+    def test_compact_saved_mutation_receipt_survives_projection_failure(self):
+        self.saved_mutation_with_broken_view(True)
+
+    def saved_init_with_broken_view(self, compact_mode):
+        spec = importlib.util.spec_from_file_location("aispa_saved_init_fixture", self.cli)
+        candidate_cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(candidate_cli)
+        args = candidate_cli.parser().parse_args([
+            "--root", str(self.root), *(["--compact"] if compact_mode else []), "init",
+            "--slug", "saved-init", "--title", "Saved initial run",
+            "--mode", "auto", "--runtime", "codex", "--check", "balanced"])
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr), patch.object(
+                candidate_cli, "publish", side_effect=Invalid("Private initial view failure /local/private/path")):
+            try:
+                code = candidate_cli.execute(args)
+            except (Invalid, OSError, ValueError):
+                code = 2
+        store = Journal(self.root)
+        state = store.load()
+        journal = store.read_journal()
+        self.run = store.run
+        self.assertGreaterEqual(journal["count"], 3, "Initial state/context/runtime must have actually been saved")
+        self.assertEqual(code, 0, "An initialized run lost its saved receipt after projection failure")
+        output = json.loads(stdout.getvalue())
+        self.assertTrue(output["ok"])
+        self.assertTrue(output["committed"])
+        self.assertTrue(output["doNotRepeat"])
+        self.assertEqual(output["receipt"], {"run": state["run"]})
+        self.assertEqual(output["committedEvent"], {key: journal["last"][key] for key in ("sequence", "hash", "event")})
+        self.assertEqual(output["viewError"], {"code": "projection_unavailable"})
+        self.assertNotIn("gates", output)
+        self.assertNotIn("/local/private", stdout.getvalue() + stderr.getvalue())
+        if compact_mode:
+            full = self.full_response(output)
+            self.assertEqual(full["receipt"], output["receipt"])
+            self.assertEqual(full["committedEvent"], output["committedEvent"])
+        self.assertEqual(store.read_journal()["count"], journal["count"])
+
+    def test_init_saved_receipt_survives_projection_failure(self):
+        self.saved_init_with_broken_view(False)
+
+    def test_compact_init_saved_receipt_survives_projection_failure(self):
+        self.saved_init_with_broken_view(True)
 
     def test_default_init_status_and_mutation_contracts_stay_full(self):
         initial = self.init()

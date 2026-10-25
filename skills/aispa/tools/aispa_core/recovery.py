@@ -124,7 +124,7 @@ def _verification_valid(store, state, core, journal):
           and artifact_valid(store, receipt.get("artifact", {})),
           "нужна свежая успешная проверка без усечения и изменения кода")
     try:
-        saved = json.loads(store.text(receipt["artifact"]))
+        saved = store.json(receipt["artifact"])
     except (OSError, ValueError, TypeError) as exc:
         raise Invalid("AISpa recovery: повреждена квитанция проверки") from exc
     _need(saved == {key: value for key, value in receipt.items() if key != "artifact"},

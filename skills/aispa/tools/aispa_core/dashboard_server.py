@@ -6,6 +6,7 @@ from http.client import HTTPConnection, HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import socket
@@ -21,6 +22,7 @@ from urllib.parse import urlsplit
 from . import VERSION
 from .display import project
 from .dashboard_reader import DisplayJournal, SnapshotJournal
+from .dashboard_snapshot import SnapshotCoordinator, calculate
 from .portable import is_link
 from .store import Invalid, Journal, atomic_json, digest, file_hash
 
@@ -410,6 +412,8 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
     instance = instance or secrets.token_hex(16)
     token = token or secrets.token_urlsafe(48)
     root_hash = _root_hash(store)
+    snapshots = SnapshotCoordinator(lambda: calculate(
+        store.root, reader_class, loaded, pinned_digest, lambda: _asset_bytes(store), project))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, _format, *_args):
@@ -429,7 +433,10 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             if data:
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # A disconnected client does not own or cancel the job.
 
         def _status_error(self, code):
             # Fixed codes only: exceptions may contain local paths or source text.
@@ -441,38 +448,15 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
                 self._send(421)
                 return
             route = urlsplit(self.path)
-            if route.query or route.fragment:
+            generation = re.fullmatch(r"calculation=([0-9a-f]{32})", route.query) if route.query else None
+            if route.fragment or route.query and not (route.path == "/status.json" and generation):
                 self._send(404)
             elif route.path == "/dashboard.html":
                 self._send(200, asset, "text/html; charset=utf-8")
             elif route.path == "/status.json":
-                for attempt in range(3):
-                    try:
-                        # A writer may append after load but before projection.
-                        # Retry only that exact race, with no cross-attempt cache.
-                        reader = reader_class(store.root)
-                        state = reader.load()
-                        if (state["run"] != loaded["run"] or state["version"] != loaded["version"]
-                                or state.get("runtimeDigest") != pinned_digest
-                                or hashlib.sha256(_asset_bytes(store)).hexdigest() != loaded["assetSha256"]):
-                            self._status_error("dashboard_context_changed")
-                            return
-                        view = project(reader, state)
-                        # Validators can report a false gate on a concurrent
-                        # append. Do not publish a mixed snapshot in that case.
-                        reader.read_journal()
-                        view.update(dashboardVersion=loaded["dashboardVersion"], viewerMode=loaded["readerMode"])
-                        payload = json.dumps(view, ensure_ascii=False).encode("utf-8")
-                        break
-                    except Invalid as error:
-                        if str(error) == "Журнал изменился после проверки" and attempt < 2:
-                            continue
-                        self._status_error("status_unavailable")
-                        return
-                    except (OSError, ValueError, KeyError, TypeError):
-                        self._status_error("status_unavailable")
-                        return
-                self._send(200, payload, "application/json; charset=utf-8")
+                code, payload = snapshots.get(generation.group(1) if generation else None)
+                self._send(code, json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                           "application/json; charset=utf-8")
             elif route.path == "/_control/health" and self._authorized():
                 payload = json.dumps({"marker": MARKER, "rootHash": root_hash,
                                       "instance": instance, "pid": os.getpid(), **loaded}).encode("utf-8")

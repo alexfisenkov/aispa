@@ -1,4 +1,5 @@
 import json
+import io
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
@@ -18,6 +19,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools
 from aispa_core import dashboard_server as dashboard
 from aispa_core.dashboard_reader import DisplayJournal, SUPPORTED_VERSIONS
 from aispa_core.store import Invalid, Journal, atomic_json
+
+
+@contextmanager
+def ready_status(url, *, timeout=10):
+    """Observe the same generation until ready; never create work by polling."""
+    requested, generation, deadline = url, None, time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        stream = urlopen(requested, timeout=max(.1, deadline - time.monotonic()))
+        if stream.code == 200:
+            with stream:
+                raw = stream.read()
+            assert json.loads(raw)["calculation"]["state"] == "ready"
+            with io.BytesIO(raw) as body:
+                yield body
+            return
+        with stream:
+            assert stream.code == 202
+            pending = json.load(stream)["calculation"]
+        assert pending["state"] == "calculating"
+        identifier = pending["id"]
+        assert isinstance(identifier, str) and len(identifier) == 32 and all(c in "0123456789abcdef" for c in identifier)
+        assert generation is None or generation == identifier
+        generation = identifier
+        requested = url + "?calculation=" + generation
+        time.sleep(.01)
+    raise AssertionError("Addressed dashboard generation did not become ready within the deadline")
 
 
 class DashboardServerTests(unittest.TestCase):
@@ -67,7 +94,7 @@ class DashboardServerTests(unittest.TestCase):
                 writer.append(current, "agent-decision-recorded")
             return original(reader, state)
 
-        with self.inline_server(projection) as url, urlopen(url, timeout=3) as response:
+        with self.inline_server(projection) as url, ready_status(url) as response:
             view = json.load(response)
         self.assertEqual(len(readers), 2)
         self.assertIsNot(readers[0], readers[1])
@@ -88,7 +115,7 @@ class DashboardServerTests(unittest.TestCase):
                 writer.append(current, "agent-decision-recorded")
             return view
 
-        with self.inline_server(projection) as url, urlopen(url, timeout=3) as response:
+        with self.inline_server(projection) as url, ready_status(url) as response:
             view = json.load(response)
         self.assertEqual(len(calls), 2)
         self.assertEqual(view["decisions"][-1]["text"], "last-moment event")
@@ -104,9 +131,12 @@ class DashboardServerTests(unittest.TestCase):
                     raise Invalid(message)
 
                 with self.inline_server(projection) as url, self.assertRaises(HTTPError) as error:
-                    urlopen(url, timeout=3)
+                    with ready_status(url):
+                        pass
                 self.assertEqual(error.exception.code, 409)
-                self.assertEqual(json.load(error.exception), {"error": {"code": "status_unavailable"}})
+                failure = json.load(error.exception)
+                self.assertEqual(failure["error"], {"code": "snapshot_source_error"})
+                self.assertEqual(failure["calculation"]["state"], "source_error")
                 error.exception.close()
                 self.assertEqual(len(calls), expected_calls)
                 self.assertEqual(len({id(reader) for reader in calls}), expected_calls)
@@ -121,7 +151,7 @@ class DashboardServerTests(unittest.TestCase):
         with urlopen(first["url"], timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"AISpa", response.read())
-        with urlopen(first["url"].replace("dashboard.html", "status.json"), timeout=3) as response:
+        with ready_status(first["url"].replace("dashboard.html", "status.json")) as response:
             self.assertEqual(json.load(response)["status"], "running")
         metadata = self.store.home / "service/dashboard.json"
         self.assertNotIn("token", json.dumps(first))
@@ -152,15 +182,18 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIsNone(stale["url"])
         self.assertEqual(stale["context"]["run"], self.state["run"])
         with self.assertRaises(HTTPError) as error:
-            urlopen(first["url"].replace("dashboard.html", "status.json"), timeout=3)
-        self.assertEqual(json.load(error.exception), {"error": {"code": "dashboard_context_changed"}})
+            with ready_status(first["url"].replace("dashboard.html", "status.json")):
+                pass
+        failure = json.load(error.exception)
+        self.assertEqual(failure["error"], {"code": "dashboard_context_changed"})
+        self.assertEqual(failure["calculation"]["state"], "source_error")
         error.exception.close()
         second = dashboard.start(self.store)
         self.assertNotEqual(second["instance"], first["instance"])
         self.assertEqual(second["port"], first["port"])
         self.assertIsNotNone(old_child.poll())
         self.assertEqual(second["context"]["run"], next_state["run"])
-        with urlopen(second["url"].replace("dashboard.html", "status.json"), timeout=3) as response:
+        with ready_status(second["url"].replace("dashboard.html", "status.json")) as response:
             self.assertEqual(json.load(response)["run"], next_state["run"])
         self.assertEqual(previous_journal.read_bytes(), before)
 
@@ -206,7 +239,7 @@ class DashboardServerTests(unittest.TestCase):
                 self.assertNotEqual(second["instance"], first["instance"])
                 self.assertEqual(second["context"]["version"], next_version)
                 self.assertNotEqual(second["context"]["runtimeDigest"], first["context"]["runtimeDigest"])
-                with urlopen(second["url"].replace("dashboard.html", "status.json"), timeout=3) as response:
+                with ready_status(second["url"].replace("dashboard.html", "status.json")) as response:
                     self.assertEqual(json.load(response)["run"], next_state["run"])
                 self.assertEqual(previous_journal.read_bytes(), before)
             finally:
@@ -278,9 +311,9 @@ class DashboardServerTests(unittest.TestCase):
     def test_status_error_is_safe_json_and_unchanged_journal_is_not_new_work(self):
         info = dashboard.start(self.store)
         url = info["url"].replace("dashboard.html", "status.json")
-        with urlopen(url, timeout=3) as response:
+        with ready_status(url) as response:
             first = json.load(response)
-        with urlopen(url, timeout=3) as response:
+        with ready_status(url) as response:
             second = json.load(response)
         self.assertEqual(first["updatedAt"], second["updatedAt"])
         self.assertEqual(first["events"], second["events"])
@@ -290,9 +323,15 @@ class DashboardServerTests(unittest.TestCase):
         try:
             journal.write_bytes(b"private-error-fixture-not-public\n")
             with self.assertRaises(HTTPError) as error:
-                urlopen(url, timeout=3)
+                with ready_status(url):
+                    pass
             self.assertEqual(error.exception.code, 409)
-            self.assertEqual(json.load(error.exception), {"error": {"code": "status_unavailable"}})
+            failure = json.load(error.exception)
+            self.assertEqual(failure["error"], {"code": "snapshot_source_error"})
+            self.assertEqual(failure["calculation"]["state"], "source_error")
+            self.assertEqual(failure["lastSnapshot"]["freshness"], "historical")
+            self.assertEqual(failure["lastSnapshot"]["capturedAt"], second["snapshot"]["capturedAt"])
+            self.assertNotIn("private-error-fixture", json.dumps(failure))
             error.exception.close()
         finally:
             journal.write_bytes(before)
@@ -326,7 +365,7 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual(asset.read_bytes(), dashboard.ASSET.read_bytes())
         backups = list((self.store.home / "service/asset-backups").glob("*.html"))
         self.assertEqual([path.read_bytes() for path in backups], [old_asset])
-        with urlopen(refreshed["url"].replace("dashboard.html", "status.json"), timeout=3) as response:
+        with ready_status(refreshed["url"].replace("dashboard.html", "status.json")) as response:
             view = json.load(response)
         self.assertEqual(view["version"], "0.3.0")
         self.assertEqual(view["dashboardVersion"], dashboard.VERSION)

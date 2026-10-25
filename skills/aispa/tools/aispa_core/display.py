@@ -5,7 +5,7 @@ from .contracts import basis, gate_valid, task_basis, task_contract, verified
 from .store import Invalid, atomic_json, timestamp
 from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
-from .team import _record_valid, _actor_valid, _role_data, task_proof_valid
+from .team import _record_valid, _actor_valid, _role_data, task_proof_valid, proof_provenance
 from . import display_details, display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers, work_progress
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
@@ -101,6 +101,14 @@ def _assignment(store, state, task, phase_stale):
         return None
 
 
+def _phase_receipt(store, task, record, current_basis):
+    if not record:
+        return {}
+    return {"basis": record.get("basis"), "recordedAt": store.receipt_time(record),
+            "basisCurrent": record.get("basis") == current_basis,
+            "historical": bool(task["status"] == "completed" and record.get("basis") != current_basis)}
+
+
 def _phase_steps(store, state, task, proof_current):
     """Show receipts from this attempt; the order alone never implies PASS."""
     attempt = (state.get("taskHistory", {}).get(task["id"]) or [None])[-1]
@@ -110,10 +118,14 @@ def _phase_steps(store, state, task, proof_current):
         status = ("done" if proof_current else "stale") if completed else ("current" if task["status"] == "running" else "pending")
         if task["status"] == "blocked":
             status = "blocked"
-        return [{"id": "implementation", "label": PHASES["implementation"], "status": status},
-                {"id": "verified_completion", "label": PHASES["verified_completion"], "status": status if completed else "pending"},
+        current_basis = task_basis(store, state, task["id"]) if completed or attempt.get("submitted") else None
+        return [{"id": "implementation", "label": PHASES["implementation"], "status": status,
+                 **_phase_receipt(store, task, attempt.get("submitted"), current_basis)},
+                {"id": "verified_completion", "label": PHASES["verified_completion"], "status": status if completed else "pending",
+                 **_phase_receipt(store, task, completed, current_basis)},
                 *[{"id": name, "label": PHASES[name], "status": "skipped"} for name in TASK_PHASES if name != "implementation"]]
     result = {name: "pending" for name in TASK_PHASES}
+    receipts = {}
     if task["status"] != "pending" and attempt:
         submitted = attempt.get("submitted")
         rounds = attempt.get("rounds", [])
@@ -141,7 +153,10 @@ def _phase_steps(store, state, task, proof_current):
         repairing = (task["status"] == "running" and phase == "repair" and first
                      and not first.get("passed") and not repair)
         stale_candidate = any(record and not _record_intact(store, record) for record in receipts.values())
-        stale_candidate = stale_candidate or (basis_changed and not repairing)
+        # Intact historical phase bases do not revoke a valid current result
+        # established by the exact domain descendant proof.
+        historical_result = task["status"] == "completed" and proof_current
+        stale_candidate = stale_candidate or (basis_changed and not repairing and not historical_result)
         if stale_candidate:
             for name in TASK_PHASES:
                 if result[name] in ("done", "skipped"):
@@ -159,13 +174,17 @@ def _phase_steps(store, state, task, proof_current):
             result[phase] = "blocked"
     elif task["status"] == "blocked" and phase in result:
         result[phase] = "blocked"
-    return [{"id": name, "label": PHASES[name], "status": result[name]} for name in TASK_PHASES]
+    current_basis = task_basis(store, state, task["id"]) if receipts else None
+    return [{"id": name, "label": PHASES[name], "status": result[name],
+             **_phase_receipt(store, task, receipts.get(name), current_basis)} for name in TASK_PHASES]
 
 
 def project(store, state):
     observed = timestamp()
     gates = {name: gate_valid(store, state, name) for name in ("coverage", "plan", "acceptance")}
-    current = {t["id"]: task_proof_valid(store, state, t["id"]) for t in state["tasks"] if t["status"] == "completed"}
+    provenance = {t["id"]: proof_provenance(store, state, t["id"])
+                  for t in state["tasks"] if t["status"] == "completed"}
+    current = {tid: confirmation is not None for tid, confirmation in provenance.items()}
     if not all(current.values()):
         gates["acceptance"] = False
     status = state["status"]
@@ -221,6 +240,7 @@ def project(store, state):
                           phaseSteps=steps, phaseStale=phase_stale,
                           assignment=_assignment(store, state, task, phase_stale),
                           proofCurrent=current.get(task["id"], False),
+                          proofProvenance=provenance.get(task["id"]),
                           maximumCriticRounds=0 if light else 2,
                           reviewPolicy=review_policy.mode((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]),
                           criticRounds=len((state.get("taskHistory", {}).get(task["id"]) or [{}])[-1].get("rounds", [])),

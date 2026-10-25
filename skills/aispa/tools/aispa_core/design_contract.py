@@ -185,7 +185,7 @@ def _saved(store, state, key, history, group):
           and state[history] and state[history][-1] == ref, "нет актуальной истории: " + key)
     _need(isinstance(ref.get("file"), str) and ref["file"].startswith(group + "/")
           and artifact_valid(store, ref), "отчёт изменён: " + key)
-    payload = json.loads(store.text(ref))
+    payload = store.json(ref)
     _need(isinstance(payload, dict) and payload.get("schema") == SCHEMA
           and payload.get("run") == state["run"] and isinstance(payload.get("report"), dict),
           "чужая или повреждённая схема: " + key)
@@ -294,7 +294,7 @@ def record_interfaces(store, state, report):
 
 def reference_snapshots(store, state):
     report = _saved(store, state, "interfaceContract", "interfaceContractHistory", "interface-contracts")
-    payload = json.loads(store.text(state["interfaceContract"]))
+    payload = store.json(state["interfaceContract"])
     rows = payload.get("referenceSnapshots", [])
     expected = {(ref["file"], ref["sha256"]) for item in report["interfaces"] for ref in item["references"]}
     _need(isinstance(rows, list) and len(rows) == len(expected), "снимки материалов интерфейса неполны")

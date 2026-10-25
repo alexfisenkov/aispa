@@ -63,7 +63,7 @@ def _validate_saved(store, rows):
         require(isinstance(row, dict) and isinstance(row.get("record"), dict)
                 and artifact_valid(store, row["record"]),
                 "Повреждён источник метрики")
-        require(json.loads(store.text(row["record"])) == {k: v for k, v in row.items() if k != "record"},
+        require(store.json(row["record"]) == {k: v for k, v in row.items() if k != "record"},
                 "Метрика отличается от источника")
         key = (row.get("actor"), row.get("callId"))
         require(key not in seen, "Повторный вызов в журнале usage")
@@ -162,7 +162,7 @@ def summary(store, state):
         require(isinstance(item, dict) and isinstance(item.get("record"), dict)
                 and artifact_valid(store, item["record"]),
                 "Повреждена контрольная точка usage")
-        require(json.loads(store.text(item["record"])) == {k: v for k, v in item.items() if k != "record"},
+        require(store.json(item["record"]) == {k: v for k, v in item.items() if k != "record"},
                 "Контрольная точка usage отличается от источника")
     latest_sources = {}
     for item in history:

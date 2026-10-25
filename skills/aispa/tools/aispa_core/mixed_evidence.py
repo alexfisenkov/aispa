@@ -51,10 +51,19 @@ def _text(value):
 
 
 def _observation(store, name, contract, intent_ref, basis, kind, criterion):
+    from .verified_reads import current_scope
     path = _evidence_file(store, name)
     require(path.stat().st_size <= MAX_OBSERVATION_BYTES, 'Mixed evidence: слишком большой JSON')
+    scope = current_scope()
     try:
-        body = json.loads(path.read_text(encoding='utf-8'))
+        if scope is not None:
+            raw = scope.artifact(path, None, literal=True, maximum=MAX_OBSERVATION_BYTES)
+            body = scope.json(raw)
+            _evidence_file(store, name)
+        else:
+            raw = path.read_bytes()
+            require(len(raw) <= MAX_OBSERVATION_BYTES, 'Mixed evidence: слишком большой JSON')
+            body = json.loads(raw.decode('utf-8'))
     except (ValueError, UnicodeError) as exc:
         raise Invalid('Mixed evidence: нужен JSON наблюдения') from exc
     require(isinstance(body, dict) and set(body) == {'schema', 'run', 'task', 'attempt', 'candidate',
@@ -83,14 +92,14 @@ def _observation(store, name, contract, intent_ref, basis, kind, criterion):
     attachments = body['attachments']
     require(isinstance(attachments, list) and len(attachments) <= MAX_ATTACHMENTS,
             'Mixed evidence: неверный список приложений')
-    refs, seen = [{'file': name, 'sha256': file_hash(path)}], {name}
+    refs, seen = [{'file': name, 'sha256': scope.sha256(path, raw) if scope is not None else file_hash(path)}], {name}
     for ref in attachments:
         require(isinstance(ref, dict) and set(ref) == {'file', 'sha256'}
                 and isinstance(ref['sha256'], str) and test_intent.SHA.fullmatch(ref['sha256'])
                 and isinstance(ref['file'], str) and ref['file'] not in seen,
                 'Mixed evidence: неверное или повторное приложение')
         attachment = _evidence_file(store, ref['file'])
-        require(file_hash(attachment) == ref['sha256'], 'Mixed evidence: приложение изменено')
+        require(store.artifact_hash_valid(ref), 'Mixed evidence: приложение изменено')
         refs.append(copy.deepcopy(ref))
         seen.add(ref['file'])
     return refs
@@ -157,7 +166,7 @@ def record_valid(store, record):
         return True
     try:
         contract = test_intent._saved(store, ref)
-        report = json.loads(store.text(record['report']))
+        report = store.json(record['report'])
         artifacts, failures = check_contract(store, contract, ref, report)
         return (all(a in record.get('artifacts', []) for a in artifacts)
                 and (not record.get('passed') or not failures))

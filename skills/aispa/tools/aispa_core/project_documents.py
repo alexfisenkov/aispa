@@ -12,6 +12,7 @@ import re
 
 from .portable import is_link, relative_name
 from .store import Invalid, confined, digest
+from .verified_reads import ResourceLimit, current_scope
 
 SCHEMA = 1
 ROLES = ("interview", "intent", "spec", "plan", "index")
@@ -75,8 +76,13 @@ def _source(store, name, names=None):
         scale.Budget().check(path.stat().st_size, path=name)
     if path.stat().st_size > maximum:
         return {"path": name, "status": "unsafe", "reason": "oversized"}, None
-    with path.open("rb") as stream:
-        raw = stream.read(maximum + 1)
+    scope = current_scope()
+    if scope is not None:
+        raw = scope.artifact(path, None, literal=True, maximum=maximum)
+        discovery._safe_path(store.root, name)
+    else:
+        with path.open("rb") as stream:
+            raw = stream.read(maximum + 1)
     if len(raw) > maximum:
         return {"path": name, "status": "unsafe", "reason": "oversized"}, None
     try:
@@ -87,7 +93,8 @@ def _source(store, name, names=None):
         return {"path": name, "status": "unsafe", "reason": "empty"}, None
     if "\0" in text or discovery.SECRET_CONTENT.search(text) or CREDENTIAL.search(text):
         return {"path": name, "status": "unsafe", "reason": "binary-or-sensitive"}, None
-    return {"path": name, "status": "safe", "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}, raw
+    sha = scope.value_hash(raw) if scope is not None else hashlib.sha256(raw).hexdigest()
+    return {"path": name, "status": "safe", "sha256": sha, "bytes": len(raw)}, raw
 
 
 def _metadata(store, name, names):
@@ -160,6 +167,16 @@ def _artifact_bytes(base, ref, suffix, *, scalable=False):
              and _HASH.fullmatch(ref["sha256"]), "повреждена ссылка на снимок документа")
     path = confined(base, ref["file"])
     _require(path.is_file() and path.stat().st_size <= maximum, "снимок отсутствует или слишком велик")
+    scope = current_scope()
+    if scope is not None:
+        # Legacy is literal bytes, even when Markdown begins with the reserved
+        # transport marker. Scalable callers retain the sole scale decoder.
+        raw = scope.artifact(path, ref["sha256"], allow_manifest=scalable,
+                             literal=not scalable, maximum=maximum)
+        confined(base, ref["file"])
+        return raw
+    if scalable:
+        return scale.read_file(path, expected_sha256=ref["sha256"])
     with path.open("rb") as stream:
         raw = stream.read(maximum + 1)
     _require(len(raw) <= maximum, "снимок слишком велик")
@@ -175,12 +192,18 @@ def _validate_binding(base, binding, role, *, scalable=False):
     _name(binding["path"])
     expected = {key: value for key, value in binding.items() if key != "manifest"}
     try:
-        saved = json.loads(_artifact_bytes(base, binding["manifest"], ".json", scalable=scalable))
+        raw_manifest = _artifact_bytes(base, binding["manifest"], ".json", scalable=scalable)
+        scope = current_scope()
+        saved = scope.json(raw_manifest) if scope is not None else json.loads(raw_manifest.decode("utf-8"))
+    except ResourceLimit:
+        raise
     except (OSError, ValueError, TypeError) as error:
         raise Invalid("AISpa project documents: повреждён манифест привязки") from error
     _require(saved == {"schema": SCHEMA, "binding": expected}, "привязка не совпадает с сохранённым манифестом")
     raw = _artifact_bytes(base, binding["snapshot"], ".md", scalable=scalable)
-    _require(binding["acceptedSha256"] == hashlib.sha256(raw).hexdigest()
+    scope = current_scope()
+    sha = scope.value_hash(raw) if scope is not None else hashlib.sha256(raw).hexdigest()
+    _require(binding["acceptedSha256"] == sha
              and binding["id"] == digest({"role": role, "path": binding["path"], "sha256": binding["acceptedSha256"]}),
              "привязка не совпадает с принятым источником")
     return raw

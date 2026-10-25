@@ -191,7 +191,7 @@ def _read(store, ref, state=None):
     path = confined(store.run, ref["file"])
     _require(state is not None and scale.enabled(state) or path.stat().st_size <= MAX_REPORT_CHARS * 4 + 4096, "артефакт разбора слишком большой")
     _require(artifact_valid(store, ref), "артефакт разбора изменён")
-    return json.loads(store.text(ref))
+    return store.json(ref)
 
 
 def _saved_report(store, state, *, check_sources=True):

@@ -73,6 +73,91 @@ function archivedSample(status='accepted'){
  }
  return d;
 }
+
+function pendingSnapshot(last=null,state='calculating'){
+ return {calculation:{id:'fixture-generation',state,startedAt:'2026-10-26T01:00:00Z'},
+  lastSnapshot:last?{view:last,capturedAt:'2026-10-26T00:59:00Z',basis:{journalSha256:'a'.repeat(64)},freshness:'historical'}:null,
+  ...(state==='source_error'?{error:{code:'snapshot_source_error'}}:{})};
+}
+function descendants(element){return [element,...element.children.filter(x=>typeof x==='object').flatMap(descendants)];}
+test('first calculation is observable without fabricated snapshot or PASS',async()=>{
+ const f=await fixture('',pendingSnapshot());
+ assert.match(f.text('sourceLabel'),/рассчитывается/i);
+ assert.doesNotMatch(f.text('label'),/приняты|готов/i);
+ assert.equal(f.text('runElapsed'),'—');assert.doesNotMatch(f.text('gates'),/✓/);
+ f.el('language').change('en');assert.match(f.text('sourceLabel'),/calculating/i);
+});
+test('calculating retains a historical snapshot without current acceptance or ticking clocks',async()=>{
+ const d=sample('accepted'),f=await fixture('',d);
+ assert.match(f.text('label'),/приняты/);
+ await f.update(pendingSnapshot(d));
+ assert.match(f.text('sourceLabel'),/рассчитывается/i);
+ assert.equal(f.text('title'),d.title);assert.doesNotMatch(f.text('label'),/приняты/);
+ assert.doesNotMatch(f.text('gates'),/✓/);
+ const before=f.text('time-T01');f.advance(6000);assert.equal(f.text('time-T01'),before);
+ assert.match(f.text('refreshText'),/26\.10\.2026.*08:59|2026-10-26T00:59:00Z|26\.10\.2026.*00:59/);
+});
+test('source failure and disconnected transport are distinct until a verified reconnect',async()=>{
+ const d=sample('accepted'),f=await fixture('',d);
+ await f.update(pendingSnapshot(d,'source_error'));
+ assert.match(f.text('sourceLabel'),/ошибка источника/i);
+ assert.doesNotMatch(f.text('gates'),/✓/);
+ await f.fail();assert.match(f.text('sourceLabel'),/нет связи/i);
+ assert.doesNotMatch(f.text('label'),/приняты/);
+ await f.update(d);assert.match(f.text('sourceLabel'),/Живые данные/);assert.match(f.text('label'),/приняты/);
+});
+test('descendant-confirmed result links to confirmer while old phase receipts stay historical',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=true;d.tasks[0].phaseStale=true;
+ d.tasks[0].proofProvenance={kind:'descendant',task:'T02',attempt:'descendant-attempt',recordedAt:'2026-10-26T01:00:00Z'};
+ d.tasks[0].phaseSteps=[{id:'critic_1',label:'Критик · круг 1',status:'done',historical:true,
+  basis:'old-basis',basisCurrent:false,recordedAt:'2026-10-19T12:00:00Z'}];
+ d.tasks[1].status='completed';d.tasks[1].proofCurrent=true;
+ const f=await fixture('',d);
+ assert.match(f.text('waves'),/Результат подтверждён последующей задачей/);
+ assert.doesNotMatch(f.el('task-T01').className,/proof-stale/);
+ const nodes=descendants(f.el('task-T01'));
+ assert.ok(nodes.some(n=>n.tag==='a'&&n.attributes.href==='#task-T02'));
+ assert.ok(nodes.some(n=>n.tag==='time'&&n.attributes.datetime==='2026-10-19T12:00:00Z'));
+ assert.match(f.text('task-T01'),/Историческ/);
+ f.el('language').change('en');assert.match(f.text('waves'),/Result confirmed by a later task/);
+});
+test('hero distinguishes calculating and source errors from disconnected transport in both languages',async()=>{
+ const d=sample('accepted');
+ for(const [state,ru,en] of [['calculating','Рассчитывается','Calculating'],['source_error','Ошибка источника','Source error'],['disconnected','Нет связи','Disconnected']]){
+  const f=await fixture('',d);
+  if(state==='disconnected')await f.fail();else await f.update(pendingSnapshot(d,state));
+  assert.equal(f.text('statusShort'),ru,`Hero conflated ${state} with transport failure`);
+  f.el('language').change('en');assert.equal(f.text('statusShort'),en);
+  assert.doesNotMatch(f.text('label'),/Accepted|requirements accepted/);
+ }
+});
+test('retained criterion outcomes are neutral history in calculating source_error and disconnected then current on reconnect',async()=>{
+ const d=sample('accepted');d.tasks[0].status='completed';d.tasks[0].proofCurrent=true;
+ d.tasks[0].criteriaDetails=[{text:'Saved exact criterion',status:'passed',source:'checked_report',checkedBy:'acceptor'}];
+ function resultChip(f,text){return descendants(f.el('task-T01')).find(n=>n.className.startsWith('status-chip')&&text.test(n.textContent));}
+ for(const state of ['calculating','source_error','disconnected']){
+  const f=await fixture('',d);
+  assert.equal(resultChip(f,/Пройдено/).className,'status-chip passed');
+  if(state==='disconnected')await f.fail();else await f.update(pendingSnapshot(d,state));
+  const historical=resultChip(f,/Пройдено/);
+  assert.equal(historical.className,'status-chip historical',`Retained criterion still advertises current PASS in ${state}`);
+  assert.match(historical.textContent,/последний снимок|на дату снимка/);
+  f.el('language').change('en');
+  const translated=resultChip(f,/Passed/);assert.equal(translated.className,'status-chip historical');assert.match(translated.textContent,/snapshot/);
+  await f.update(d);assert.equal(resultChip(f,/Passed/).className,'status-chip passed');
+ }
+});
+test('descendant criterion explains its real proof source and repair phase copy is translated',async()=>{
+ const d=sample();d.tasks[0].status='completed';d.tasks[0].proofCurrent=true;
+ d.tasks[0].proofProvenance={kind:'descendant',task:'T02',attempt:'current-descendant'};
+ d.tasks[0].criteriaDetails=[{text:'Ancestor criterion',status:'passed',source:'descendant_proof',checkedBy:'critic'}];
+ const f=await fixture('',d);
+ assert.match(f.text('task-T01'),/По подтверждению последующей задачей/);
+ assert.doesNotMatch(f.text('task-T01'),/Отдельная проверка критерия ещё не записана/);
+ f.el('language').change('en');assert.match(f.text('task-T01'),/Confirmed by a later task/);
+ const repairing=sample();repairing.tasks[0].phase='repair';repairing.tasks[0].phaseLabel='Исправление';
+ await f.update(repairing);assert.match(f.text('waves'),/Repair/);assert.doesNotMatch(f.text('waves'),/Исправление/);
+});
 test('logo, workshop label and AISpa title share an accessible external channel link',async()=>{
  const header=html.match(/<header>([\s\S]*?)<\/header>/)[1];
  const links=[...header.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)];

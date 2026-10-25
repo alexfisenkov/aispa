@@ -1,5 +1,6 @@
 import json
 import copy
+import io
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -119,6 +120,29 @@ class CliTests(unittest.TestCase):
             process.terminate()
             process.wait(timeout=5)
             process.stdout.close()
+
+    @contextmanager
+    def status_response(self, url):
+        """Observe one exact generation; preserve ready bytes and HTTP errors."""
+        requested, generation, deadline = url, None, time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with urllib.request.urlopen(requested, timeout=max(.001, deadline - time.monotonic())) as response:
+                raw = response.read()
+                value = json.loads(raw)
+                if response.code == 200:
+                    self.assertEqual(value["calculation"]["state"], "ready")
+                    with io.BytesIO(raw) as body:
+                        yield body
+                    return
+                self.assertEqual(response.code, 202)
+                self.assertEqual(value["calculation"]["state"], "calculating")
+                identifier = value["calculation"]["id"]
+                self.assertRegex(identifier, r"^[0-9a-f]{32}$")
+                self.assertTrue(generation is None or generation == identifier)
+                generation = identifier
+                requested = url + "?calculation=" + identifier
+            time.sleep(.01)
+        self.fail("The addressed status generation did not settle within 10 seconds")
 
     def test_mode_is_explicit(self):
         self.call("init", "--slug", "example", "--title", "Example", "--runtime", "codex", "--check", "balanced", expected=2)
@@ -440,7 +464,7 @@ class CliTests(unittest.TestCase):
         original = (self.root / "app.py").read_bytes()
         with self.server() as url:
             (self.root / "app.py").write_text("print('changed after delivery')\n", encoding="utf-8", newline="\n")
-            with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
+            with self.status_response(url.replace("dashboard.html", "status.json")) as response:
                 self.assertEqual(json.load(response)["status"], "stale")
         (self.root / "app.py").write_bytes(original)
         new = self.call("init", "--slug", "next", "--title", "Next iteration", "--mode", "auto", "--runtime", "codex", "--check", "balanced")
@@ -458,12 +482,13 @@ class CliTests(unittest.TestCase):
         with self.server() as url:
             with urllib.request.urlopen(url, timeout=5) as response:
                 self.assertIn("AISpa", response.read().decode())
-            with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
+            with self.status_response(url.replace("dashboard.html", "status.json")) as response:
                 self.assertEqual(json.load(response)["status"], "running")
             journal = self.run / "events.jsonl"
             journal.write_text(journal.read_text(encoding="utf-8").replace('"running"', '"accepted"'), encoding="utf-8", newline="\n")
             with self.assertRaises(urllib.error.HTTPError) as error:
-                urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5)
+                with self.status_response(url.replace("dashboard.html", "status.json")):
+                    pass
             self.assertEqual(error.exception.code, 409)
             error.exception.close()
 
@@ -476,7 +501,7 @@ class CliTests(unittest.TestCase):
             try:
                 seen = False
                 for _ in range(40):
-                    with urllib.request.urlopen(url.replace("dashboard.html", "status.json"), timeout=5) as response:
+                    with self.status_response(url.replace("dashboard.html", "status.json")) as response:
                         data = json.load(response)
                     if (data.get("activity") or {}).get("kind") == "verification":
                         seen = True

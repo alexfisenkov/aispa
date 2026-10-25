@@ -183,7 +183,7 @@ def valid(store, state):
     receipt = state.get("planReview")
     if state.get("policy", {}).get("deliveryPlan"):
         try:
-            report = json.loads(store.text(receipt["report"]))
+            report = store.json(receipt["report"])
             delivery.validate(state["tasks"], report["delivery"], state=state)
             if receipt.get("deliveryDigest") != digest(report["delivery"]):
                 return False

@@ -103,7 +103,7 @@ def _history(store, state):
     require(isinstance(history, list), "Повреждена история авторства")
     for row in history:
         require(isinstance(row, dict) and artifact_valid(store, row.get("record", {})), "Повреждена квитанция авторства")
-        require(json.loads(store.text(row["record"])) == {k: v for k, v in row.items() if k != "record"}
+        require(store.json(row["record"]) == {k: v for k, v in row.items() if k != "record"}
                 and row.get("run") == state["run"] and row.get("previous") == previous,
                 "Нарушена неизменность или последовательность авторства")
         require(suitable(participants.resolve(store, state, row.get("actor")), row.get("phase"))

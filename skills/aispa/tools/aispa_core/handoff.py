@@ -20,6 +20,7 @@ from . import carryover, discovery
 from .contracts import artifact_valid, require, verified
 from .portable import relative_name
 from .store import Invalid, timestamp
+from .verified_reads import current_scope
 
 
 SCHEMA = 1
@@ -330,10 +331,12 @@ def valid(store, state, *, command_receipt):
         if not artifact_valid(store, ref):
             return False
         path = store.run / ref["file"]
-        raw = path.read_bytes()
+        scope = current_scope()
+        raw = (scope.artifact(path, ref["sha256"], literal=True, maximum=MAX_BYTES)
+               if scope is not None else path.read_bytes())
         if len(raw) > MAX_BYTES:
             return False
-        body = json.loads(raw)
+        body = scope.json(raw) if scope is not None else json.loads(raw)
         if not isinstance(body, dict) or body.get("run") != state["run"] or body.get("code") != row["code"]:
             return False
         report = {key: copy.deepcopy(body[key]) for key in

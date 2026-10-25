@@ -12,6 +12,7 @@ import re
 from . import carryover, cleanroom, discovery
 from .contracts import artifact_valid
 from .store import Invalid, confined, digest, timestamp
+from .verified_reads import current_scope
 
 
 SCHEMA = 1
@@ -53,10 +54,14 @@ def _read(store, ref, prefix):
              and SHA.fullmatch(ref["sha256"]), "неверная ссылка истории")
     path = confined(store.run, ref["file"])
     _require(path.is_file() and path.stat().st_size <= MAX_BYTES, "артефакт истории отсутствует или слишком велик")
-    raw = path.read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == ref["sha256"], "изменён артефакт истории")
+    scope = current_scope()
+    raw = (scope.artifact(path, ref["sha256"], literal=True, maximum=MAX_BYTES)
+           if scope is not None else path.read_bytes())
+    confined(store.run, ref["file"])
+    _require((scope.value_hash(raw) if scope is not None else hashlib.sha256(raw).hexdigest()) == ref["sha256"],
+             "изменён артефакт истории")
     try:
-        value = json.loads(raw)
+        value = scope.json(raw) if scope is not None else json.loads(raw)
     except (ValueError, UnicodeError) as exc:
         raise Invalid("AISpa executions: повреждён JSON истории") from exc
     _require(isinstance(value, dict), "неверный артефакт истории")

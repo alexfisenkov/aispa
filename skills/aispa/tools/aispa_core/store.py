@@ -341,6 +341,7 @@ class Journal:
         hasher = hashlib.sha256()
         events = [] if include_events else None
         event_tail = []
+        receipt_times = {}
         tail = None
         try:
             with path.open("rb") as stream:
@@ -363,6 +364,7 @@ class Journal:
                     previous_hash, prior, last = row["hash"], last, row
                     count, valid_bytes = number, valid_bytes + len(raw)
                     event_tail = (event_tail + [{"event": row.get("event", ""), "at": row.get("at")}])[-64:]
+                    self._index_receipt_times(row, receipt_times)
                     if include_events:
                         events.append(row)
         except OSError as exc:
@@ -375,10 +377,45 @@ class Journal:
         result = {"path": path, "count": count, "last": last, "previous": prior,
                   "sha256": hasher.hexdigest(), "size": valid_bytes + (len(tail) if tail else 0),
                   "eventTail": event_tail,
-                  "validBytes": valid_bytes, "_hasher": hasher, "_tail": tail}
+                  "validBytes": valid_bytes, "_hasher": hasher, "_tail": tail,
+                  "_receipt_times": receipt_times}
         if include_events:
             result["events"] = events
         return result
+
+    @staticmethod
+    def _receipt_identity(record):
+        ref = record.get("record") if isinstance(record, dict) else None
+        if isinstance(ref, dict) and isinstance(ref.get("file"), str) and isinstance(ref.get("sha256"), str):
+            return ref["file"], ref["sha256"]  # exact sealed receipt, not its report body
+        return None
+
+    @classmethod
+    def _index_receipt_times(cls, row, index):
+        if not isinstance(row.get("at"), str):
+            return
+        histories = row["state"].get("taskHistory", {})
+        if not isinstance(histories, dict):
+            return
+        for history in histories.values():
+            if not isinstance(history, list):
+                continue
+            for attempt in history:
+                if not isinstance(attempt, dict):
+                    continue
+                records = [attempt.get(key) for key in ("submitted", "repair", "acceptance", "verifiedCompletion")]
+                for key in ("rounds", "submissionHistory", "repairHistory"):
+                    if isinstance(attempt.get(key), list):
+                        records += attempt[key]
+                for record in records:
+                    identity = cls._receipt_identity(record)
+                    if identity is not None:
+                        index.setdefault(identity, row["at"])
+
+    def receipt_time(self, record):
+        """Historical first appearance in an already verified journal cursor."""
+        cursor = self._verified if self._verified is not None else self._journal_cursor()
+        return cursor.get("_receipt_times", {}).get(self._receipt_identity(record))
 
     def _journal_cursor(self, *, include_events=False):
         path = confined(self.run, "events.jsonl")
@@ -553,12 +590,14 @@ class Journal:
             os.fsync(stream.fileno())
         hasher = cursor["_hasher"].copy() if history.exists() and sequence > 1 else hashlib.sha256()
         hasher.update(raw)
+        receipt_times = dict(cursor.get("_receipt_times", {})) if sequence > 1 else {}
+        self._index_receipt_times(row, receipt_times)
         self._verified = {"path": history, "count": sequence, "last": row,
                           "previous": cursor["last"] if sequence > 1 else None,
                           "eventTail": ((cursor.get("eventTail", []) if sequence > 1 else []) +
                                         [{"event": event, "at": row["at"]}])[-64:],
                           "sha256": hasher.hexdigest(), "size": (cursor["size"] if sequence > 1 else 0) + len(raw),
-                          "_hasher": hasher}
+                          "_hasher": hasher, "_receipt_times": receipt_times}
 
     def artifact(self, group, data, suffix):
         name = group + "/" + uuid.uuid4().hex + suffix
@@ -580,9 +619,28 @@ class Journal:
         return {"file": name, "sha256": file_hash(path)}
 
     def text(self, artifact):
+        return self.artifact_bytes(artifact).decode("utf-8")
+
+    def artifact_bytes(self, artifact):
         from . import scale
-        return scale.read_file(confined(self.run, artifact["file"]),
-                               expected_sha256=artifact["sha256"], verify_plain=False).decode("utf-8")
+        path = confined(self.run, artifact["file"])
+        scope = getattr(self, "_reads", None)
+        if scope is not None:
+            return scope.artifact(path, artifact["sha256"])
+        return scale.read_file(path, expected_sha256=artifact["sha256"])
+
+    def json(self, artifact):
+        raw = self.artifact_bytes(artifact)
+        scope = getattr(self, "_reads", None)
+        try:
+            return scope.json(raw) if scope is not None else json.loads(raw.decode("utf-8"))
+        except (ValueError, TypeError, UnicodeError, RecursionError) as error:
+            raise Invalid("Некорректный JSON артефакта") from error
+
+    def artifact_hash_valid(self, artifact):
+        path = confined(self.run, artifact["file"])
+        scope = getattr(self, "_reads", None)
+        return scope.hash_valid(path, artifact["sha256"]) if scope is not None else file_hash(path) == artifact["sha256"]
 
     def git(self, *args):
         result = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True)

@@ -20,6 +20,7 @@ import uuid
 from .store import Invalid, confined, digest, file_hash, timestamp
 from .portable import is_link, relative_name
 from . import git_snapshot, process_runner
+from .verified_reads import current_scope
 
 
 MAX_OUTPUT = 1024 * 1024
@@ -202,7 +203,13 @@ def _artifact_value(store, artifact):
     _no_links(store.run, store.root)
     p = confined(store.run, artifact["file"])
     _no_links(p, store.root)
-    _require(p.is_file() and file_hash(p) == artifact["sha256"], "Изменено свидетельство clean-clone")
+    _require(p.is_file(), "Изменено свидетельство clean-clone")
+    scope = current_scope()
+    if scope is not None:
+        raw = scope.artifact(p, artifact["sha256"], literal=True)
+        _no_links(p, store.root)
+        return scope.json(raw)
+    _require(file_hash(p) == artifact["sha256"], "Изменено свидетельство clean-clone")
     return json.loads(p.read_text(encoding="utf-8"))
 
 
@@ -532,7 +539,9 @@ def valid(store, state):
             return False
         p = confined(store.run, receipt["output"]["file"])
         _no_links(p, store.root)
-        return p.is_file() and file_hash(p) == receipt["output"]["sha256"]
+        scope = current_scope()
+        return p.is_file() and (scope.hash_valid(p, receipt["output"]["sha256"]) if scope is not None
+                                else file_hash(p) == receipt["output"]["sha256"])
     except (Invalid, KeyError, OSError, ValueError, TypeError):
         return False
 

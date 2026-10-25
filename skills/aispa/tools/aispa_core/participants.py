@@ -27,7 +27,7 @@ def _sealed(store, actor, field):
     if not isinstance(ref, dict) or not artifact_valid(store, ref):
         return False
     try:
-        return json.loads(store.text(ref)) == {k: v for k, v in actor.items() if k != field}
+        return store.json(ref) == {k: v for k, v in actor.items() if k != field}
     except (OSError, ValueError, TypeError):
         return False
 

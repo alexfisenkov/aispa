@@ -129,10 +129,10 @@ def _sealed_report(store, saved, run):
     """Check an immutable record against its own candidate, including old code."""
     require(isinstance(saved, dict) and all(artifact_valid(store, saved.get(key, {}))
             for key in ("record", "report", "candidate")), "Повреждена история blind-приёмки")
-    require(json.loads(store.text(saved["record"])) == {k: v for k, v in saved.items() if k != "record"},
+    require(store.json(saved["record"]) == {k: v for k, v in saved.items() if k != "record"},
             "Изменена запись blind-приёмки")
-    report = json.loads(store.text(saved["report"]))
-    candidate = json.loads(store.text(saved["candidate"]))
+    report = store.json(saved["report"])
+    candidate = store.json(saved["candidate"])
     require(isinstance(report, dict) and isinstance(candidate, dict) and candidate.get("run") == run
             and digest(candidate) == saved.get("basis"), "Нарушена привязка blind-истории к исходному кандидату")
     require(all(saved.get(key) == report.get(key) for key in ("basis", "reviewer", "independent", "observations"))
@@ -193,7 +193,7 @@ def valid(store, state):
         if not isinstance(saved, dict) or not cleanroom.valid(store, state):
             return False
         _history(store, state)
-        report = json.loads(store.text(saved["report"]))
+        report = store.json(saved["report"])
         return (_validate_report(store, state, report) == saved.get("artifacts")
                 and phase_receipts.valid(store, state, "blind"))
     except (Invalid, OSError, ValueError, KeyError, TypeError, AttributeError):
@@ -333,8 +333,8 @@ def derived_waves_valid(store, state):
                     wave["basis"] == gate_basis(store, state, "wave") and
                     wave["plan"] == plan_basis(state) and artifact_valid(store, wave["report"]),
                     "Производная сверка волны устарела")
-            saved = json.loads(store.text(wave["report"]))
-            final = json.loads(store.text(gate["report"]))
+            saved = store.json(wave["report"])
+            final = store.json(gate["report"])
             require(saved.get("kind") == "derived-final-wave" and saved.get("run") == state["run"] and
                     saved.get("wave") == int(number) and saved.get("basis") == wave["basis"] and
                     saved.get("plan") == wave["plan"] and saved.get("derivedFrom") == wave["derivedFrom"] and

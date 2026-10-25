@@ -13,6 +13,18 @@ INLINE_RECEIPT_BYTES = 2048
 TASK_STATUSES = ("pending", "running", "blocked", "completed")
 
 
+def saved_without_view(store, state, receipt, *, ok, previous_sequence=0):
+    """A projection refusal cannot erase an independently read-back append."""
+    journal = store.read_journal()
+    if journal["count"] <= previous_sequence:
+        return None
+    event = journal["last"]
+    return {"ok": ok, "run": state["run"], "runDirectory": "runs/" + state["run"],
+            "status": state["status"], "stage": state["stage"], "receipt": receipt,
+            "committed": True, "committedEvent": {key: event[key] for key in ("sequence", "hash", "event")},
+            "viewError": {"code": "projection_unavailable"}, "doNotRepeat": True}
+
+
 def encode(value):
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
@@ -23,7 +35,8 @@ def compact(store, output):
     result = {
         "compact": True,
         "ok": output.get("ok", True),
-        **{key: output[key] for key in ("run", "runDirectory", "status", "stage", "gates", "autonomy", "requiredHostActions") if key in output},
+        **{key: output[key] for key in ("run", "runDirectory", "status", "stage", "gates", "autonomy", "requiredHostActions",
+                                       "committed", "committedEvent", "viewError", "doNotRepeat") if key in output},
         **reference,
         "absolutePath": str(store.run / reference["file"]),
         "bytes": len(raw),
