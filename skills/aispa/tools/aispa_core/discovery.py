@@ -14,7 +14,7 @@ import tomllib
 
 from .store import Invalid, digest, NATIVE_RULE_INPUTS, native_rule_input
 from .portable import is_link, relative_name
-from . import docmeta
+from . import docmeta, scale
 from . import project_documents
 
 
@@ -179,7 +179,24 @@ def _included_paths(store, paths, names):
     return sorted(set(result))
 
 
-def _scan(store, paths=None):
+def _scan(store, paths=None, *, cursor=None, scalable=False):
+    budget = scale.Budget() if scalable else None
+    max_sources = scale._positive("AISPA_DISCOVERY_PAGE_SOURCES", MAX_SOURCES) if scalable else MAX_SOURCES
+    max_file_bytes = budget.max_bytes if scalable else MAX_FILE_BYTES
+    max_excerpt = scale._positive("AISPA_DISCOVERY_EXCERPT_CHARS", MAX_TOTAL_CHARS) if scalable else MAX_EXCERPT_CHARS
+    max_total = scale._positive("AISPA_DISCOVERY_PAGE_CHARS", MAX_TOTAL_CHARS) if scalable else MAX_TOTAL_CHARS
+    position, character, binding = 0, 0, None
+    if cursor is not None:
+        _require(scalable and isinstance(cursor, str), "cursor requires scalableInputs")
+        try:
+            binding, left, right = cursor.split(":")
+            position, character = int(left), int(right)
+            _require(position >= 0 and character >= 0 and str(position) == left and str(character) == right,
+                     "invalid discovery cursor")
+        except (ValueError, AttributeError) as error:
+            raise Invalid("AISpa discovery: invalid cursor") from error
+    next_position = None
+    next_character = 0
     sources, omitted, fingerprints = [], [], []
     counts, used = Counter(), 0
     names = _names(store)
@@ -197,7 +214,12 @@ def _scan(store, paths=None):
         for items in groups.values():
             if index < len(items):
                 candidates.append(items[index])
-    for name, kind in candidates:
+    if scalable:
+        # All requested safe includes precede opportunistic navigation sources.
+        candidates.sort(key=lambda item: item[0] not in included)
+    for candidate_index, (name, kind) in enumerate(candidates):
+        if budget:
+            budget.check(0, path=name)
         item = {"path": name, "kind": kind}
         try:
             path = _safe_path(store.root, name)
@@ -206,13 +228,13 @@ def _scan(store, paths=None):
             else:
                 stat = path.stat()
                 item["bytes"] = stat.st_size
-                if stat.st_size > MAX_FILE_BYTES:
+                if stat.st_size > max_file_bytes:
                     item.update(status="oversized", mtimeNs=stat.st_mtime_ns)
                 else:
                     # Size cap also applies if a writer grows a file after stat.
                     with path.open("rb") as stream:
-                        raw = stream.read(MAX_FILE_BYTES + 1)
-                    if len(raw) > MAX_FILE_BYTES:
+                        raw = stream.read(max_file_bytes + 1)
+                    if len(raw) > max_file_bytes:
                         item.update(status="oversized", mtimeNs=stat.st_mtime_ns)
                     else:
                         item["sha256"] = hashlib.sha256(raw).hexdigest()
@@ -233,23 +255,39 @@ def _scan(store, paths=None):
                  "include нельзя безопасно прочитать: " + name + " (" + item["status"] + ")")
         fingerprints.append(item)
         reason = item["status"] if item["status"] != "safe" else (
-            "source-limit" if len(sources) >= MAX_SOURCES else "excerpt-budget" if used >= MAX_TOTAL_CHARS else None)
+            "previous-page" if candidate_index < position else "source-limit" if len(sources) >= max_sources else "excerpt-budget" if used >= max_total or next_position is not None else None)
         if reason:
+            if scalable and item["status"] == "safe" and candidate_index >= position and next_position is None:
+                next_position = candidate_index
             counts[reason] += 1
             if len(omitted) < MAX_OMITTED_DETAILS:
                 omitted.append({"path": name, "reason": reason})
             continue
-        limit = min(MAX_EXCERPT_CHARS, MAX_TOTAL_CHARS - used)
-        excerpt = text[:limit]
+        offset = character if scalable and candidate_index == position else 0
+        _require(offset < len(text) or not text, "discovery cursor offset outside source")
+        limit = min(max_excerpt, max_total - used)
+        excerpt = text[offset:offset + limit]
+        if scalable and offset + len(excerpt) < len(text):
+            next_position, next_character = candidate_index, offset + len(excerpt)
         used += len(excerpt)
         commands = _commands(name, text)
         source = {k: v for k, v in item.items() if k != "status"}
         source.update(excerpt=excerpt, omittedChars=max(0, len(text) - len(excerpt)),
+                      **({"excerptStart": offset, "excerptEnd": offset + len(excerpt), "totalChars": len(text)} if scalable else {}),
                       commands=commands[:MAX_COMMANDS], omittedCommands=max(0, len(commands) - MAX_COMMANDS))
         sources.append(source)
-    limits = {"sources": MAX_SOURCES, "fileBytes": MAX_FILE_BYTES, "excerptChars": MAX_EXCERPT_CHARS,
-              "totalExcerptChars": MAX_TOTAL_CHARS, "omittedDetails": MAX_OMITTED_DETAILS, "commandsPerSource": MAX_COMMANDS}
-    return {"sources": sources, "scanDigest": digest(fingerprints), "limits": limits, "includedPaths": included,
+    limits = {"sources": max_sources, "fileBytes": max_file_bytes, "excerptChars": max_excerpt,
+              "totalExcerptChars": max_total, "omittedDetails": MAX_OMITTED_DETAILS, "commandsPerSource": MAX_COMMANDS}
+    scan_digest = digest(fingerprints)
+    pagination = {}
+    if scalable:
+        page_digest = digest({"scan": scan_digest, "included": included, "limits": limits})
+        _require(binding is None or binding == page_digest, "stale or foreign discovery cursor")
+        _require(position < len(candidates) or position == 0, "discovery cursor outside selection")
+        pagination = {"pagination": {"total": len(candidates), "omitted": len(candidates) - next_position if next_position is not None else 0,
+                       "cursor": f"{page_digest}:{next_position}:{next_character}" if next_position is not None else None,
+                       "digest": page_digest, "start": position, "character": character}}
+    return {**pagination, "sources": sources, "scanDigest": scan_digest, "limits": limits, "includedPaths": included,
             "omitted": {"counts": dict(sorted(counts.items())), "details": omitted,
                         "unlisted": sum(counts.values()) - len(omitted),
                         "unselectedPaths": len(names) - len(candidates)},
@@ -269,8 +307,7 @@ def _read(store, artifact):
     name = artifact.get("file")
     _require(isinstance(name, str) and name.startswith("discovery/") and name.endswith(".json"), "недопустимый артефакт")
     path = _safe_path(store.run, name)
-    raw = path.read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == artifact.get("sha256"), "артефакт изменён")
+    raw = scale.read_file(path, expected_sha256=artifact.get("sha256"))
     return json.loads(raw)
 
 
@@ -278,12 +315,12 @@ def _collection(store, state):
     ref = state.get("discoveryCollection")
     saved = _read(store, ref)
     _require(saved.get("schema") == SCHEMA and saved.get("run") == state["run"], "чужой снимок исследования")
-    _require(saved.get("basis") == ref.get("basis") == digest({"run": state["run"], "scan": saved.get("scanDigest"), "limits": saved.get("limits"), "includedPaths": saved.get("includedPaths", [])}),
+    _require(saved.get("basis") == ref.get("basis") == digest({"run": state["run"], "scan": saved.get("scanDigest"), "limits": saved.get("limits"), "includedPaths": saved.get("includedPaths", []), **({"pagination": saved["pagination"]} if "pagination" in saved else {})}),
              "неверная основа исследования")
     return saved
 
 
-def collect(store, state, paths=None, *, metadata_receipt=None):
+def collect(store, state, paths=None, *, metadata_receipt=None, cursor=None):
     """Save/reuse bounded evidence; paths=None retains prior explicit includes.
 
     An explicit [] clears includes. Mutate state only, never execute or append.
@@ -303,8 +340,8 @@ def collect(store, state, paths=None, *, metadata_receipt=None):
         # catalog. Missing/stale references remain visible in project-documents.
         mapped = project_documents.view(store, state)["roles"].values()
         paths = sorted(set(paths or []) | {row["path"] for row in mapped if row.get("status") in ("fresh", "changed")})
-    scan = _scan(store, paths)
-    basis = digest({"run": state["run"], "scan": scan["scanDigest"], "limits": scan["limits"], "includedPaths": scan["includedPaths"]})
+    scan = _scan(store, paths, cursor=cursor, scalable=scale.enabled(state))
+    basis = digest({"run": state["run"], "scan": scan["scanDigest"], "limits": scan["limits"], "includedPaths": scan["includedPaths"], **({"pagination": scan["pagination"]} if "pagination" in scan else {})})
     if state.get("discoveryCollection"):
         try:
             previous = _collection(store, state)
@@ -319,9 +356,11 @@ def collect(store, state, paths=None, *, metadata_receipt=None):
     return saved
 
 
-def _report(saved, report):
+def _report(saved, report, state=None):
+    if state is not None:
+        scale.check_value(report, state)
     _require(isinstance(report, dict), "отчёт должен быть объектом")
-    _require(len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_CHARS, "отчёт слишком большой; используйте ссылки")
+    _require(state is not None and scale.enabled(state) or len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_CHARS, "отчёт слишком большой; используйте ссылки")
     _require(report.get("basis") == saved["basis"], "отчёт относится к другому снимку")
     _require(isinstance(report.get("summary"), str) and report["summary"].strip(), "нужно краткое резюме исследования")
     observations, uncertainties = report.get("observations"), report.get("uncertainties")
@@ -364,10 +403,12 @@ def _report(saved, report):
 def record(store, state, report):
     """Validate source-backed observations and store a reusable immutable report."""
     saved = _collection(store, state)
-    current = _scan(store, saved.get("includedPaths", []))
+    current = _scan(store, saved.get("includedPaths", []), scalable=scale.enabled(state),
+                    cursor=(f"{saved['pagination']['digest']}:{saved['pagination']['start']}:{saved['pagination']['character']}"
+                            if saved.get("pagination", {}).get("start") or saved.get("pagination", {}).get("character") else None))
     _require(saved["scanDigest"] == current["scanDigest"] and saved["limits"] == current["limits"],
              "источники изменились; повторите discovery collect")
-    normalized = _report(saved, report)
+    normalized = _report(saved, report, state)
     value = {"schema": SCHEMA, "run": state["run"], "collection": state["discoveryCollection"], **normalized}
     old = state.get("discovery")
     if old:
@@ -390,12 +431,14 @@ def valid(store, state, *, check_sources=True):
         collection_state = dict(state, discoveryCollection=ref.get("collection"))
         saved = _collection(store, collection_state)
         _require(report.get("collection") == ref["collection"] and report.get("basis") == ref.get("basis"), "связь отчёта нарушена")
-        _report(saved, report)
+        _report(saved, report, state)
         from . import phase_receipts
         if not phase_receipts.valid(store, state, "discovery"):
             return False
         if check_sources:
-            scan = _scan(store, saved.get("includedPaths", []))
+            scan = _scan(store, saved.get("includedPaths", []), scalable=scale.enabled(state),
+                    cursor=(f"{saved['pagination']['digest']}:{saved['pagination']['start']}:{saved['pagination']['character']}"
+                            if saved.get("pagination", {}).get("start") or saved.get("pagination", {}).get("character") else None))
             return saved["scanDigest"] == scan["scanDigest"] and saved["limits"] == scan["limits"]
         return True
     except (OSError, ValueError, TypeError, KeyError):

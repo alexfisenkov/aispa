@@ -1,7 +1,7 @@
 """Addressed preparation commands, owner references and honest templates."""
 import json
 
-from . import briefmap, design_contract, participants
+from . import briefmap, design_contract, participants, scale
 from .contracts import active, artifact_valid, nonempty, require
 from .store import confined, digest, file_hash
 
@@ -52,11 +52,11 @@ def owner_reference(store, state, report):
     require(isinstance(ids, list) and ids and all(isinstance(x, str) for x in ids)
             and len(set(ids)) == len(ids) and set(ids) <= {r["id"] for r in active(state)},
             "Материал должен быть связан с действующими требованиями")
-    require(nonempty(report["use"]) and len(report["use"]) <= 1600, "Объясните назначение материала")
+    require(nonempty(report["use"]) and (scale.enabled(state) or len(report["use"]) <= 1600), "Объясните назначение материала")
     design_contract.safe_reference_name(report["path"])
     path = confined(store.root, report["path"])
-    require(path.is_file() and path.stat().st_size <= 5 * 1024 * 1024, "Материал должен быть локальным файлом до 5 MiB")
-    raw = path.read_bytes()
+    require(path.is_file() and (scale.enabled(state) or path.stat().st_size <= 5 * 1024 * 1024), "Материал должен быть локальным файлом до 5 MiB")
+    raw = scale.read_file(path, allow_manifest=False) if scale.enabled(state) else path.read_bytes()
     from .discovery import SECRET_CONTENT
     require(not SECRET_CONTENT.search(raw.decode("utf-8", "replace")), "Материал содержит возможный секрет")
     import hashlib

@@ -6,6 +6,7 @@ These checks are not an OS-level compare-and-swap against external editors.
 """
 import hashlib
 import json
+from . import scale
 import os
 from pathlib import Path
 import re
@@ -121,9 +122,12 @@ def _source(store, state, name, *, names=None):
     else:
         kind = "document"
     path = _safe_path(store.root, name)
+    maximum = scale.Budget().max_bytes if scale.enabled(state) else MAX_FILE_BYTES
     before = path.stat()
+    if scale.enabled(state):
+        scale.Budget().check(before.st_size, path=name)
     _require(stat.S_ISREG(before.st_mode), "источник не является обычным файлом")
-    _require(before.st_size <= MAX_FILE_BYTES, "источник превышает лимит размера")
+    _require(before.st_size <= maximum, "источник превышает лимит размера")
     # O_NOFOLLOW protects the leaf on POSIX; path components are rechecked after
     # reading on all platforms. This is not an adversarial filesystem sandbox.
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
@@ -131,19 +135,22 @@ def _source(store, state, name, *, names=None):
         opened = os.fstat(stream.fileno())
         _require(stat.S_ISREG(opened.st_mode) and opened.st_ino == before.st_ino
                  and opened.st_dev == before.st_dev, "источник изменился во время чтения")
-        raw = stream.read(MAX_FILE_BYTES + 1)
+        raw = stream.read(maximum + 1)
     _safe_path(store.root, name)
     after = path.stat()
     _require((after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
              == (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns),
              "источник изменился во время чтения")
-    _require(len(raw) <= MAX_FILE_BYTES, "источник превышает лимит размера")
+    _require(len(raw) <= maximum, "источник превышает лимит размера")
+    physical_sha = _hash(raw)
+    if original is not None and scale.enabled(state):
+        raw = scale.read_file(path, expected_sha256=original["sha256"])
     try:
         text = raw.decode("utf-8")
     except UnicodeError as exc:
         raise Invalid("AISpa documents: источник должен быть UTF-8") from exc
     _require("\0" not in text and not _sensitive(text), "источник содержит двоичные данные или возможный секрет")
-    sha = _hash(raw)
+    sha = physical_sha
     _require(original is None or sha == original["sha256"], "изменён неизменный источник")
     return {"path": path, "raw": raw, "text": text, "sha256": sha, "kind": kind,
             "stat": after, "original": original}
@@ -435,7 +442,7 @@ def collect_sources(store, state, sources):
     for source in sources:
         path = source.get("path") if isinstance(source, dict) else None
         try:
-            _require(len(registered) < MAX_DOCUMENTS, "достигнут лимит документов")
+            _require(scale.enabled(state) or len(registered) < MAX_DOCUMENTS, "достигнут лимит документов")
             _require(isinstance(path, str) and isinstance(source.get("sha256"), str), "источнику нужны путь и хеш")
             registered.append(_register(store, state, path, expected_sha256=source["sha256"], names=names))
         except (OSError, ValueError, TypeError, KeyError):

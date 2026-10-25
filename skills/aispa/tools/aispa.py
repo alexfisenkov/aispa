@@ -33,6 +33,12 @@ def parser():
                    help="Краткий ответ изменений/status/init со ссылкой и SHA-256 полного JSON; перед подкомандой")
     p.add_argument("--version", action="version", version=VERSION)
     sub = p.add_subparsers(dest="action", required=True)
+    pack = sub.add_parser("pack", help="Prepare a verified chunked input without changing a run")
+    pack.add_argument("--file", required=True)
+    pack.add_argument("--output", required=True)
+    pack.add_argument("--kind", required=True, choices=("text", "json"))
+    pack.add_argument("--basis", help="Source-package SHA-256 binding; defaults to payload SHA-256")
+    pack.add_argument("--chunk-bytes", type=int)
     sub.add_parser("update-check")
     sub.add_parser("update-prepare")
     apply = sub.add_parser("update-apply")
@@ -60,6 +66,11 @@ def parser():
     plan = sub.add_parser("plan"); plan.add_argument("--file", required=True); plan.add_argument("--review")
     plan.add_argument("--actor")
     sub.add_parser("plan-check").add_argument("--file", required=True)
+    page = sub.add_parser("page", help="Read a digest-bound presentation page; domain validation still uses full input")
+    page.add_argument("--file", required=True)
+    page.add_argument("--cursor")
+    page.add_argument("--limit", type=int, default=48)
+    page.add_argument("--field", help="Address a top-level list field of a report")
     idea = sub.add_parser("idea"); idea.add_argument("--file"); idea.add_argument("--full", action="store_true")
     idea.add_argument("--actor")
     commands = sub.add_parser("commands")
@@ -92,6 +103,7 @@ def parser():
     discover = sub.add_parser("discover")
     discover.add_argument("--file")
     discover.add_argument("--actor")
+    discover.add_argument("--cursor", help="Continue a digest-bound discovery page")
     discover.add_argument("--include", action="append", help="Дополнительный безопасный исходник; можно повторять")
     sub.add_parser("discovery")
     sub.add_parser("memory")
@@ -233,6 +245,21 @@ def batch(args):
 
 
 def execute(args):
+    if args.action == "pack":
+        from aispa_core import scale
+        from aispa_core.workflow import read_input
+        import hashlib
+        raw = read_input(args.file, scalable=True).encode("utf-8")
+        output = Path(args.output).absolute()
+        value = scale.write_manifest(output, raw, kind=args.kind,
+                                     basis=args.basis or hashlib.sha256(raw).hexdigest(),
+                                     chunk_bytes=args.chunk_bytes)
+        if scale.read_file(output) != raw:
+            raise Invalid("Packed input read-back mismatch")
+        print(json.dumps({"file": str(output), "sha256": file_hash(output),
+                          "digest": value["digest"], "totalBytes": value["totalBytes"],
+                          "chunks": len(value["chunks"]), "verified": True}, ensure_ascii=False, indent=2))
+        return 0
     if args.action == "batch":
         return batch(args)
     if args.action.startswith("update-"):
@@ -293,7 +320,8 @@ def execute(args):
                                    "executionObligations": True, "finalWaveReuse": True,
                                    "errorBoundaryChecks": True, "taskTiers": True,
                                    "leanControl": True, "projectDocuments": True,
-                                   "firstBriefingClosure": True}
+                                   "firstBriefingClosure": True, "scalableInputs": True}
+                store.scale_enabled = True
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
                 check_modes.initialize(state, args.check)
@@ -328,7 +356,7 @@ def execute(args):
         preparation_write = (args.action in ("template", "brief-source", "brief-map-context") and args.write
                              or args.action == "context" and args.with_template)
         read_only = not preparation_write and (
-                     args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands")
+                     args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands", "page")
                      or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
                      or (args.action in ("idea", "repair-plan", "integration-review") and not args.file)
@@ -366,6 +394,15 @@ def execute(args):
         elif action == "plan":
             flow.plan(args.file, review_path=args.review, actor=args.actor)
             receipt = state.get("planReview")
+        elif action == "page":
+            from aispa_core import scale
+            value = json.loads(flow.read_input(args.file))
+            if args.field:
+                if not isinstance(value, dict) or args.field not in value:
+                    raise Invalid("Page field is absent")
+                value = value[args.field]
+            print(json.dumps(scale.page(value, cursor=args.cursor, limit=args.limit), ensure_ascii=False, indent=2))
+            return 0
         elif action == "plan-check":
             print(json.dumps(planning.analyze(store, state, json.loads(flow.read_input(args.file))), ensure_ascii=False, indent=2))
             return 0
@@ -436,7 +473,7 @@ def execute(args):
                 flow.save("project-discovery-recorded")
             else:
                 metadata_receipt = {}
-                evidence = discovery.collect(store, state, paths=args.include, metadata_receipt=metadata_receipt)
+                evidence = discovery.collect(store, state, paths=args.include, metadata_receipt=metadata_receipt, cursor=args.cursor)
                 receipt = {"collection": state["discoveryCollection"],
                            "absolutePath": str(store.run / state["discoveryCollection"]["file"]),
                            "sourceCount": len(evidence["sources"]), "omitted": evidence["omitted"],

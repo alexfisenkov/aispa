@@ -3,6 +3,7 @@
 This records a test contract and command provenance. It cannot decide whether
 the test actually expresses the requested behavior; independent reviewers do.
 """
+from . import scale
 import copy
 import json
 import re
@@ -23,8 +24,15 @@ MAX_REASON = 1600
 MAX_TEST_BYTES = 2 * 1024 * 1024
 
 
-def _text(value, label, limit=MAX_REASON):
-    require(isinstance(value, str) and bool(value.strip()) and len(value) <= limit,
+def _revision_budget(state, count):
+    if scale.enabled(state):
+        maximum = scale._positive("AISPA_MAX_INTENT_REVISIONS", MAX_REVISIONS)
+        if count > maximum:
+            raise Invalid(f"RESOURCE_LIMIT intentRevisions: {count}>{maximum}; continuation: increase AISPA_MAX_INTENT_REVISIONS and revalidate complete history")
+
+
+def _text(value, label, limit=MAX_REASON, *, state=None):
+    require(isinstance(value, str) and bool(value.strip()) and (state is not None and scale.enabled(state) or len(value) <= limit),
             "Test intent: неверное поле " + label)
     return value.strip()
 
@@ -49,7 +57,9 @@ def _file(store, source):
         file = confined(store.root, path)
     except (TypeError, ValueError) as exc:
         raise Invalid("Test intent: небезопасный путь источника") from exc
-    require(path == source["path"] and file.is_file() and file.stat().st_size <= MAX_TEST_BYTES
+    if getattr(store, "scale_enabled", False) and file.is_file():
+        scale.Budget().check(file.stat().st_size, path=path)
+    require(path == source["path"] and file.is_file() and (getattr(store, "scale_enabled", False) or file.stat().st_size <= MAX_TEST_BYTES)
             and file_hash(file) == source["sha256"], "Test intent: тестовый источник изменён")
     return path
 
@@ -142,9 +152,9 @@ def _saved(store, ref):
     return value
 
 
-def _routes(report, expected):
+def _routes(report, expected, state=None):
     routes = report.get("routes")
-    require(isinstance(routes, list) and 0 < len(routes) <= MAX_ROUTES,
+    require(isinstance(routes, list) and routes and (state is not None and scale.enabled(state) or len(routes) <= MAX_ROUTES),
             "Test intent: нужны способы проверки каждого критерия")
     seen = set()
     for row in routes:
@@ -157,7 +167,7 @@ def _routes(report, expected):
         require(pair not in seen, "Test intent: повторный способ проверки критерия")
         seen.add(pair)
         for key in ("reason", "procedure", "expected"):
-            _text(row[key], key)
+            _text(row[key], key, state=state)
     require({c for c, _ in seen} == expected, "Test intent: способы покрывают не все критерии")
     return {c for c, kind in seen if kind == "automated"}
 
@@ -192,7 +202,7 @@ def route_summary(store, state, task_id):
                 or value.get("taskContract") != task_contract(state, task_id)):
             return empty
         routes = value["report"]["routes"]
-        _routes(value["report"], set(_task["criteria"]))
+        _routes(value["report"], set(_task["criteria"]), state)
         return {"mode": "mixed", "counts": {k: sum(r["kind"] == k for r in routes) for k in sorted(KINDS)},
                 "routes": copy.deepcopy(routes)}
     except (Invalid, OSError, ValueError, TypeError, KeyError):
@@ -200,6 +210,7 @@ def route_summary(store, state, task_id):
 
 
 def _report(store, state, task, attempt, report):
+    scale.check_value(report, state)
     require(isinstance(report, dict) and report.get("mode") in ("behavior_change", "not_applicable", "mixed")
             and report.get("attempt") == attempt["id"]
             and report.get("basis") == task_basis(store, state, task["id"]),
@@ -208,7 +219,7 @@ def _report(store, state, task, attempt, report):
     extra = {"failureChecks"} if state.get("policy", {}).get("errorBoundaryChecks") else set()
     if report["mode"] == "mixed":
         require(state.get("policy", {}).get("mixedEvidence") is True, "Test intent: mixed требует новой политики")
-        expected = _routes(report, expected)
+        expected = _routes(report, expected, state)
     if report["mode"] in ("behavior_change", "mixed"):
         shape = {"mode", "attempt", "basis", "criteria", "redExecution", "newTestFiles"} | extra
         if report["mode"] == "mixed":
@@ -222,7 +233,7 @@ def _report(store, state, task, attempt, report):
                 failure_checks.validate(task, report, lambda source: _file(store, source))
             return
         tests = report["newTestFiles"]
-        require(isinstance(tests, list) and 0 < len(tests) <= MAX_TESTS,
+        require(isinstance(tests, list) and tests and (scale.enabled(state) or len(tests) <= MAX_TESTS),
                 "Test intent: нужны новые тесты с SHA")
         seen, covered = set(), set()
         for row in tests:
@@ -234,7 +245,7 @@ def _report(store, state, task, attempt, report):
                     and len(set(row["criteria"])) == len(row["criteria"])
                     and set(row["criteria"]) <= expected,
                     "Test intent: повторный тест или чужой критерий")
-            _text(row["expectedFailure"], "expectedFailure", 500)
+            _text(row["expectedFailure"], "expectedFailure", 500, state=state)
             seen.add(path)
             covered.update(row["criteria"])
         require(covered == expected, "Test intent: часть критериев не покрыта новыми тестами")
@@ -253,7 +264,7 @@ def _report(store, state, task, attempt, report):
                     and row["criterion"] in expected and row["criterion"] not in seen
                     and row["purpose"] in PURPOSES,
                     "Test intent: причина не связана с критерием и назначением")
-            _text(row["reason"], "reason")
+            _text(row["reason"], "reason", state=state)
             _file(store, row["source"])
             seen.add(row["criterion"])
         _na_guard(store, state, task, attempt, report)
@@ -300,7 +311,9 @@ def record(store, state, task_id, report):
     require(digest(journal["last"]["state"]) == digest(state),
             "Test intent: сначала сохраните исполнение в журнал")
     previous_refs = attempt.get("testIntentHistory", [])
-    require(isinstance(previous_refs, list) and len(previous_refs) < MAX_REVISIONS,
+    if isinstance(previous_refs, list):
+        _revision_budget(state, len(previous_refs) + 1)
+    require(isinstance(previous_refs, list) and (scale.enabled(state) or len(previous_refs) < MAX_REVISIONS),
             "Test intent: история повреждена или исчерпана")
     previous = _saved(store, previous_refs[-1]) if previous_refs else None
     first_submit = _first_submit(journal["events"], task_id, attempt["id"])
@@ -358,7 +371,9 @@ def record(store, state, task_id, report):
 def _valid(store, state, task_id, *, require_green, allow_source_changes=False, historical=False):
     task, attempt = _attempt(state, task_id)
     history = attempt.get("testIntentHistory")
-    require(isinstance(history, list) and 0 < len(history) <= MAX_REVISIONS
+    if isinstance(history, list):
+        _revision_budget(state, len(history))
+    require(isinstance(history, list) and history and (scale.enabled(state) or len(history) <= MAX_REVISIONS)
             and attempt.get("testIntent") == history[-1],
             "Test intent: контракт отсутствует")
     journal = store.read_journal()
@@ -366,6 +381,7 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
     require(digest(journal["last"]["state"]) == digest(state),
             "Test intent: состояние не сохранено")
     contracts = [_saved(store, ref) for ref in history]
+    scale.check_value(contracts, state)
     baseline_ref = attempt.get("testBaseline")
     require(baseline_ref and artifact_valid(store, baseline_ref), "Test intent: исходный снимок изменён")
     baseline = json.loads(store.text(baseline_ref))
@@ -412,7 +428,7 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
     report = latest["report"]
     if latest["mode"] == "mixed":
         require(state.get("policy", {}).get("mixedEvidence") is True, "Test intent: mixed требует новой политики")
-        automatic = _routes(report, set(task["criteria"]))
+        automatic = _routes(report, set(task["criteria"]), state)
         require(bool(automatic) == _has_red(report), "Test intent: автоматическим критериям нужен RED")
         if not automatic:
             require(report.get("redExecution") is None and report.get("newTestFiles") == [], "Test intent: лишний RED")

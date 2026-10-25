@@ -5,6 +5,7 @@ coverage and two declared participants are checkable; semantic interpretation
 still requires independent human or model judgment.
 """
 import json
+from . import scale
 
 from .contracts import active, artifact_valid, nonempty
 from .store import Invalid, confined, digest
@@ -32,14 +33,14 @@ def _sources(store, state):
         _need(artifact_valid(store, ref), "изменён исходный бриф")
         bid = ref.get("id")
         _need(isinstance(bid, str) and bid not in result, "повторный или пустой ID брифа")
-        text = confined(store.run, ref["file"]).read_bytes().decode("utf-8")
-        _need(text.strip() and len(text) <= MAX_SOURCE_CHARS, "пустой или слишком большой бриф")
+        text = store.text(ref)
+        _need(text.strip() and (scale.enabled(state) or len(text) <= MAX_SOURCE_CHARS), "пустой или слишком большой бриф")
         result[bid] = (ref, text)
     _need(result, "сначала сохраните бриф")
     return result
 
 
-def _units(text):
+def _units(text, *, scalable=False):
     """Stable navigation only: line ends and sentence punctuation + whitespace."""
     rows = []
     start = 0
@@ -59,11 +60,13 @@ def _units(text):
             emit(start, index if char in "\r\n" else index + 1)
             start = index + 1
     emit(start, len(text))
-    _need(0 < len(rows) <= MAX_UNITS, "слишком много исходных фрагментов")
+    _need(rows and (scalable or len(rows) <= MAX_UNITS), "слишком много исходных фрагментов")
     # This also guards edits to the navigation splitter that drop characters.
-    marked = {i for left, right, _ in rows for i in range(left, right)}
-    _need(all(i in marked for i, char in enumerate(text) if not char.isspace()),
-          "исходный текст покрыт не полностью")
+    previous = 0
+    for left, right, _ in rows:
+        _need(not text[previous:left].strip(), "исходный текст покрыт не полностью")
+        previous = right
+    _need(not text[previous:].strip(), "исходный текст покрыт не полностью")
     return rows
 
 
@@ -72,7 +75,7 @@ def source_context(store, state):
     return {"basis": source_basis(state), "briefs": [
         {"id": bid, "sha256": ref["sha256"], "text": text,
          "units": [{"brief": bid, "start": start, "end": end, "text": chunk}
-                   for start, end, chunk in _units(text)]}
+                   for start, end, chunk in _units(text, scalable=scale.enabled(state))]}
         for bid, (ref, text) in _sources(store, state).items()]}
 
 
@@ -84,10 +87,10 @@ def _source_rows(store, state, report, role, actor_check):
     _need(isinstance(actor, str) and actor_check(state, actor, role),
           "участник не подтверждён реестром: " + role)
     rows = report["units"]
-    _need(isinstance(rows, list) and 0 < len(rows) <= MAX_UNITS * max(1, len(state["briefs"])),
+    _need(isinstance(rows, list) and rows and (scale.enabled(state) or len(rows) <= MAX_UNITS * max(1, len(state["briefs"]))),
           "нужен ограниченный список исходных фрагментов")
     expected = {(bid, start, end): chunk for bid, (_, text) in _sources(store, state).items()
-                for start, end, chunk in _units(text)}
+                for start, end, chunk in _units(text, scalable=scale.enabled(state))}
     seen = {}
     for row in rows:
         fields = {"brief", "start", "end", "text", "kind", "summary", "reason"}
@@ -99,8 +102,8 @@ def _source_rows(store, state, report, role, actor_check):
               key in expected and key not in seen and row["text"] == expected[key],
               "пропущен, повторён или изменён исходный диапазон")
         _need(row["kind"] in ("intent", "context") and nonempty(row["summary"])
-              and len(row["summary"]) <= 1200, "каждому фрагменту нужны вид и смысл")
-        _need(isinstance(row["reason"], str) and len(row["reason"]) <= 1200
+              and (scale.enabled(state) or len(row["summary"]) <= 1200), "каждому фрагменту нужны вид и смысл")
+        _need(isinstance(row["reason"], str) and (scale.enabled(state) or len(row["reason"]) <= 1200)
               and (row["kind"] != "context" or nonempty(row["reason"])),
               "контекст требует отдельного объяснения")
         if "execution" in row:
@@ -109,7 +112,8 @@ def _source_rows(store, state, report, role, actor_check):
             execution_obligations.annotation(row["execution"], row["text"])
         seen[key] = row
     _need(set(seen) == set(expected), "потеряны слова исходного брифа; учтите каждый фрагмент")
-    _need(len(json.dumps(report, ensure_ascii=False, allow_nan=False)) <= MAX_REPORT_CHARS,
+    scale.check_value(report, state)
+    _need(scale.enabled(state) or len(json.dumps(report, ensure_ascii=False, allow_nan=False)) <= MAX_REPORT_CHARS,
           "слишком большой отчёт")
     return seen
 
@@ -204,7 +208,7 @@ def _reconciliation(store, state, report, actor_check):
         _need(key in left and key in right and key not in seen, "неизвестный или повторный диапазон сверки")
         seen.add(key)
         _need(isinstance(row["reason"], str) and nonempty(row["reason"])
-              and len(row["reason"]) <= 1600, "объясните решение по каждому фрагменту")
+              and (scale.enabled(state) or len(row["reason"]) <= 1600), "объясните решение по каждому фрагменту")
         kinds = {left[key]["kind"], right[key]["kind"]}
         disposition = row["disposition"]
         if len(kinds) != 1:
@@ -237,7 +241,8 @@ def _reconciliation(store, state, report, actor_check):
                       "требование должно цитировать весь исходный фрагмент того же брифа")
                 mapped.add(rid)
     _need(seen == set(left), "часть исходного текста не сверена")
-    _need(len(json.dumps(report, ensure_ascii=False, allow_nan=False)) <= MAX_REPORT_CHARS,
+    scale.check_value(report, state)
+    _need(scale.enabled(state) or len(json.dumps(report, ensure_ascii=False, allow_nan=False)) <= MAX_REPORT_CHARS,
           "слишком большой отчёт сверки")
     return not unresolved and mapped == set(reqs) and mapped_execution == set(obligations)
 

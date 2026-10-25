@@ -3,6 +3,7 @@
 The caller owns the journal lock and event. This module never writes ordinary
 project documents, imports old scope, executes document text, or asks for approval.
 """
+from . import scale
 import copy
 import hashlib
 import json
@@ -69,11 +70,14 @@ def _source(store, name, names=None):
         return {"path": name, "status": "unsafe", "reason": "ignored-by-git"}, None
     if not path.is_file():
         return {"path": name, "status": "unsafe", "reason": "not-a-file"}, None
-    if path.stat().st_size > MAX_FILE_BYTES:
+    maximum = scale.Budget().max_bytes if getattr(store, "scale_enabled", False) else MAX_FILE_BYTES
+    if getattr(store, "scale_enabled", False):
+        scale.Budget().check(path.stat().st_size, path=name)
+    if path.stat().st_size > maximum:
         return {"path": name, "status": "unsafe", "reason": "oversized"}, None
     with path.open("rb") as stream:
-        raw = stream.read(MAX_FILE_BYTES + 1)
-    if len(raw) > MAX_FILE_BYTES:
+        raw = stream.read(maximum + 1)
+    if len(raw) > maximum:
         return {"path": name, "status": "unsafe", "reason": "oversized"}, None
     try:
         text = raw.decode("utf-8")
@@ -125,7 +129,7 @@ def discover(store):
             name = path.relative_to(store.root).as_posix()
             if _role(name):
                 candidates.add(name)
-    _require(len(candidates) <= MAX_CANDIDATES, "слишком много кандидатов; укажите канон адресно")
+    _require(getattr(store, "scale_enabled", False) or len(candidates) <= MAX_CANDIDATES, "слишком много кандидатов; укажите канон адресно")
     roles = {role: [] for role in ROLES}
     for name in sorted(candidates):
         roles[_role(name)].append(_metadata(store, name, names))
@@ -148,21 +152,22 @@ def _registry(state):
     return value
 
 
-def _artifact_bytes(base, ref, suffix):
+def _artifact_bytes(base, ref, suffix, *, scalable=False):
+    maximum = scale.Budget().max_bytes if scalable else MAX_FILE_BYTES + 8192
     _require(isinstance(ref, dict) and set(ref) == {"file", "sha256"}
              and isinstance(ref["file"], str) and ref["file"].startswith("project-documents/")
              and ref["file"].endswith(suffix) and isinstance(ref["sha256"], str)
              and _HASH.fullmatch(ref["sha256"]), "повреждена ссылка на снимок документа")
     path = confined(base, ref["file"])
-    _require(path.is_file() and path.stat().st_size <= MAX_FILE_BYTES + 8192, "снимок отсутствует или слишком велик")
+    _require(path.is_file() and path.stat().st_size <= maximum, "снимок отсутствует или слишком велик")
     with path.open("rb") as stream:
-        raw = stream.read(MAX_FILE_BYTES + 8193)
-    _require(len(raw) <= MAX_FILE_BYTES + 8192, "снимок слишком велик")
+        raw = stream.read(maximum + 1)
+    _require(len(raw) <= maximum, "снимок слишком велик")
     _require(hashlib.sha256(raw).hexdigest() == ref["sha256"], "изменён неизменный снимок документа")
     return raw
 
 
-def _validate_binding(base, binding, role):
+def _validate_binding(base, binding, role, *, scalable=False):
     _require(isinstance(binding, dict) and set(binding) == {"id", "role", "path", "acceptedSha256", "reason", "originRun", "snapshot", "manifest"},
              "повреждена привязка документа")
     _require(binding["role"] == role and isinstance(binding["reason"], str) and binding["reason"].strip()
@@ -170,11 +175,11 @@ def _validate_binding(base, binding, role):
     _name(binding["path"])
     expected = {key: value for key, value in binding.items() if key != "manifest"}
     try:
-        saved = json.loads(_artifact_bytes(base, binding["manifest"], ".json"))
+        saved = json.loads(_artifact_bytes(base, binding["manifest"], ".json", scalable=scalable))
     except (OSError, ValueError, TypeError) as error:
         raise Invalid("AISpa project documents: повреждён манифест привязки") from error
     _require(saved == {"schema": SCHEMA, "binding": expected}, "привязка не совпадает с сохранённым манифестом")
-    raw = _artifact_bytes(base, binding["snapshot"], ".md")
+    raw = _artifact_bytes(base, binding["snapshot"], ".md", scalable=scalable)
     _require(binding["acceptedSha256"] == hashlib.sha256(raw).hexdigest()
              and binding["id"] == digest({"role": role, "path": binding["path"], "sha256": binding["acceptedSha256"]}),
              "привязка не совпадает с принятым источником")
@@ -191,13 +196,13 @@ def _save(store, role, path, raw, reason, origin_run):
     return binding
 
 
-def _validate_history(base, registry):
+def _validate_history(base, registry, *, scalable=False):
     checked = set()
     for event in registry["history"]:
         binding = event["binding"]
         key = json.dumps(binding, ensure_ascii=False, sort_keys=True)
         if key not in checked:
-            _validate_binding(base, binding, event["role"])
+            _validate_binding(base, binding, event["role"], scalable=scalable)
             checked.add(key)
 
 
@@ -212,13 +217,13 @@ def bind(store, state, role, path, expected_sha256, reason):
     _require(not discovery.SECRET_CONTENT.search(reason) and not CREDENTIAL.search(reason),
              "причина содержит чувствительные данные")
     registry = _registry(state)
-    _validate_history(store.run, registry)
+    _validate_history(store.run, registry, scalable=scale.enabled(state))
     metadata, raw = _source(store, path)
     _require(metadata["status"] == "safe", "источник недоступен или небезопасен: " + path)
     _require(metadata["sha256"] == expected_sha256, "источник изменился после чтения; перечитайте его")
     previous = registry["bindings"].get(role)
     if previous:
-        _validate_binding(store.run, previous, role)
+        _validate_binding(store.run, previous, role, scalable=scale.enabled(state))
         if previous["path"] == path and previous["acceptedSha256"] == expected_sha256:
             return copy.deepcopy(previous)
     binding = _save(store, role, path, raw, reason, state["run"])
@@ -236,9 +241,9 @@ def initialize(store, state, previous=None):
     if previous and previous.get("projectDocuments"):
         old = _registry(previous)
         old_run = confined(store.home, "runs/" + previous["run"])
-        _validate_history(old_run, old)
+        _validate_history(old_run, old, scalable=scale.enabled(previous))
         for role, binding in old["bindings"].items():
-            raw = _validate_binding(old_run, binding, role)
+            raw = _validate_binding(old_run, binding, role, scalable=scale.enabled(previous))
             saved = _save(store, role, binding["path"], raw, binding["reason"], binding["originRun"])
             registry["bindings"][role] = saved
             registry["history"].append({"action": "inherit", "role": role,
@@ -255,7 +260,7 @@ def initialize(store, state, previous=None):
 def view(store, state):
     """Compact read-only file map. Actual contents stay in their ordinary file."""
     registry = _registry(state)
-    _validate_history(store.run, registry)
+    _validate_history(store.run, registry, scalable=scale.enabled(state))
     found = discover(store)
     from . import discovery
     names = set(discovery._names(store))
@@ -265,7 +270,7 @@ def view(store, state):
         row = {"role": role, "purpose": PURPOSES[role][0], "whenRead": PURPOSES[role][1], "candidates": candidates}
         binding = registry["bindings"].get(role)
         if binding:
-            _validate_binding(store.run, binding, role)
+            _validate_binding(store.run, binding, role, scalable=scale.enabled(state))
             metadata = _metadata(store, binding["path"], names)
             status = metadata["status"]
             if status == "safe":
@@ -300,11 +305,11 @@ def required_paths(state):
 def intent_reference(store, state):
     """Read the selected intent only; task packets need no full discovery catalog."""
     registry = _registry(state)
-    _validate_history(store.run, registry)
+    _validate_history(store.run, registry, scalable=scale.enabled(state))
     binding = registry["bindings"].get("intent")
     if not binding:
         return None
-    _validate_binding(store.run, binding, "intent")
+    _validate_binding(store.run, binding, "intent", scalable=scale.enabled(state))
     row = _metadata(store, binding["path"], None)
     if row["status"] == "safe":
         row["status"] = "fresh" if row["sha256"] == binding["acceptedSha256"] else "changed"

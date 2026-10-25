@@ -1,10 +1,11 @@
 """Review complete outcomes and ordered, reversible migration steps."""
 from .contracts import nonempty, overlap, require, task_closure
 from .store import canonical_zone
+from . import scale
 
 
-def _text(value):
-    return nonempty(value) and len(value) <= 2400
+def _text(value, *, scalable=False):
+    return nonempty(value) and (scalable or len(value) <= 2400)
 
 
 def _ids(value, known, *, empty=False):
@@ -28,12 +29,17 @@ def _checks(rows, tasks, needed):
     return seen
 
 
-def validate(tasks, report):
+def validate(tasks, report, *, state=None):
+    scalable = state is not None and scale.enabled(state)
+    if state is not None:
+        scale.check_value(report, state)
     require(isinstance(report, dict) and set(report) == {
         "profile", "reason", "slices", "migrations", "migrationReason"},
         "delivery: нужны profile, reason, slices, migrations, migrationReason")
-    require(report["profile"] in ("small", "feature", "system", "migration") and _text(report["reason"]),
+    require(report["profile"] in ("small", "feature", "system", "migration") and _text(report["reason"], scalable=scalable),
             "Объясните глубину планирования по размеру, связанности и риску проекта")
+    from .scale.graph import DependencyIndex
+    dependency_index = DependencyIndex(tasks, budget=scale.Budget() if scalable else None)
     tasks = {t["id"]: t for t in tasks}
     slices = report["slices"]
     require(isinstance(slices, list) and 0 < len(slices) <= len(tasks), "План требует проверяемых сквозных результатов")
@@ -43,7 +49,7 @@ def validate(tasks, report):
             "id", "kind", "outcome", "tasks", "demonstration", "supports"},
             "Срезу нужны id, kind, outcome, tasks, demonstration, supports")
         sid = row["id"]
-        require(_text(sid) and sid not in known and row["kind"] in ("user", "enabler") and _text(row["outcome"]),
+        require(_text(sid, scalable=scalable) and sid not in known and row["kind"] in ("user", "enabler") and _text(row["outcome"], scalable=scalable),
                 "Объясните наблюдаемый результат среза или необходимой инфраструктуры")
         tids = _ids(row["tasks"], tasks)
         require(not covered & tids, "Задача включена в несколько срезов")
@@ -63,7 +69,7 @@ def validate(tasks, report):
                 "Вспомогательный срез должен объяснять, какие пользовательские результаты обеспечивает")
 
     migrations = report["migrations"]
-    require(isinstance(migrations, list) and len(migrations) <= 32 and _text(report["migrationReason"]),
+    require(isinstance(migrations, list) and (scalable or len(migrations) <= 32) and _text(report["migrationReason"], scalable=scalable),
             "Укажите миграции либо конкретную причину их отсутствия")
     require(report["profile"] != "migration" or migrations, "Профиль migration требует последовательности миграции")
     seen = set()
@@ -71,17 +77,17 @@ def validate(tasks, report):
         require(isinstance(row, dict) and set(row) == {
             "id", "reason", "expand", "migrate", "contract", "consumers", "compatibility", "rollback"},
             "Миграции нужны шаги expand/migrate/contract, потребители, проверки совместимости и восстановления")
-        require(_text(row["id"]) and row["id"] not in seen and _text(row["reason"]), "Повторная или необъяснённая миграция")
+        require(_text(row["id"], scalable=scalable) and row["id"] not in seen and _text(row["reason"], scalable=scalable), "Повторная или необъяснённая миграция")
         seen.add(row["id"])
         expand, migrate, contract = (_ids(row[k], tasks) for k in ("expand", "migrate", "contract"))
         require(not (expand & migrate or expand & contract or migrate & contract),
                 "Добавление нового, перенос потребителей и удаление старого должны иметь отдельные границы проверки")
         for later, earlier in ((migrate, expand), (contract, migrate)):
             for tid in later:
-                ancestors = {t["id"] for t in task_closure({"tasks": list(tasks.values())}, tid)} - {tid}
+                ancestors = {other for other in tasks if other != tid and dependency_index.contains(tid, other)}
                 require(earlier <= ancestors, "Нельзя переносить потребителей до добавления нового или удалять старое до переноса всех")
         consumers = row["consumers"]
-        require(isinstance(consumers, list) and consumers and len(consumers) <= 256, "Перечислите затронутых потребителей")
+        require(isinstance(consumers, list) and consumers and (scalable or len(consumers) <= 256), "Перечислите затронутых потребителей")
         paths, moved = set(), set()
         for consumer in consumers:
             require(isinstance(consumer, dict) and set(consumer) == {"path", "task"}, "Потребителю нужны path и задача переноса")

@@ -26,19 +26,9 @@ def definition(task):
 
 
 def task_closure(state, task_id):
-    tasks = {t["id"]: t for t in state["tasks"]}
-    found, visiting = {}, set()
-    def visit(tid):
-        require(tid in tasks and tid not in visiting, "Неизвестная или циклическая зависимость задачи")
-        if tid in found:
-            return
-        visiting.add(tid)
-        for dep in tasks[tid]["dependsOn"]:
-            visit(dep)
-        visiting.remove(tid)
-        found[tid] = tasks[tid]
-    visit(task_id)
-    return list(found.values())
+    from .scale.graph import DependencyIndex
+    from . import scale
+    return DependencyIndex(state["tasks"], budget=scale.Budget() if scale.enabled(state) else None).closure(task_id)
 
 
 def task_contract(state, task_id):
@@ -122,7 +112,13 @@ def basis(store, state, kind, task_id=None):
 def artifact_valid(store, artifact):
     try:
         p = confined(store.run, artifact["file"])
-        return p.is_file() and file_hash(p) == artifact["sha256"]
+        from . import scale
+        if not p.is_file() or file_hash(p) != artifact["sha256"]:
+            return False
+        # The outer SHA binds ordered chunk identities; verify their bytes too.
+        if p.suffix in (".json", ".md"):
+            scale.read_file(p, expected_sha256=artifact["sha256"])
+        return True
     except (Invalid, KeyError, OSError):
         return False
 
@@ -202,6 +198,8 @@ def task_verified(store, state, task_id):
 
 
 def add_requirements(store, state, items):
+    from . import scale
+    scale.check_value(items, state)
     require(isinstance(items, list) and items, "Нужен непустой список требований")
     known = {r["id"]: r for r in state["requirements"]}
     briefs = {b["id"]: b for b in state["briefs"]}
@@ -236,6 +234,8 @@ def add_requirements(store, state, items):
 
 
 def validate_plan(state, items):
+    from . import scale
+    budget = scale.check_value(items, state)
     require(isinstance(items, list) and items, "Пустой план недопустим")
     available = {r["id"] for r in active(state)}
     tasks = {}
@@ -267,42 +267,44 @@ def validate_plan(state, items):
     covered = {r for t in tasks.values() for r in t["requirements"]}
     require(available <= covered, "В плане потеряны требования: " + ", ".join(sorted(available - covered)))
     graph = dict(state, tasks=list(tasks.values()))
-    closures = {tid: task_closure(graph, tid) for tid in tasks}
+    from .scale.graph import DependencyIndex
+    index = DependencyIndex(list(tasks.values()), budget=budget)
+    closures = {}
+    import sys
+    accounted_memory = sum(sys.getsizeof(bits) for bits in index.bits.values())
+    for tid in tasks:
+        closures[tid] = index.closure(tid)
+        accounted_memory += sys.getsizeof(closures[tid])
+        if budget:
+            budget.check_memory(accounted_memory, path="plan dependency index", progress=len(closures))
     from . import task_tiers
     task_tiers.validate_plan(tasks, closures)
     common = {canonical_zone(z) for z in COMMON_INPUTS} | {z for t in tasks.values() for z in t["zones"] if common_input(z)}
     if state.get("policy", {}).get("projectDocuments"):
         from . import project_documents
         common |= {canonical_zone(z) for z in project_documents.required_paths(state)}
-    readsets = {tid: sorted(common | {z for t in closure for z in t["zones"] + t.get("readZones", [])})
-                for tid, closure in closures.items()}
+    readsets = {}
+    for tid, closure in closures.items():
+        readsets[tid] = sorted(common | {z for t in closure for z in t["zones"] + t.get("readZones", [])})
+        accounted_memory += sys.getsizeof(readsets[tid])
+        if budget:
+            budget.check_memory(accounted_memory, path="plan read/conflict index", progress=len(readsets))
     values = list(tasks.values())
     for i, left in enumerate(values):
+        if budget:
+            budget.check(0, path="plan dependency/conflict validation", progress=i)
         for right in values[i + 1:]:
-            ordered = left["id"] in {t["id"] for t in closures[right["id"]]} or right["id"] in {t["id"] for t in closures[left["id"]]}
+            ordered = index.contains(right["id"], left["id"]) or index.contains(left["id"], right["id"])
             conflict = overlap(left["zones"], readsets[right["id"]]) or overlap(right["zones"], readsets[left["id"]])
             require(not conflict or ordered, "Запись/чтение задач %s и %s пересекаются: добавьте явную dependsOn" % (left["id"], right["id"]))
-    visiting = set()
-
-    def wave(tid):
-        require(tid in tasks, "Неизвестная зависимость: " + tid)
+    by_wave = {}
+    for tid in index.order:
         task = tasks[tid]
-        if "wave" in task:
-            return task["wave"]
-        require(tid not in visiting, "Цикл зависимостей")
-        visiting.add(tid)
-        value = 1 + max([wave(dep) for dep in task["dependsOn"]] or [0])
-        visiting.remove(tid)
-        # Conflicting zones are serialised deterministically.
-        used = [t for t in tasks.values() if t is not task and t.get("wave") == value]
-        while any(overlap(task["zones"], t["zones"]) for t in used):
+        value = 1 + max((tasks[dep]["wave"] for dep in task["dependsOn"]), default=0)
+        while any(overlap(task["zones"], other["zones"]) for other in by_wave.get(value, [])):
             value += 1
-            used = [t for t in tasks.values() if t is not task and t.get("wave") == value]
         task["wave"] = value
-        return value
-
-    for tid in tasks:
-        wave(tid)
+        by_wave.setdefault(value, []).append(task)
     return list(tasks.values())
 
 

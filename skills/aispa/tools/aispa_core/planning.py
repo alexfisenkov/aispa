@@ -5,7 +5,7 @@ from collections import Counter
 from .contracts import (active, artifact_valid, basis, definition, nonempty, overlap,
                         require, validate_plan)
 from .store import digest
-from . import check_modes, delivery, review_policy, task_tiers
+from . import check_modes, delivery, review_policy, task_tiers, scale
 
 MAX_TASKS = 96
 MAX_REPORT_CHARS = 131072
@@ -58,8 +58,9 @@ ROLE_SLOT_NOTE = "Базовые роли одной попытки; не пре
 
 
 def _tasks(state, raw):
-    require(isinstance(raw, list) and 0 < len(raw) <= MAX_TASKS,
+    require(isinstance(raw, list) and raw and (scale.enabled(state) or len(raw) <= MAX_TASKS),
             "Разбор размера плана принимает от 1 до 96 задач")
+    scale.check_value(raw, state)
     return validate_plan(state, raw)
 
 
@@ -104,7 +105,8 @@ def review(store, state, final, report):
     require(isinstance(report, dict) and {"basis", "draft", "groups", "separate"} <= set(report)
             <= {"basis", "draft", "groups", "separate", "delivery"},
             "Разбор плана требует basis, draft, groups, separate и delivery для новых прогонов")
-    require(len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_CHARS, "Слишком большой разбор плана")
+    scale.check_value(report, state)
+    require(scale.enabled(state) or len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_CHARS, "Слишком большой разбор плана")
     advice = analyze(store, state, report["draft"])
     require(report["basis"] == advice["basis"], "Разбор размера плана устарел")
     draft = {t["id"]: t for t in advice["draft"]}
@@ -118,7 +120,7 @@ def review(store, state, final, report):
         require(isinstance(tid, str) and tid in final and tid not in seen_final, "Неизвестная или повторная итоговая задача")
         require(isinstance(ids, list) and ids and all(isinstance(i, str) and i in draft and i not in mapping for i in ids)
                 and len(ids) == len(set(ids)), "Исходная задача потеряна или включена дважды")
-        require(nonempty(group["reason"]) and len(group["reason"]) <= 2000, "Объясните размер и границы итоговой задачи")
+        require(nonempty(group["reason"]) and (scale.enabled(state) or len(group["reason"]) <= 2000), "Объясните размер и границы итоговой задачи")
         seen_final.add(tid)
         selected = [draft[i] for i in ids]
         connected = {ids[0]}
@@ -159,11 +161,11 @@ def review(store, state, final, report):
         require(isinstance(row, dict) and set(row) == {"suggestion", "reason"}, "Некорректное объяснение границы")
         key = row["suggestion"]
         require(isinstance(key, str) and key in needed and key not in seen and nonempty(row["reason"])
-                and len(row["reason"]) <= 2000, "Объясните каждую сохранённую тонкую границу один раз")
+                and (scale.enabled(state) or len(row["reason"]) <= 2000), "Объясните каждую сохранённую тонкую границу один раз")
         seen.add(key)
     require(seen == needed, "Остались мелкие связанные задачи без объяснения границ")
     if state.get("policy", {}).get("deliveryPlan") or "delivery" in report:
-        delivery.validate(list(final.values()), report.get("delivery"))
+        delivery.validate(list(final.values()), report.get("delivery"), state=state)
     record = store.artifact("plan-reviews", (json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
     return {"report": record, "scopeBasis": basis(store, state, "coverage"),
             "planDigest": digest([definition(t) for t in final.values()]),
@@ -182,7 +184,7 @@ def valid(store, state):
     if state.get("policy", {}).get("deliveryPlan"):
         try:
             report = json.loads(store.text(receipt["report"]))
-            delivery.validate(state["tasks"], report["delivery"])
+            delivery.validate(state["tasks"], report["delivery"], state=state)
             if receipt.get("deliveryDigest") != digest(report["delivery"]):
                 return False
         except (OSError, ValueError, TypeError, KeyError):

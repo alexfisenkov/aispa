@@ -4,6 +4,7 @@ These are structural contracts. Exact quotations and hashes establish origin,
 not the quality of a proposed scenario or the truth of an implementation.
 """
 import json
+from . import scale
 import re
 from pathlib import PurePosixPath
 
@@ -51,8 +52,8 @@ def _need(ok, message):
         raise Invalid("AISpa design: " + message)
 
 
-def _text(value, label, limit=1600):
-    _need(nonempty(value) and len(value) <= limit, label + ": нужен конкретный текст")
+def _text(value, label, limit=1600, *, state=None):
+    _need(nonempty(value) and (state is not None and scale.enabled(state) or len(value) <= limit), label + ": нужен конкретный текст")
     return value
 
 
@@ -80,12 +81,13 @@ def interface_basis(state):
     return scenario_basis(state)
 
 
-def _size(report):
+def _size(report, state):
     try:
         size = len(json.dumps(report, ensure_ascii=False, allow_nan=False))
     except (ValueError, TypeError, RecursionError) as exc:
         raise Invalid("AISpa design: нужен корректный JSON") from exc
-    _need(size <= MAX_REPORT_CHARS, "слишком большой отчёт")
+    scale.check_value(report, state)
+    _need(scale.enabled(state) or size <= MAX_REPORT_CHARS, "слишком большой отчёт")
 
 
 def _features(store, state, report, mode=None):
@@ -96,18 +98,18 @@ def _features(store, state, report, mode=None):
     _need(report["depth"] in DEPTHS, "depth: strict, balanced или deep")
     _need("depth" not in state or report["depth"] == state["depth"],
           "глубина сценариев должна совпадать с выбранной глубиной прогона")
-    _text(report["depthReason"], "причина глубины", 600)
+    _text(report["depthReason"], "причина глубины", 600, state=state)
     spec = _spec(store, state)
     sources = _source_map(store, state)
     reqs = {r["id"]: r for r in active(state)}
     expected = {rid: r for rid, r in reqs.items() if r.get("kind", "requested") in ("requested", "addition")}
     rows = report["features"]
-    _need(isinstance(rows, list) and len(rows) <= MAX_FEATURES,
+    _need(isinstance(rows, list) and (scale.enabled(state) or len(rows) <= MAX_FEATURES),
           "нужен ограниченный список действующих функций")
     if not rows:
         _need(not expected and "noFeatureReason" in report,
               "пустые сценарии допустимы только без действующих функций и с объяснением")
-        _text(report["noFeatureReason"], "почему нет функций")
+        _text(report["noFeatureReason"], "почему нет функций", state=state)
     else:
         _need("noFeatureReason" not in report, "объяснение отсутствия функций противоречит списку")
     seen = set()
@@ -132,7 +134,7 @@ def _features(store, state, report, mode=None):
         _need(nonempty(quote), "цитата исходного брифа: нужен конкретный текст")
         _need(quote == anchor.get("quote") and quote in sources[anchor["brief"]],
               "цитата должна совпадать с зарегистрированным источником")
-        _need(_text(row["specQuote"], "цитата спецификации", 3000) in spec,
+        _need(_text(row["specQuote"], "цитата спецификации", 3000, state=state) in spec,
               "сценарии не привязаны к действующей спецификации")
         dimensions = row["dimensions"]
         required = set(required_dimensions(state, report["depth"], mode))
@@ -149,15 +151,15 @@ def _features(store, state, report, mode=None):
             checked.add(name)
             _need(cell["status"] in ("covered", "not_applicable"),
                   "статус измерения: covered или not_applicable")
-            _text(cell["scenario"], name + ": сценарий или причина неприменимости")
-            _text(cell["verification"], name + ": способ проверки")
-            _need(isinstance(cell["counterexample"], str) and len(cell["counterexample"]) <= 1600,
+            _text(cell["scenario"], name + ": сценарий или причина неприменимости", state=state)
+            _text(cell["verification"], name + ": способ проверки", state=state)
+            _need(isinstance(cell["counterexample"], str) and (scale.enabled(state) or len(cell["counterexample"]) <= 1600),
                   "контрпример должен быть текстом")
             if (report["depth"] == "deep" or (mode or check_modes.current(state)) == "max") and cell["status"] == "covered":
-                _text(cell["counterexample"], name + ": контрпример для deep")
+                _text(cell["counterexample"], name + ": контрпример для deep", state=state)
         _need(required <= checked, "сценарии функции неполны")
     _need(seen == set(expected), "не все действующие функции получили сценарии")
-    _size(report)
+    _size(report, state)
 
 
 def _save(store, state, report, key, history, group, extra=None, mode=None):
@@ -230,11 +232,11 @@ def _interfaces(store, state, report, check_sources=True):
     _source_map(store, state)
     active_ids = {r["id"] for r in active(state)}
     rows = report["interfaces"]
-    _need(isinstance(rows, list) and len(rows) <= MAX_INTERFACES,
+    _need(isinstance(rows, list) and (scale.enabled(state) or len(rows) <= MAX_INTERFACES),
           "до плана нужен ограниченный список интерфейсов")
     if not rows:
         _need("noInterfaceReason" in report, "объясните, почему контракту не нужны интерфейсы")
-        _text(report["noInterfaceReason"], "почему нет интерфейсов")
+        _text(report["noInterfaceReason"], "почему нет интерфейсов", state=state)
     else:
         _need("noInterfaceReason" not in report, "объяснение отсутствия интерфейсов противоречит списку")
     names = set()
@@ -242,16 +244,16 @@ def _interfaces(store, state, report, check_sources=True):
         _need(isinstance(row, dict) and set(row) ==
               {"name", "signature", "ownerZone", "consumers", "testSeam", "requirements", "references", "referenceReason"},
               "интерфейсу нужны имя, сигнатура, зоны, тест и ссылки")
-        name = _text(row["name"], "имя интерфейса", 160)
+        name = _text(row["name"], "имя интерфейса", 160, state=state)
         _need(bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:-]*", name)) and name not in names,
               "имя интерфейса должно быть точным и уникальным")
         names.add(name)
-        _text(row["signature"], "точная сигнатура", 1000)
-        _text(row["testSeam"], "тестовый шов", 1600)
+        _text(row["signature"], "точная сигнатура", 1000, state=state)
+        _text(row["testSeam"], "тестовый шов", 1600, state=state)
         owner = canonical_zone(row["ownerZone"])
         consumers = row["consumers"]
         _need(isinstance(consumers, list) and all(isinstance(z, str) for z in consumers)
-              and len(consumers) == len(set(consumers)) and len(consumers) <= 64,
+              and len(consumers) == len(set(consumers)) and (scale.enabled(state) or len(consumers) <= 64),
               "потребители должны быть списком зон")
         _need(all(canonical_zone(z) != owner for z in consumers), "владелец не является внешним потребителем")
         ids = row["requirements"]
@@ -259,11 +261,11 @@ def _interfaces(store, state, report, check_sources=True):
               and len(ids) == len(set(ids)),
               "интерфейс должен быть привязан к действующим требованиям")
         refs = row["references"]
-        _need(isinstance(refs, list) and len(refs) <= 32, "слишком много указателей материалов")
+        _need(isinstance(refs, list) and (scale.enabled(state) or len(refs) <= 32), "слишком много указателей материалов")
         for ref in refs:
             _path_ref(store, ref, check_sources)
-        _text(row["referenceReason"], "основание выбора материалов или их отсутствия", 1000)
-    _size(report)
+        _text(row["referenceReason"], "основание выбора материалов или их отсутствия", 1000, state=state)
+    _size(report, state)
 
 
 def record_interfaces(store, state, report):
@@ -277,10 +279,12 @@ def record_interfaces(store, state, report):
             if key in snapshots:
                 continue
             path = confined(store.root, source["file"])
-            _need(path.stat().st_size <= 5 * 1024 * 1024, "материал интерфейса превышает 5 MiB")
-            raw = path.read_bytes()
+            _need((scale.enabled(state) or path.stat().st_size <= 5 * 1024 * 1024), "материал интерфейса превышает 5 MiB")
+            raw = scale.read_file(path, allow_manifest=False) if scale.enabled(state) else path.read_bytes()
             total += len(raw)
-            _need(total <= 20 * 1024 * 1024 and len(snapshots) < 64, "слишком много материалов интерфейса")
+            if scale.enabled(state):
+                scale.Budget().check(total, path="interface-references")
+            _need((scale.enabled(state) or total <= 20 * 1024 * 1024 and len(snapshots) < 64), "слишком много материалов интерфейса")
             _need(hashlib.sha256(raw).hexdigest() == source["sha256"], "материал изменился во время чтения")
             _need(not SECRET_CONTENT.search(raw.decode("utf-8", "replace")), "материал содержит возможный секрет")
             snapshots[key] = {**source, "snapshot": store.artifact("interface-references", raw, path.suffix or ".bin")}
@@ -325,21 +329,14 @@ def validate_plan_bindings(store, state, tasks):
     _need(isinstance(tasks, list) and tasks, "нужен план задач для привязки интерфейсов")
     indexed = {t["id"]: t for t in tasks}
     _need(len(indexed) == len(tasks), "повторный ID задачи")
-    def ancestors(task):
-        seen, pending = set(), list(task["dependsOn"])
-        while pending:
-            tid = pending.pop()
-            _need(tid in indexed, "неизвестная зависимость плана")
-            if tid not in seen:
-                seen.add(tid)
-                pending.extend(indexed[tid]["dependsOn"])
-        return seen
+    from .scale.graph import DependencyIndex
+    dependency_index = DependencyIndex(tasks, budget=scale.Budget() if scale.enabled(state) else None)
 
     def first_owner(matches, label):
         # A later integration/repair task may read or write the whole tree.
         # It does not replace the earliest owner of this interface.
         roots = [t for t in matches if not any(
-            other["id"] in ancestors(t) for other in matches if other is not t)]
+            dependency_index.contains(t["id"], other["id"]) for other in matches if other is not t)]
         _need(len(roots) == 1, label + " должен иметь одного первоначального исполнителя")
         return roots[0]
     bindings = []
@@ -357,14 +354,8 @@ def validate_plan_bindings(store, state, tasks):
                                                         for z in t.get("readZones", []))]
             consumer = first_owner(matches, "потребитель интерфейса")
             if consumer["id"] != provider["id"]:
-                visited, pending = set(), list(consumer["dependsOn"])
-                while pending:
-                    tid = pending.pop()
-                    _need(tid in indexed, "неизвестная зависимость плана")
-                    if tid not in visited:
-                        visited.add(tid)
-                        pending.extend(indexed[tid]["dependsOn"])
-                _need(provider["id"] in visited, "потребитель должен зависеть от владельца интерфейса")
+                _need(dependency_index.contains(consumer["id"], provider["id"]),
+                      "потребитель должен зависеть от владельца интерфейса")
             consumers.append(consumer["id"])
         bindings.append({"interface": item["name"], "provider": provider["id"],
                          "consumers": consumers})

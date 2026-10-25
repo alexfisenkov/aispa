@@ -5,7 +5,7 @@ import json
 from .contracts import (active, basis, definition, task_closure, require, artifact_valid)
 from .store import common_input, confined, Invalid
 from .portable import match_name, relative_name
-from . import autonomy, docmeta, telemetry, review_policy, task_tiers
+from . import autonomy, docmeta, telemetry, review_policy, task_tiers, scale
 
 MAX_PACKET_BYTES = 16000
 
@@ -22,6 +22,21 @@ def _context_artifact(store, value):
     """
     data = encode(value)
     sha = hashlib.sha256(data).hexdigest()
+    if getattr(store, "scale_enabled", False) and len(data) > scale.Budget().chunk_bytes:
+        # A separate index points to the immutable manifest, never changes an
+        # existing by-sha artifact's meaning, and is not used as evidence.
+        index_name = "contexts/manifest-index/" + sha + ".json"
+        index_path = confined(store.run, index_name)
+        if index_path.exists():
+            ref = json.loads(scale.read_file(index_path, allow_manifest=False))
+            require(artifact_valid(store, ref) and store.text(ref).encode() == data,
+                    "Повреждён сохранённый пакетный раздел контекста")
+            return ref
+        ref = store.artifact("reviews", data, ".json")
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        with index_path.open("xb") as stream:
+            stream.write(encode(ref))
+        return ref
     name = "contexts/by-sha/" + sha + ".json"
     path = confined(store.run, name)
     path.parent.mkdir(parents=True, exist_ok=True)

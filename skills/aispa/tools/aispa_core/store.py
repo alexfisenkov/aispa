@@ -67,7 +67,11 @@ def digest(value):
 
 
 def file_hash(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    hasher = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(65536), b""):
+            hasher.update(block)
+    return hasher.hexdigest()
 
 
 def atomic_json(path, value):
@@ -560,12 +564,25 @@ class Journal:
         name = group + "/" + uuid.uuid4().hex + suffix
         path = confined(self.run, name)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("xb") as stream:
-            stream.write(data)
+        from . import scale
+        # Only domain inputs/reports use this transport. Execution receipts,
+        # binary attachments and private history retain their native schemas.
+        groups = {"briefs", "specs", "reviews", "plans", "ideas", "feature-scenarios",
+                  "interface-contracts", "brief-extractions", "brief-reviews", "brief-maps",
+                  "plan-reviews", "test-intent", "test-baselines", "integration-baselines",
+                  "project-integration-reviews", "blind-reviews", "blind-candidates", "discovery"}
+        if getattr(self, "scale_enabled", False) and group in groups and len(data) > scale.Budget().chunk_bytes:
+            scale.write_manifest(path, data, kind="json" if suffix == ".json" else "text",
+                                 basis=hashlib.sha256(data).hexdigest())
+        else:
+            with path.open("xb") as stream:
+                stream.write(data)
         return {"file": name, "sha256": file_hash(path)}
 
     def text(self, artifact):
-        return confined(self.run, artifact["file"]).read_text(encoding="utf-8")
+        from . import scale
+        return scale.read_file(confined(self.run, artifact["file"]),
+                               expected_sha256=artifact["sha256"], verify_plain=False).decode("utf-8")
 
     def git(self, *args):
         result = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True)

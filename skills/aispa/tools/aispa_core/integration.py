@@ -8,6 +8,7 @@ This module validates complete code-tree coverage, immutable source baseline,
 and candidate-specific review.
 It does not run a model or assert that a critic's judgment is true.
 """
+from . import scale
 import copy
 import json
 import os
@@ -107,11 +108,12 @@ def choose_task(store, state, tasks):
     _need(isinstance(tasks, list) and tasks, "для итогового ревью нужен непустой план")
     ids = {t["id"] for t in tasks}
     _need(len(ids) == len(tasks), "повторный ID задачи")
-    graph = dict(state, tasks=tasks)
+    from .scale.graph import DependencyIndex
+    dependency_index = DependencyIndex(tasks, budget=scale.Budget() if scale.enabled(state) else None)
     files = {name for name, _ in store.code_records()}
     candidates = []
     for task in tasks:
-        closure = {item["id"] for item in task_closure(graph, task["id"])}
+        closure = {item["id"] for item in dependency_index.closure(task["id"])}
         if closure != ids:
             continue
         zones = task["zones"] + task.get("readZones", [])
@@ -170,11 +172,11 @@ def _evidence(store, name):
     return {"file": name, "sha256": file_hash(path)}
 
 
-def _review_fields(store, branch):
+def _review_fields(store, branch, state=None):
     _need(isinstance(branch, dict) and set(branch) ==
           {"basis", "code", "files", "changes", "axes", "note", "evidence"},
           "branchReview требует basis, code, files, changes, axes, note, evidence")
-    _need(nonempty(branch["note"]) and len(branch["note"]) <= 3000,
+    _need(nonempty(branch["note"]) and (state is not None and scale.enabled(state) or len(branch["note"]) <= 3000),
           "нужно заключение по всей ветке")
     _need(isinstance(branch["axes"], list) and len(branch["axes"]) == len(AXES),
           "нужны пять направлений общего ревью")
@@ -187,7 +189,7 @@ def _review_fields(store, branch):
               "неизвестное или повторное направление ревью")
         seen.add(axis)
         _need(row["status"] in ("passed", "failed") and nonempty(row["note"])
-              and len(row["note"]) <= 2000, "результат направления ревью не объяснён")
+              and (state is not None and scale.enabled(state) or len(row["note"]) <= 2000), "результат направления ревью не объяснён")
         artifacts.append(_evidence(store, row["evidence"]))
         if row["status"] == "failed":
             failures.append({"axis": axis, "status": "failed", "note": row["note"]})
@@ -205,14 +207,15 @@ def check(store, state, tid, role, report):
     _need(choose_task(store, state, state["tasks"]) == tid, "итоговая задача больше не охватывает план")
     view = context(store, state, tid)
     branch = report.get("branchReview")
-    artifacts, failures = _review_fields(store, branch)
+    artifacts, failures = _review_fields(store, branch, state)
     _need(report.get("basis") == view["candidateBasis"]
           and branch["basis"] == view["basis"]
           and branch["code"] == view["code"]
           and branch["files"] == view["files"]
           and branch["changes"] == view["changes"],
           "общее ревью не соответствует текущему полному коду и списку изменений")
-    _need(len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_BYTES,
+    scale.check_value(report, state)
+    _need(scale.enabled(state) or len(json.dumps(report, ensure_ascii=False)) <= MAX_REPORT_BYTES,
           "слишком большой отчёт общего ревью")
     return artifacts, failures
 
@@ -253,7 +256,7 @@ def record_valid(store, state, tid, role, record):
         _need(isinstance(report, dict) and report.get("basis") == record.get("basis"),
               "исторический отчёт относится к другому кандидату")
         branch = report.get("branchReview")
-        artifacts, _failures = _review_fields(store, branch)
+        artifacts, _failures = _review_fields(store, branch, state)
         _need(all(artifact_valid(store, ref) for ref in artifacts), "доказательство общего ревью изменено")
         code = _reconstructed_code(baseline["records"], branch["changes"])
         _need(branch["code"] == code
@@ -341,15 +344,16 @@ def project_context(store, state, actor=None):
                          "independent": True, "verdict": "UNASSESSED", "branchReview": branch}}
 
 
-def _project_report(store, report):
+def _project_report(store, report, state=None):
     _need(isinstance(report, dict) and set(report) ==
           {"basis", "reviewer", "independent", "verdict", "branchReview"},
           "общему отчёту нужны basis, reviewer, independent, verdict, branchReview")
     _need(report["independent"] is True and report["verdict"] in ("PASS", "FAIL"),
           "нужны независимое ревью и явный verdict PASS или FAIL")
-    _need(len(json.dumps(report, ensure_ascii=False).encode("utf-8")) <= MAX_REPORT_BYTES,
+    scale.check_value(report, state or {})
+    _need(state is not None and scale.enabled(state) or len(json.dumps(report, ensure_ascii=False).encode("utf-8")) <= MAX_REPORT_BYTES,
           "слишком большой отчёт общего ревью")
-    artifacts, failures = _review_fields(store, report["branchReview"])
+    artifacts, failures = _review_fields(store, report["branchReview"], state)
     _need((report["verdict"] == "PASS") == (not failures),
           "verdict должен соответствовать пяти направлениям общего ревью")
     return artifacts, failures
@@ -373,7 +377,7 @@ def _project_history(store, state):
         who = _project_actor(store, state, record.get("actor"))
         _need(record.get("participant") == who["record"], "изменена личность общего проверяющего")
         report = json.loads(store.text(record["report"]))
-        artifacts, failures = _project_report(store, report)
+        artifacts, failures = _project_report(store, report, state)
         branch = report["branchReview"]
         code = _reconstructed_code(baseline["records"], branch["changes"])
         _need(report["basis"] == record.get("basis") and report["reviewer"] == record["actor"]
@@ -403,7 +407,7 @@ def project_review(store, state, report, actor=None):
     _need(isinstance(report, dict), "общий отчёт должен быть объектом JSON")
     who = _project_actor(store, state, actor if actor is not None else report.get("reviewer"))
     _need(report.get("reviewer") == who["id"], "автор отчёта отличается от integration-reviewer")
-    artifacts, failures = _project_report(store, report)
+    artifacts, failures = _project_report(store, report, state)
     view = context(store, state, tid)
     branch = report["branchReview"]
     _need(report["basis"] == view["candidateBasis"]

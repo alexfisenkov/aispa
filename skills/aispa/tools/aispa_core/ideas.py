@@ -6,7 +6,7 @@ successful. It never adds, removes or weakens requirements on an agent's behalf.
 """
 import json
 
-from . import discovery, product
+from . import discovery, product, scale
 from .contracts import active, artifact_valid
 from .store import Invalid, confined, digest, file_hash
 
@@ -35,14 +35,14 @@ def _object(value, fields, optional=()):
              "пропущено обязательное или добавлено неизвестное поле")
 
 
-def _text(value, label, limit):
-    _require(isinstance(value, str) and bool(value.strip()) and len(value) <= limit,
+def _text(value, label, limit, *, state=None):
+    _require(isinstance(value, str) and bool(value.strip()) and (state is not None and scale.enabled(state) or len(value) <= limit),
              label + ": нужен непустой текст в пределах " + str(limit) + " символов")
     return value
 
 
-def _rows(value, label, limit=MAX_ROWS):
-    _require(isinstance(value, list) and len(value) <= limit,
+def _rows(value, label, limit=MAX_ROWS, *, state=None):
+    _require(isinstance(value, list) and (state is not None and scale.enabled(state) or len(value) <= limit),
              label + ": нужен список в пределах " + str(limit) + " записей")
     return value
 
@@ -77,7 +77,7 @@ def _briefs(store, state):
 
 
 def _observations(store, state, report, *, check_sources):
-    observations = _rows(report["sourceObservations"], "sourceObservations", 32)
+    observations = _rows(report["sourceObservations"], "sourceObservations", 32, state=state)
     if not observations:
         _require("collection" not in report, "collection без sourceObservations не нужен")
         return
@@ -89,19 +89,19 @@ def _observations(store, state, report, *, check_sources):
     checked = set()
     for row in observations:
         _object(row, ("text", "sources"))
-        _text(row["text"], "наблюдение", 1200)
-        refs = _rows(row["sources"], "sources", 8)
+        _text(row["text"], "наблюдение", 1200, state=state)
+        refs = _rows(row["sources"], "sources", 8, state=state)
         _require(refs, "наблюдению нужны источники из сохранённого discovery")
         seen = set()
         for ref in refs:
             _object(ref, ("path", "sha256", "quote"))
-            name = _text(ref["path"], "путь источника", 512)
+            name = _text(ref["path"], "путь источника", 512, state=state)
             source = known.get(name)
             _require(name not in seen and source is not None
                      and ref["sha256"] == source.get("sha256"),
                      "повторный, неизвестный или изменённый источник наблюдения")
             seen.add(name)
-            quote = _text(ref["quote"], "цитата источника", 1200)
+            quote = _text(ref["quote"], "цитата источника", 1200, state=state)
             _require(quote in source.get("excerpt", ""), "цитаты нет в собранном источнике")
             if check_sources and name not in checked:
                 _require(name in names and discovery._kind(name, explicit=True),
@@ -116,24 +116,25 @@ def _validate(store, state, report, *, check_sources=True):
     if state.get("policy", {}).get("projectDocuments") and check_sources:
         from . import project_documents
         project_documents.require_fresh_intent(store, state)
+    scale.check_value(report, state)
     _object(report, _FIELDS, ("collection", "challenge"))
-    _require(_size(report) <= MAX_REPORT_CHARS, "отчёт слишком большой; сократите изложение, сохранив все требования")
+    _require(scale.enabled(state) or _size(report) <= MAX_REPORT_CHARS, "отчёт слишком большой; сократите изложение, сохранив все требования")
     _require(report["basis"] == basis(state), "бриф или требования изменились; обновите разбор идеи")
     _require(isinstance(report["depth"], str) and report["depth"] in LIMITS,
              "depth должен быть compact или deep")
     limit = LIMITS[report["depth"]]
-    _text(report["depthReason"], "причина глубины разбора", 600)
-    _text(report["summary"], "резюме", 1600)
+    _text(report["depthReason"], "причина глубины разбора", 600, state=state)
+    _text(report["summary"], "резюме", 1600, state=state)
     briefs = _briefs(store, state)
     seen = set()
-    for anchor in _rows(report["anchors"], "anchors"):
+    for anchor in _rows(report["anchors"], "anchors", state=state):
         _object(anchor, ("brief", "sha256", "quote"))
         bid = anchor["brief"]
         _require(isinstance(bid, str) and bid in briefs and bid not in seen,
                  "неизвестная или повторная ссылка на бриф")
         source, text = briefs[bid]
         _require(anchor["sha256"] == source["sha256"], "неверная контрольная сумма брифа")
-        _require(_text(anchor["quote"], "цитата брифа", 1600) in text,
+        _require(_text(anchor["quote"], "цитата брифа", 1600, state=state) in text,
                  "цитата отсутствует в исходных словах владельца")
         seen.add(bid)
     _require(seen == set(briefs), "разбор должен ссылаться на каждый текущий бриф владельца")
@@ -141,14 +142,14 @@ def _validate(store, state, report, *, check_sources=True):
     requirements = {row["id"]: row for row in active(state)}
     _require(requirements, "сначала выделите действующие требования")
     seen = set()
-    for row in _rows(report["coverage"], "coverage"):
+    for row in _rows(report["coverage"], "coverage", state=state):
         _object(row, ("requirement", "role", "proposal"))
         rid = row["requirement"]
         _require(isinstance(rid, str) and rid in requirements and rid not in seen,
                  "повторное или неизвестное требование в разборе")
         role = {"requested": "outcome", "constraint": "constraint", "addition": "addition"}[requirements[rid]["kind"]]
         _require(row["role"] == role, "нельзя выдать исходное требование за дополнение или сменить его роль")
-        _text(row["proposal"], "сохранение требования в выбранном решении", 1200)
+        _text(row["proposal"], "сохранение требования в выбранном решении", 1200, state=state)
         seen.add(rid)
     _require(seen == set(requirements), "в разборе потеряны действующие требования: " + ", ".join(sorted(set(requirements) - seen)))
 
@@ -159,43 +160,43 @@ def _validate(store, state, report, *, check_sources=True):
         _require(isinstance(area, str) and area in AREAS and area not in seen,
                  "неизвестная или повторная область разбора")
         _require(row["status"] in ("assessed", "unknown", "not_applicable"), "неизвестный статус области")
-        _text(row["text"], "наблюдение, причина неприменимости или неопределённости", limit)
+        _text(row["text"], "наблюдение, причина неприменимости или неопределённости", limit, state=state)
         if area in CORE_AREAS:
             _require(row["status"] == "assessed", "любой разбор требует рассмотренные проблему, пользователя, результат, альтернативы и малый эксперимент")
         seen.add(area)
     _require(seen == set(AREAS), "разобраны не все области: " + ", ".join(sorted(set(AREAS) - seen)))
 
-    for row in _rows(report["assumptions"], "assumptions", 48):
+    for row in _rows(report["assumptions"], "assumptions", 48, state=state):
         _object(row, ("text", "validation", "consequence"))
         for key in row:
-            _text(row[key], "предположение: " + key, 1200)
-    for row in _rows(report["additions"], "additions", 32):
+            _text(row[key], "предположение: " + key, 1200, state=state)
+    for row in _rows(report["additions"], "additions", 32, state=state):
         _object(row, ("parent", "text", "rationale"))
         parent = row["parent"]
         _require(isinstance(parent, str) and parent in requirements
                  and requirements[parent]["kind"] != "addition",
                  "предложенному дополнению нужно действующее исходное требование")
-        _text(row["text"], "предложенное дополнение", 1200)
-        _text(row["rationale"], "обоснование дополнения", 1200)
+        _text(row["text"], "предложенное дополнение", 1200, state=state)
+        _text(row["rationale"], "обоснование дополнения", 1200, state=state)
     _observations(store, state, report, check_sources=check_sources)
     if state.get("policy", {}).get("productChallenge") or "challenge" in report:
         product.validate(state, report.get("challenge"))
     return report
 
 
-def _read(store, ref):
+def _read(store, ref, state=None):
     _require(isinstance(ref, dict) and isinstance(ref.get("file"), str)
              and ref["file"].startswith("ideas/") and ref["file"].endswith(".json"),
              "нет корректной ссылки на разбор идеи")
     path = confined(store.run, ref["file"])
-    _require(path.stat().st_size <= MAX_REPORT_CHARS * 4 + 4096, "артефакт разбора слишком большой")
+    _require(state is not None and scale.enabled(state) or path.stat().st_size <= MAX_REPORT_CHARS * 4 + 4096, "артефакт разбора слишком большой")
     _require(artifact_valid(store, ref), "артефакт разбора изменён")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(store.text(ref))
 
 
 def _saved_report(store, state, *, check_sources=True):
     ref = state.get("ideaReview")
-    saved = _read(store, ref)
+    saved = _read(store, ref, state)
     _object(saved, ("schema", "run", "report"))
     _require(type(saved["schema"]) is int and saved["schema"] == SCHEMA
              and saved["run"] == state["run"], "чужой или неподдерживаемый разбор идеи")

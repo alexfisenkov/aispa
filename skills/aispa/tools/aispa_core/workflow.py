@@ -21,18 +21,24 @@ SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}
                     r"-----BEGIN [^-]*PRIVATE KEY-----)")
 
 
-def read_input(path):
-    text = Path(path).read_text(encoding="utf-8-sig")
+def read_input(path, *, scalable=False):
+    from . import scale
+    text = scale.read_file(path, allow_manifest=scalable).decode("utf-8-sig")
     require(bool(text.strip()), "Входной файл пуст")
     require(not SECRET.search(text), "Обнаружен возможный секрет; подготовьте обезличенный входной файл")
     return text
 
 
 class Workflow:
-    read_input = staticmethod(read_input)
+    def read_input(self, path):
+        from . import scale
+        self.store.scale_enabled = scale.enabled(self.s)
+        return read_input(path, scalable=scale.enabled(self.s))
 
     def __init__(self, store, state):
         self.store, self.s = store, state
+        from . import scale
+        self.store.scale_enabled = scale.enabled(state)
         self.pipeline = TaskPipeline(self)
 
     def save(self, event, at=None):
@@ -76,11 +82,11 @@ class Workflow:
     def check_mode(self, mode, path):
         """Owner's words for a mode change come as a file, never as a new brief."""
         self.running()
-        return self.pipeline.switch_check_mode(mode, read_input(path))
+        return self.pipeline.switch_check_mode(mode, self.read_input(path))
 
     def brief(self, path):
         self.running()
-        text = read_input(path)
+        text = self.read_input(path)
         artifact = self.store.artifact("briefs", text.encode(), ".md")
         artifact["id"] = "B%03d" % (len(self.s["briefs"]) + 1)
         self.s["briefs"].append(artifact)
@@ -91,7 +97,7 @@ class Workflow:
 
     def requirements(self, path):
         self.running()
-        additions = add_requirements(self.store, self.s, json.loads(read_input(path)))
+        additions = add_requirements(self.store, self.s, json.loads(self.read_input(path)))
         self.s["requirements"].extend(additions)
         self.s["sealed"] = False
         self.save("requirements-added")
@@ -145,13 +151,13 @@ class Workflow:
         if self.s.get("policy", {}).get("discovery"):
             require(discovery.valid(self.store, self.s) and phase_receipts.valid(self.store, self.s, "discovery"),
                     "Сначала изучите проект: discover и проверенный отчёт discover --file с автором")
-        self.s["spec"] = self.store.artifact("specs", read_input(path).encode(), ".md")
+        self.s["spec"] = self.store.artifact("specs", self.read_input(path).encode(), ".md")
         self.save("spec-recorded")
 
     def coverage(self, path, actor=None):
         self.running()
         require(self.s["spec"] and self.s.get("sealed"), "Нет спецификации для действующего брифа")
-        text = read_input(path); report = json.loads(text)
+        text = self.read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "coverage")
         author = phase_receipts.report_actor(self.store, self.s, "coverage", report, actor)
         rows = report.get("checks")
@@ -191,7 +197,7 @@ class Workflow:
         carryover.guard_current(self.store, self.s)
         require(gate_valid(self.store, self.s, "coverage"), "Покрытие брифа не подтверждено или устарело")
         author = phase_receipts.authorize(self.store, self.s, "planner", actor)
-        text = read_input(path)
+        text = self.read_input(path)
         tasks = validate_plan(self.s, json.loads(text))
         if self.s.get("policy", {}).get("designContract"):
             require(design_contract.valid_scenarios(self.store, self.s),
@@ -202,7 +208,7 @@ class Workflow:
         self.pipeline.validate_replan(tasks)
         if self.s.get("policy", {}).get("planReview"):
             require(review_path is not None, "До плана нужен разбор размера задач: plan-check, затем plan --review")
-        size_review = planning.review(self.store, self.s, tasks, json.loads(read_input(review_path))) if review_path else None
+        size_review = planning.review(self.store, self.s, tasks, json.loads(self.read_input(review_path))) if review_path else None
         integration_task = integration.choose_task(self.store, self.s, tasks) if self.s.get("policy", {}).get("integrationReview") else None
         old = {t["id"]: t for t in self.s["tasks"]}
         contract = basis(self.store, self.s, "coverage")
@@ -343,7 +349,7 @@ class Workflow:
         self.running(allow_wait=True)
         require(isinstance(self.s.get("waiting"), dict) and self.s["waiting"].get("kind") == "owner_question",
                 "Нет ожидаемого ответа владельца")
-        text = read_input(path)
+        text = self.read_input(path)
         artifact = self.store.artifact("briefs", text.encode(), ".md")
         artifact["id"] = "B%03d" % (len(self.s["briefs"]) + 1)
         self.s["briefs"].append(artifact)
@@ -446,7 +452,7 @@ class Workflow:
                 "Приёмка одной из завершённых задач отсутствует, повреждена или устарела")
         members = [t for t in self.s["tasks"] if t["wave"] == number]
         require(members and all(t["status"] in ("completed", "blocked") for t in members), "Волна ещё не закончилась")
-        text = read_input(path); report = json.loads(text)
+        text = self.read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "wave")
         expected = {(r["id"], c) for r in active(self.s) for c in r["acceptance"]}
         artifacts, failures = evidence_rows(self.store, report, expected)
@@ -477,7 +483,7 @@ class Workflow:
         require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"]), "Есть незавершённые задачи без результата или блокера")
         require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
                 "Не все завершённые задачи имеют действительную цепочку приёмки")
-        text = read_input(path); report = json.loads(text)
+        text = self.read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "acceptance")
         author = phase_receipts.report_actor(self.store, self.s, "acceptance", report)
         if self.s.get("policy", {}).get("cleanClone"):
