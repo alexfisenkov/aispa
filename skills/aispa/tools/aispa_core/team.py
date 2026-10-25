@@ -63,11 +63,12 @@ def _latest(state, tid):
 
 
 def _role_data(store, attempt, role):
+    from . import task_zone_extension
     record = attempt.get("roles", {}).get(role)
     require(record and artifact_valid(store, record), "Повреждена карточка роли")
     card = _json(store.text(record))
     require(card.get("role") == role and card.get("attempt") == attempt["id"]
-            and card.get("contract") == attempt.get("contract")
+            and card.get("contract") == task_zone_extension.card_contract(attempt, role, record)
             and card.get("checks") == record.get("checks")
             and card.get("specialization") == record.get("specialization")
             and card.get("reviewPolicy", review_policy.LEGACY) == review_policy.mode(attempt)
@@ -79,13 +80,14 @@ def _role_data(store, attempt, role):
 
 
 def _actor_valid(store, state, attempt, role, aid=None):
+    from . import task_zone_extension
     aid = aid or attempt.get("actors", {}).get(role)
     actor = state.get("actors", {}).get(aid)
     if not actor or not _sealed_valid(store, actor):
         return False
     return (actor.get("id") == aid == digest([actor.get("runtime"), actor.get("nativeId"), actor.get("session")])
             and actor.get("attempt") == attempt["id"] and actor.get("role") == role
-            and actor.get("card") == attempt["roles"][role]["sha256"]
+            and task_zone_extension.actor_card_valid(attempt, role, aid, actor.get("card"))
             and (role == "worker" or actor.get("fresh") is True))
 
 
@@ -96,6 +98,11 @@ def _history_valid(store, state, tid):
     if history[0].get("authorization") is not None:
         return False
     for attempt in history:
+        from . import task_zone_extension
+        try:
+            task_zone_extension.history_valid(store, state, tid, attempt)
+        except (Invalid, OSError, KeyError, ValueError, TypeError, IndexError):
+            return False
         for role in attempt.get("roles", {}):
             _role_data(store, attempt, role)
         records = [attempt.get("submitted"), attempt.get("repair"), attempt.get("acceptance"), attempt.get("verifiedCompletion"),
@@ -251,7 +258,7 @@ def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
                 and all(row["status"] in ("resolved", "rejected") for row in resolutions),
                 "Второй критик не закрыл обязательные замечания")
     if test_intent.required(state, attempt):
-        require(attempt.get("testIntent") and all(record.get("testIntent") == attempt["testIntent"] for record in records)
+        require(attempt.get("testIntent") and test_intent.chain_matches(store, attempt, submitted, rounds, repair)
                 and test_intent.history_valid(store, state, tid), "Повреждена история тестового контракта")
     return final
 
@@ -954,6 +961,9 @@ class TaskPipeline:
                 "Исправление допускается между первым и вторым критиком")
         first = attempt["rounds"][0]
         require(_record_valid(self.store, first), "Повреждён отчёт первого критика")
+        if attempt.get("zoneExtensions"):
+            require(test_intent.valid(self.store, self.s, tid),
+                    "Расширенной эпохе нужен новый сохранённый RED/GREEN до ремонта")
         diagnosis = repairs.worker_guard(self.store, self.s, tid) if self.s.get("policy", {}).get("repairDiagnosis") else None
         text, report, artifacts, failures = self._read(tid, "worker", path)
         require(report.get("previousReport") == first["report"]["sha256"], "Исправление не связано с первым отчётом")
