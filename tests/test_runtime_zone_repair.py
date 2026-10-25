@@ -70,6 +70,135 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         args.update(kw)
         return repair.apply(self.root, **args)
 
+    def first_maintenance(self):
+        """Exact previously selected package, before this uncommitted repair."""
+        source = Path(self.temp.name) / "first-maintenance"
+        names = subprocess.check_output(["git", "ls-tree", "-r", "--name-only", "3dce187", "skills/aispa"], cwd=ROOT).decode().splitlines()
+        for name in names:
+            path = source / name.removeprefix("skills/aispa/")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(subprocess.check_output(["git", "show", "3dce187:" + name], cwd=ROOT))
+        self.assertEqual(digest(repair._tree(source)), "3e41d77d07a803ac6c193be9a28759ea17574e418d5c891fd8d3f0167c8c4bf1")
+        cli = source / "tools/repair_task_zones.py"
+        prepared = self.call(cli, "prepare", "--candidate-package", str(source), "--expected-journal-sha256", self.sha)
+        self.call(cli, "apply", "--manifest-file", prepared["manifestPath"],
+                  "--expected-manifest-sha256", prepared["manifest"]["sha256"],
+                  "--expected-journal-sha256", self.sha, "--approval-file", str(self.approval), "--confirm")
+        self.sha = file_hash(self.history)
+        return prepared
+
+    def test_second_immutable_repair_preserves_first_manifest_prefix_runtime_and_attempts(self):
+        first = self.first_maintenance()
+        before = self.store.load()
+        prefix = self.history.read_bytes()
+        retained = {p.relative_to(self.run).as_posix(): p.read_bytes() for p in self.run.rglob("*")
+                    if p.is_file() and p.name != "events.jsonl"}
+        prepared = self.prepare()
+        self.assertEqual(prefix, self.history.read_bytes())
+        self.assertNotEqual(prepared["runtime"], first["runtime"])
+        manifest = json.loads(Path(prepared["manifestPath"]).read_text())
+        self.assertEqual(manifest["oldRuntimeDigest"], first["newRuntimeDigest"])
+        result = self.apply(prepared)
+        state = self.store.load()
+        expected = {**before, **{key: state[key] for key in ("runtimeDigest", "runtimeZoneRepair", "updatedAt")}}
+        self.assertEqual(state, expected)
+        self.assertTrue(self.history.read_bytes().startswith(prefix))
+        self.assertEqual(len(self.history.read_bytes().splitlines()), len(prefix.splitlines()) + 1)
+        for name, raw in retained.items():
+            self.assertEqual((self.run / name).read_bytes(), raw, name)
+        self.assertTrue(repair.inspect(self.root)["alreadyRepaired"])
+        self.call(Path(result["cli"]), "participant", "--role", "coordinator", "--runtime", "codex",
+                  "--native-id", "synthetic-second-repair", "--session", "synthetic")
+        self.sha = file_hash(self.history)
+        self.assertEqual(self.apply(prepared)["newRuntimeDigest"], result["newRuntimeDigest"])
+        with self.assertRaises(Invalid): self.prepare()  # Never a general third repair route.
+
+    def test_second_repair_rejects_stale_cas_or_changed_first_manifest_readonly(self):
+        first = self.first_maintenance()
+        prefix = self.history.read_bytes()
+        with self.assertRaises(Invalid):
+            repair.prepare(self.root, candidate_package=ROOT / "skills/aispa", expected_journal_sha256="0" * 64)
+        prepared = self.prepare()
+        self.assertEqual(prefix, self.history.read_bytes())
+        parent = Path(first["manifestPath"])
+        os.chmod(parent, 0o644)
+        parent.write_bytes(parent.read_bytes() + b"\n")
+        with self.assertRaises(Invalid): self.apply(prepared)
+        self.assertEqual(prefix, self.history.read_bytes())
+
+    def test_malformed_manifest_object_is_a_clean_cli_refusal(self):
+        prepared = self.prepare()
+        path = Path(prepared["manifestPath"])
+        os.chmod(path, 0o644)
+        path.write_text("[]\n")
+        result = self.call(CLI, "apply", "--manifest-file", str(path),
+            "--expected-manifest-sha256", file_hash(path), "--expected-journal-sha256", self.sha,
+            "--approval-file", str(self.approval), "--confirm", expected=2)
+        self.assertIn("manifest должен быть объектом", result.stderr)
+        self.assertEqual(self.prefix, self.history.read_bytes())
+
+    def mixed_fixture(self, *, synthetic=False, omit_attachment=False):
+        """Actual mixed observation schema; its auxiliary blob is arbitrary data."""
+        import test_mixed_evidence
+        from aispa_core.team import _seal
+        fixture = test_mixed_evidence.MixedEvidenceTests(methodName="test_receipts_and_attachments_bound_and_sealed")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        module, report, observations = fixture.observations()
+        fx = fixture.fx
+        blob = fx.store.artifact("evidence", json.dumps({"synthetic": synthetic,
+            "fixtureRun": "20261025T223633-team-ed35bcc7",
+            "phaseOrigins": {"report": {"file": "reviews/8a4ba5c1b0d041adb4c6c9ae480deac9.json", "sha256": "5" * 64}},
+            # A blob cannot declare observation edges just by resembling one.
+            "attachments": [{"file": "evidence/foreign-description.txt", "sha256": "6" * 64}]}).encode(), ".json")
+        body, old_ref, screenshot = observations["browser"]
+        body["attachments"].append(blob)
+        observation = fx.store.artifact("evidence", json.dumps(body).encode(), ".json")
+        for row in report["routeChecks"]:
+            if row["artifact"] == old_ref["file"]:
+                row["artifact"] = observation["file"]
+        artifacts, failures = module.check(fx.store, fx.state, "T01", report)
+        self.assertFalse(failures)
+        if omit_attachment:
+            artifacts = [ref for ref in artifacts if ref != blob]
+        attempt = fx.state["taskHistory"]["T01"][-1]
+        attempt["submitted"] = _seal(fx.store, {"testIntent": attempt["testIntent"],
+            "report": fx.store.artifact("reviews", json.dumps(report).encode(), ".json"),
+            "artifacts": artifacts, "passed": True, "basis": report["basis"], "actor": "synthetic-fixture"})
+        structural = fx.store.artifact("evidence", b"actual structural attachment", ".txt")
+        fx.state["gates"]["fixture"] = {"report": fx.store.artifact("reviews",
+            json.dumps({"nestedProof": structural}).encode(), ".json")}
+        shutil.copytree(self.package, fx.store.run / "runtime")
+        fx.state["runtimeDigest"] = repair.OFFICIAL_DIGEST
+        fx.store.append(fx.state, "synthetic-mixed-runtime")
+        return fx, {"blob": blob, "observation": observation, "screenshot": screenshot, "structural": structural}
+
+    def test_mixed_attachment_foreign_description_is_opaque_with_or_without_synthetic_flag(self):
+        for synthetic in (False, True):
+            with self.subTest(synthetic=synthetic):
+                fx, refs = self.mixed_fixture(synthetic=synthetic)
+                before = {p.relative_to(fx.store.run).as_posix(): p.read_bytes() for p in fx.store.run.rglob("*") if p.is_file()}
+                self.assertFalse(repair.inspect(fx.root)["alreadyRepaired"])
+                self.assertEqual(before, {p.relative_to(fx.store.run).as_posix(): p.read_bytes() for p in fx.store.run.rglob("*") if p.is_file()})
+
+    def test_mixed_declared_attachment_omitted_from_sealed_artifacts_is_refused(self):
+        fx, _ = self.mixed_fixture(omit_attachment=True)
+        prefix = (fx.store.run / "events.jsonl").read_bytes()
+        with self.assertRaisesRegex(Invalid, "[Mm]ixed|приложен"):
+            repair.inspect(fx.root)
+        self.assertEqual(prefix, (fx.store.run / "events.jsonl").read_bytes())
+
+    def test_mixed_blob_observation_screenshot_and_nested_structural_tamper_still_refused(self):
+        fx, refs = self.mixed_fixture()
+        for kind, ref in refs.items():
+            with self.subTest(kind=kind):
+                path = fx.store.run / ref["file"]
+                raw = path.read_bytes()
+                path.write_bytes(raw + b"tampered")
+                with self.assertRaises(Invalid): repair.inspect(fx.root)
+                path.write_bytes(raw)
+        self.assertFalse(repair.inspect(fx.root)["alreadyRepaired"])
+
     def test_inspect_is_strictly_read_only_and_prepare_does_not_select(self):
         before = {p.relative_to(self.root).as_posix(): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
         info = self.call(CLI, "inspect")

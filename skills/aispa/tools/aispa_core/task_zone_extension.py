@@ -286,6 +286,7 @@ def apply(host, tid, report, *, actor, expected_journal_sha256):
     old = copy.deepcopy(state)
     attempt = state["taskHistory"][tid][-1]
     before = {"contract": attempt["contract"], "roles": copy.deepcopy(attempt["roles"])}
+    pipeline = host.pipeline if hasattr(host, "pipeline") else TaskPipeline(host)
     state["tasks"] = proposal["plan"]
     state["planReview"] = planning.review(store, old, proposal["plan"], report["planReview"])
     attempt["contract"] = task_contract(state, tid)
@@ -295,11 +296,10 @@ def apply(host, tid, report, *, actor, expected_journal_sha256):
             continue
         card = _json(store, ref)
         card.update(contract=attempt["contract"], zones=host.task(tid)["zones"],
-                    closure=[definition(t) for t in task_closure(state, tid)],
+                    closure=[definition(t) for t in pipeline._closure(tid)],
                     zoneEpoch=len(attempt.get("zoneExtensions", [])) + 1, previousCard=copy.deepcopy(ref))
         attempt["roles"][role] = {**_artifact_json(store, "roles", card),
                                   "checks": ref["checks"], "specialization": ref["specialization"]}
-    pipeline = host.pipeline if hasattr(host, "pipeline") else TaskPipeline(host)
     for descendant in proposal["descendants"]:
         pipeline._cards(descendant, state["taskHistory"][descendant][-1])
     state["gates"]["plan"] = {"passed": True, "basis": basis(store, state, "plan"),

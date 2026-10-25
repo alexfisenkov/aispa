@@ -76,7 +76,36 @@ def _role_data(store, attempt, role):
             and all(artifact_valid(store, item) for item in card.get("briefs", []))
             and artifact_valid(store, card.get("spec", {})),
             "Карточка роли не соответствует попытке")
+    _card_closure(card, card.get("task"))
+    deferred = card.get("deferredDependencies", [])
+    require(deferred == attempt.get("deferredDependencies", []),
+            "Карточка роли изменила объявленные отложенные зависимости")
+    if attempt.get("zoneExtensions"):
+        original_ref = attempt["zoneExtensions"][0]["before"]["roles"][role]
+        require(artifact_valid(store, original_ref), "Повреждена исходная карточка эпохи")
+        original = _json(store.text(original_ref))
+        require(original.get("deferredDependencies", []) == deferred
+                and {t["id"] for t in _card_closure(original, card["task"])}
+                    == {t["id"] for t in _card_closure(card, card["task"])},
+                "Эпоха изменила состав зависимостей исходной карточки")
     return card
+
+
+def _card_closure(card, tid):
+    """Honor the sealed declaration, including old epochs that re-added it.
+
+    Deferral is a card/attempt fact, not today's status of its predecessor.
+    _role_data binds that declaration to the attempt and epoch-zero artifact.
+    """
+    deferred = card.get("deferredDependencies", [])
+    closure = card.get("closure")
+    require(isinstance(tid, str) and isinstance(deferred, list)
+            and all(isinstance(t, str) and t for t in deferred)
+            and deferred == sorted(set(deferred)) and tid not in deferred
+            and isinstance(closure, list) and all(isinstance(t, dict) and isinstance(t.get("id"), str) for t in closure)
+            and len({t["id"] for t in closure}) == len(closure) and tid in {t["id"] for t in closure},
+            "Повреждён состав зависимостей карточки")
+    return [t for t in closure if t["id"] not in deferred]
 
 
 def _actor_valid(store, state, attempt, role, aid=None):
@@ -302,7 +331,7 @@ def _historical_light(store, state, task, attempt):
     if task.get("proof") != {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}:
         return None
     inherited = accepted.get("inheritedProofs")
-    ancestors = {t["id"] for t in card["closure"]} - {task["id"]}
+    ancestors = {t["id"] for t in _card_closure(card, task["id"])} - {task["id"]}
     if not isinstance(inherited, list) or len(inherited) != len(ancestors) or {p["task"] for p in inherited} != ancestors:
         return None
     return inherited
@@ -340,20 +369,18 @@ def _historical_one(store, state, tid):
     if proof != {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}:
         return None
     coverage = {(row["requirement"], row["criterion"]) for row in accepted.get("coverage", [])}
-    expected = {(t["id"], c) for t in cards["acceptor"]["closure"] for c in t["criteria"]}
-    expected |= {(r["id"], c) for r in cards["acceptor"]["constraints"] for c in r["acceptance"]}
-    expected |= {(tid, c) for c in cards["acceptor"]["checks"]}
+    expected = _closure_expected(cards["acceptor"], tid)
     if coverage != expected:
         return None
     inherited = accepted.get("inheritedProofs")
-    closure_ids = {t["id"] for t in cards["acceptor"]["closure"]} - {tid}
+    closure_ids = {t["id"] for t in _card_closure(cards["acceptor"], tid)} - {tid}
     if not isinstance(inherited, list) or len(inherited) != len(closure_ids) or {p["task"] for p in inherited} != closure_ids:
         return None
     return inherited
 
 
 def _closure_expected(card, tid):
-    expected = {(t["id"], c) for t in card["closure"] for c in t["criteria"]}
+    expected = {(t["id"], c) for t in _card_closure(card, tid) for c in t["criteria"]}
     expected |= {(r["id"], c) for r in card["constraints"] for c in r["acceptance"]}
     return expected | {(tid, c) for c in card["checks"]}
 
@@ -384,7 +411,7 @@ def _historical_lean(store, state, task, attempt, accepted):
     if coverage != _closure_expected(card, tid):
         return None
     inherited = accepted.get("inheritedProofs")
-    closure_ids = {t["id"] for t in card["closure"]} - {tid}
+    closure_ids = {t["id"] for t in _card_closure(card, tid)} - {tid}
     if (not isinstance(inherited, list) or len(inherited) != len(closure_ids)
             or {p["task"] for p in inherited} != closure_ids
             or not isinstance(report.get("inheritedProofs"), list)

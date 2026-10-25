@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline exact-0.4.0 task-zone maintenance: inspect, prepare, apply."""
+"""Offline exact-0.4.0 task-zone/declared-deferral maintenance: inspect, prepare, apply."""
 import argparse
 import json
 import sys
