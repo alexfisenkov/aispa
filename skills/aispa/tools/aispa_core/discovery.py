@@ -179,6 +179,17 @@ def _included_paths(store, paths, names):
     return sorted(set(result))
 
 
+def _retain(budget, value, *, path):
+    """Account retained page values before keeping another source in memory."""
+    if budget is None:
+        return
+    size = 0
+    for part in json.JSONEncoder(ensure_ascii=False).iterencode(value):
+        size += len(part.encode("utf-8"))
+        budget.check_memory(size * 4, path=path)
+    budget.base_memory += size * 4
+
+
 def _scan(store, paths=None, *, cursor=None, scalable=False):
     budget = scale.Budget() if scalable else None
     max_sources = scale._positive("AISPA_DISCOVERY_PAGE_SOURCES", MAX_SOURCES) if scalable else MAX_SOURCES
@@ -217,7 +228,10 @@ def _scan(store, paths=None, *, cursor=None, scalable=False):
     if scalable:
         # All requested safe includes precede opportunistic navigation sources.
         candidates.sort(key=lambda item: item[0] not in included)
+        _retain(budget, {"names": names, "included": included, "candidates": candidates}, path="discovery selection")
     for candidate_index, (name, kind) in enumerate(candidates):
+        # The previous full source is transient; only its page excerpt remains.
+        raw = text = None
         if budget:
             budget.check(0, path=name)
         item = {"path": name, "kind": kind}
@@ -228,12 +242,15 @@ def _scan(store, paths=None, *, cursor=None, scalable=False):
             else:
                 stat = path.stat()
                 item["bytes"] = stat.st_size
-                if stat.st_size > max_file_bytes:
+                if not scalable and stat.st_size > max_file_bytes:
                     item.update(status="oversized", mtimeNs=stat.st_mtime_ns)
                 else:
                     # Size cap also applies if a writer grows a file after stat.
-                    with path.open("rb") as stream:
-                        raw = stream.read(max_file_bytes + 1)
+                    if scalable:
+                        raw = scale._read(path, budget)
+                    else:
+                        with path.open("rb") as stream:
+                            raw = stream.read(max_file_bytes + 1)
                     if len(raw) > max_file_bytes:
                         item.update(status="oversized", mtimeNs=stat.st_mtime_ns)
                     else:
@@ -249,10 +266,13 @@ def _scan(store, paths=None, *, cursor=None, scalable=False):
                                 item["status"] = "sensitive-content"
                             else:
                                 item["status"] = "safe"
-        except (OSError, Invalid):
+        except (OSError, Invalid) as error:
+            if isinstance(error, Invalid) and str(error).startswith("RESOURCE_LIMIT "):
+                raise
             item["status"] = "unavailable-or-symlink"
         _require(name not in included or item["status"] in {"safe", "oversized"},
                  "include нельзя безопасно прочитать: " + name + " (" + item["status"] + ")")
+        _retain(budget, item, path="discovery fingerprints:" + name)
         fingerprints.append(item)
         reason = item["status"] if item["status"] != "safe" else (
             "previous-page" if candidate_index < position else "source-limit" if len(sources) >= max_sources else "excerpt-budget" if used >= max_total or next_position is not None else None)
@@ -275,6 +295,7 @@ def _scan(store, paths=None, *, cursor=None, scalable=False):
         source.update(excerpt=excerpt, omittedChars=max(0, len(text) - len(excerpt)),
                       **({"excerptStart": offset, "excerptEnd": offset + len(excerpt), "totalChars": len(text)} if scalable else {}),
                       commands=commands[:MAX_COMMANDS], omittedCommands=max(0, len(commands) - MAX_COMMANDS))
+        _retain(budget, source, path="discovery page:" + name)
         sources.append(source)
     limits = {"sources": max_sources, "fileBytes": max_file_bytes, "excerptChars": max_excerpt,
               "totalExcerptChars": max_total, "omittedDetails": MAX_OMITTED_DETAILS, "commandsPerSource": MAX_COMMANDS}
@@ -351,6 +372,7 @@ def collect(store, state, paths=None, *, metadata_receipt=None, cursor=None):
         except (OSError, ValueError, TypeError):
             pass
     saved = {"schema": SCHEMA, "run": state["run"], "basis": basis, **scan}
+    scale.check_value(saved, state)
     state["discoveryCollection"] = {**_artifact(store, saved), "basis": basis}
     index_documents(saved["sources"])
     return saved

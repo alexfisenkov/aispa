@@ -153,8 +153,15 @@ def _saved(store, ref):
 
 
 def _routes(report, expected, state=None):
+    """Validate structure; explicit state also enforces admission/history policy.
+
+    State-free callers consume an immutable, previously admitted contract. Its
+    structure stays binding, but historical admission caps are not its schema.
+    Admission and policy-aware history validation must always pass their state.
+    """
+    legacy_limits = state is not None and not scale.enabled(state)
     routes = report.get("routes")
-    require(isinstance(routes, list) and routes and (state is not None and scale.enabled(state) or len(routes) <= MAX_ROUTES),
+    require(isinstance(routes, list) and routes and (not legacy_limits or len(routes) <= MAX_ROUTES),
             "Test intent: нужны способы проверки каждого критерия")
     seen = set()
     for row in routes:
@@ -167,7 +174,9 @@ def _routes(report, expected, state=None):
         require(pair not in seen, "Test intent: повторный способ проверки критерия")
         seen.add(pair)
         for key in ("reason", "procedure", "expected"):
-            _text(row[key], key, state=state)
+            require(isinstance(row[key], str) and bool(row[key].strip())
+                    and (not legacy_limits or len(row[key]) <= MAX_REASON),
+                    "Test intent: неверное поле " + key)
     require({c for c, _ in seen} == expected, "Test intent: способы покрывают не все критерии")
     return {c for c, kind in seen if kind == "automated"}
 
@@ -230,7 +239,7 @@ def _report(store, state, task, attempt, report):
                     "Test intent: без automated RED и тесты отсутствуют")
             if extra:
                 from . import failure_checks
-                failure_checks.validate(task, report, lambda source: _file(store, source))
+                failure_checks.validate(task, report, lambda source: _file(store, source), state=state)
             return
         tests = report["newTestFiles"]
         require(isinstance(tests, list) and tests and (scale.enabled(state) or len(tests) <= MAX_TESTS),
@@ -270,7 +279,7 @@ def _report(store, state, task, attempt, report):
         _na_guard(store, state, task, attempt, report)
     if extra:
         from . import failure_checks
-        failure_checks.validate(task, report, lambda source: _file(store, source))
+        failure_checks.validate(task, report, lambda source: _file(store, source), state=state)
 
 
 def _red(store, state, task_id, attempt_id, report):
@@ -436,7 +445,7 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
         require(covered == automatic, "Test intent: неверное покрытие automated")
     if state.get("policy", {}).get("errorBoundaryChecks"):
         from . import failure_checks
-        failure_checks.validate(task, report)
+        failure_checks.validate(task, report, state=state)
     if latest["mode"] == "not_applicable" and not historical:
         _na_guard(store, state, task, attempt, report)
     sources = (report["newTestFiles"] if latest["mode"] in ("behavior_change", "mixed") else

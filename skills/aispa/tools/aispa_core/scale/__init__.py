@@ -87,16 +87,22 @@ def _read(path, budget, limit=None):
         limit = budget.max_bytes
     elif size > limit:
         raise Invalid('RESOURCE_LIMIT chunkBytes: ' + str(path) + '; continuation: increase AISPA_CHUNK_BYTES and retry complete input')
+    budget.check_memory(size * 4, path=str(path))
+    allocation_limit = min(limit, (budget.memory_bytes - budget.base_memory) // 4)
     data = bytearray()
     with path.open('rb') as stream:
         while True:
-            part = stream.read(min(65536, limit - len(data) + 1))
+            budget.check(0, path=str(path), progress=len(data))
+            # One sentinel byte detects post-stat growth without allocating the
+            # rest of a source that no longer fits the materialization budget.
+            part = stream.read(min(65536, allocation_limit - len(data) + 1))
             if not part:
                 break
-            data.extend(part)
-            budget.check(0, path=str(path), progress=len(data))
-            if len(data) > limit:
+            total = len(data) + len(part)
+            budget.check_memory(total * 4, path=str(path), progress=len(data))
+            if total > limit:
                 raise Invalid('RESOURCE_LIMIT maxInputBytes: ' + str(path) + '; continuation: increase operation budget and retry complete input')
+            data.extend(part)
     return bytes(data)
 
 
@@ -196,6 +202,11 @@ def write_manifest(path, raw, *, kind, basis, chunk_bytes=None):
     if (type(chunk_bytes) is not int or chunk_bytes <= 0 or kind not in ('text', 'json')
             or not isinstance(basis, str) or not _SHA.fullmatch(basis) or not isinstance(raw, bytes) or not raw):
         raise Invalid('AISpa scale: invalid producer input')
+    if chunk_bytes > budget.chunk_bytes:
+        raise Invalid(f'RESOURCE_LIMIT chunkBytes: requestedChunkBytes={chunk_bytes}, '
+                      f'limit={budget.chunk_bytes}, completedBytes=0, path={path}; '
+                      'continuation: increase AISPA_CHUNK_BYTES or reduce --chunk-bytes '
+                      'and retry complete input; scope unchanged')
     raw.decode('utf-8')
     if kind == 'json':
         _object(raw)

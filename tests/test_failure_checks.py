@@ -1,5 +1,8 @@
 import copy
+import json
+import os
 import unittest
+from unittest.mock import patch
 
 import test_test_intent as fixture
 from aispa_core import failure_checks, test_intent
@@ -92,6 +95,56 @@ class FailureCheckTests(unittest.TestCase):
         report["failureChecks"] = failure_checks.template()["failureChecks"]
         with self.assertRaises(Invalid):
             self.save(report)
+
+    def test_scalable_test_intent_preserves_more_than_24_failure_cases(self):
+        self.fx.state["policy"]["scalableInputs"] = True
+        report = self.report()
+        case = report["failureChecks"]["cases"][0]
+        report["failureChecks"]["cases"] = [dict(case, id=f"E{i:04d}") for i in range(40)]
+        ref = self.save(report)
+        saved = json.loads(self.fx.store.text(ref))["report"]
+        self.assertEqual(saved, report)
+        self.fx.green()
+        self.assertTrue(test_intent.valid(self.fx.store, self.fx.state, "T01"))
+        self.assertTrue(test_intent.history_valid(self.fx.store, self.fx.state, "T01"))
+        self.assertEqual(test_intent.view(self.fx.store, self.fx.state, "T01")["failureCaseCount"], 40)
+
+    def test_scalable_test_intent_preserves_long_exact_criterion_and_failure_prose(self):
+        self.fx.state["policy"]["scalableInputs"] = True
+        criterion = "VALUE equals one: " + "Exact source-bound explanation. " * 60
+        self.fx.state["tasks"][0]["criteria"] = [criterion]
+        report = self.report()
+        report["criteria"] = [criterion]
+        report["newTestFiles"][0]["criteria"] = [criterion]
+        case = report["failureChecks"]["cases"][0]
+        case["criterion"] = criterion
+        case["scenario"] = "Reject the invalid initial value. " * 60
+        case["expected"] = "Assertion fails before changing VALUE. " * 60
+        report["failureChecks"]["notApplicable"][0]["reason"] *= 30
+        ref = self.save(report)
+        self.assertEqual(json.loads(self.fx.store.text(ref))["report"], report)
+        self.fx.green()
+        self.assertTrue(test_intent.valid(self.fx.store, self.fx.state, "T01"))
+        self.assertTrue(test_intent.history_valid(self.fx.store, self.fx.state, "T01"))
+
+    def test_historical_failure_checks_keep_case_and_text_caps(self):
+        report = self.report()
+        case = report["failureChecks"]["cases"][0]
+        report["failureChecks"]["cases"] = [dict(case, id=f"E{i:04d}") for i in range(25)]
+        with self.assertRaisesRegex(Invalid, "список сценариев"):
+            self.save(report)
+        report["failureChecks"]["cases"] = [dict(case, scenario="x" * 1601)]
+        with self.assertRaisesRegex(Invalid, "scenario"):
+            self.save(report)
+        self.assertNotIn("testIntent", self.fx.state["taskHistory"]["T01"][-1])
+
+    def test_scalable_failure_contract_still_obeys_resource_budget(self):
+        self.fx.state["policy"]["scalableInputs"] = True
+        report = self.report()
+        with patch.dict(os.environ, {"AISPA_MAX_INPUT_BYTES": "64"}):
+            with self.assertRaisesRegex(Invalid, "RESOURCE_LIMIT.*maxInputBytes.*continuation"):
+                self.save(report)
+        self.assertNotIn("testIntent", self.fx.state["taskHistory"]["T01"][-1])
 
 
     def test_cli_mixed_template_bootstrap_is_explicit_policy_gated_and_read_only(self):

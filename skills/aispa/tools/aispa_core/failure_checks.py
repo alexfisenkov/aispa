@@ -1,5 +1,6 @@
 """Source-bound failure scenarios; declarations never imply a passing test."""
 from .contracts import require
+from . import scale
 from .portable import relative_name
 from .store import Invalid, canonical_zone
 
@@ -8,8 +9,8 @@ BOUNDARIES = frozenset({"input", "output", "storage", "protocol", "dependency"})
 MAX_CASES = 24
 
 
-def _text(value, label):
-    require(isinstance(value, str) and bool(value.strip()) and len(value) <= 1600,
+def _text(value, label, *, scalable=False):
+    require(isinstance(value, str) and bool(value.strip()) and (scalable or len(value) <= 1600),
             "Failure checks: неверное поле " + label)
 
 
@@ -36,12 +37,15 @@ def sources(value):
         row["source"] for row in value.get("notApplicable", [])]
 
 
-def validate(task, report, source_check=None):
+def validate(task, report, source_check=None, *, state=None):
+    """New runs use operation budgets; omitted state retains the historical contract."""
     value = report.get("failureChecks")
+    scalable = state is not None and scale.enabled(state)
+    budget = scale.check_value(value, state) if scalable else None
     require(isinstance(value, dict) and set(value) == {"cases", "notApplicable"},
             "Failure checks: нужен разбор пяти отказных границ")
     cases, excluded = value["cases"], value["notApplicable"]
-    require(isinstance(cases, list) and len(cases) <= MAX_CASES
+    require(isinstance(cases, list) and (scalable or len(cases) <= MAX_CASES)
             and isinstance(excluded, list) and len(excluded) <= len(BOUNDARIES),
             "Failure checks: неверный список сценариев")
     expected = set(task["criteria"])
@@ -50,6 +54,8 @@ def validate(task, report, source_check=None):
     routes = {(r["criterion"], r["kind"]) for r in report.get("routes", [])}
     ids, covered, omitted = set(), set(), set()
     for row in cases:
+        if budget is not None:
+            budget.check()
         kind = row.get("kind") if isinstance(row, dict) else None
         source_key = "source" if mixed and kind in ("browser", "process") else "test"
         shape = {"id", "boundary", "scenario", "expected", "criterion", source_key}
@@ -58,7 +64,7 @@ def validate(task, report, source_check=None):
         require(isinstance(row, dict) and set(row) == shape,
             "Failure checks: неверная схема сценария")
         for key in ("id", "scenario", "expected", "criterion"):
-            _text(row[key], key)
+            _text(row[key], key, scalable=scalable)
         require(row["id"] not in ids and isinstance(row["boundary"], str)
                 and row["boundary"] in BOUNDARIES and row["criterion"] in expected,
                 "Failure checks: повторный сценарий или чужой критерий")
@@ -78,7 +84,7 @@ def validate(task, report, source_check=None):
                 and len(set(row["boundaries"])) == len(row["boundaries"])
                 and not (set(row["boundaries"]) & (covered | omitted)),
                 "Failure checks: повторная, противоречивая или неизвестная граница")
-        _text(row["reason"], "reason")
+        _text(row["reason"], "reason", scalable=scalable)
         _source(row["source"], source_check)
         omitted.update(row["boundaries"])
     require(covered | omitted == BOUNDARIES,

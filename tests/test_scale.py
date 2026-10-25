@@ -14,8 +14,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/aispa/tools'))
-from aispa_core import briefmap, contracts, design_contract, discovery, ideas, packets, planning
+from aispa_core import briefmap, contracts, design_contract, discovery, ideas, mixed_evidence, packets, planning, test_intent
 from aispa_core.store import Invalid, digest
+from tests import test_mixed_evidence as mixed_fixture
 from tests.test_ideas import synthetic_report
 from tests.test_workflow import WorkflowTests
 
@@ -188,6 +189,56 @@ class ScaleTests(unittest.TestCase):
         self.assertFalse(contracts.artifact_valid(self.store, ref))
         with self.assertRaises(Invalid): self.store.text(ref)
 
+    def test_pack_chunk_override_refuses_before_writing_and_retry_is_possible(self):
+        cli = Path(__file__).resolve().parents[1] / 'skills/aispa/tools/aispa.py'
+        source = self.fx.inbox / 'pack-source.txt'
+        source.write_bytes(b'x' * 65)
+        output = self.fx.inbox / 'pack-output.json'
+        before = set(self.fx.inbox.iterdir())
+        command = [sys.executable, '-B', str(cli), 'pack', '--file', str(source),
+                   '--output', str(output), '--kind', 'text', '--chunk-bytes', '128']
+        env = dict(os.environ, AISPA_CHUNK_BYTES='64')
+        refused = subprocess.run(command, capture_output=True, text=True, env=env)
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn('RESOURCE_LIMIT', refused.stderr)
+        self.assertIn('chunkBytes', refused.stderr)
+        self.assertIn('AISPA_CHUNK_BYTES', refused.stderr)
+        self.assertFalse(output.exists(), 'pack must refuse before publishing an unreadable manifest')
+        self.assertEqual(set(self.fx.inbox.iterdir()), before, 'refusal must leave no chunks or directories')
+        self.assertEqual(source.read_bytes(), b'x' * 65)
+        env['AISPA_CHUNK_BYTES'] = '128'
+        retried = subprocess.run(command, capture_output=True, text=True, env=env)
+        self.assertEqual(retried.returncode, 0, retried.stdout + retried.stderr)
+        self.assertTrue(json.loads(retried.stdout)['verified'])
+        with patch.dict(os.environ, {'AISPA_CHUNK_BYTES': '128'}):
+            self.assertEqual(self.scale().read_file(output), source.read_bytes())
+
+    def test_manifest_producer_rejects_chunk_override_above_reader_budget_without_files(self):
+        output = self.fx.inbox / 'new-output-directory' / 'manifest.json'
+        with patch.dict(os.environ, {'AISPA_CHUNK_BYTES': '64'}):
+            with self.assertRaisesRegex(Invalid, 'RESOURCE_LIMIT.*chunkBytes.*AISPA_CHUNK_BYTES'):
+                self.scale().write_manifest(output, b'x' * 65, kind='text',
+                                            basis=digest({'producer': 'budget'}), chunk_bytes=128)
+        self.assertFalse(output.parent.exists())
+
+    def test_long_idea_compact_view_has_honest_summary_omission_and_full_reference(self):
+        self.setup_scope(2)
+        report = synthetic_report(self.store, self.state)
+        report['summary'] = 'Точный вывод 🦊. ' * 720
+        ref = ideas.record(self.store, self.state, report)
+        before = copy.deepcopy(self.state)
+        immutable = (self.store.run / ref['file']).read_bytes()
+        view = ideas.view(self.store, self.state)
+        self.assertLessEqual(len(json.dumps(view, ensure_ascii=False)), ideas.MAX_VIEW_CHARS)
+        self.assertTrue(report['summary'].startswith(view['summary']))
+        self.assertGreater(view['omitted']['summaryChars'], 0)
+        self.assertEqual(view['omitted']['summaryChars'], len(report['summary']) - len(view['summary']))
+        self.assertEqual(view['artifact'], ref)
+        self.assertEqual(ideas.view(self.store, self.state, compact=False)['report'], report)
+        self.assertEqual(ideas._saved_report(self.store, self.state), report)
+        self.assertEqual((self.store.run / ref['file']).read_bytes(), immutable)
+        self.assertEqual(self.state, before)
+
     def test_iterative_dependency_walk_exceeds_python_recursion_depth(self):
         tasks = [{'id': f'T{i:05d}', 'dependsOn': [f'T{i-1:05d}'] if i else []} for i in range(1500)]
         closure = contracts.task_closure({'tasks': tasks}, tasks[-1]['id'])
@@ -241,6 +292,173 @@ class ScaleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         from aispa_core.store import Journal
         self.assertIs(Journal(fresh).load()['policy'].get('scalableInputs'), True)
+
+
+class ScaleMixedConsumerTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = mixed_fixture.MixedEvidenceTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.fx = self.fixture.fx
+
+    def intent(self, *, scalable=True, count=3, field=None, chars=1601):
+        self.fx.state['policy']['scalableInputs'] = scalable
+        self.fx.store.scale_enabled = scalable
+        self.fx.state['tasks'][0]['criteria'] = [f'Exact criterion {i:04d}' for i in range(count)]
+        self.fx.store.append(self.fx.state, 'scale-mixed-consumer-fixture')
+        report = self.fixture.report(automatic=False)
+        if field:
+            report['routes'][0][field] = 'r' * chars
+        return report
+
+    def saved_consumer(self, intent):
+        ref = self.fixture.save(intent)
+        self.assertEqual(test_intent._saved(self.fx.store, ref)['report'], intent)
+        self.assertTrue(self.fx.flow.verify([sys.executable, '-c', "print('isolated candidate sanity')"], 10, 'T01'))
+        self.assertTrue(test_intent.valid(self.fx.store, self.fx.state, 'T01'))
+        self.assertTrue(test_intent.history_valid(self.fx.store, self.fx.state, 'T01'))
+        rows = mixed_evidence.report_template(self.fx.store, self.fx.state, 'T01')
+        self.assertEqual([(r['criterion'], r['kind']) for r in rows],
+                         [(r['criterion'], r['kind']) for r in intent['routes']])
+        for row in rows:
+            row.update(status='not_tested', note='Synthetic consumer check; no acceptance claimed', artifact='')
+        report = {'basis': contracts.task_basis(self.fx.store, self.fx.state, 'T01'), 'routeChecks': rows}
+        record = {'testIntent': ref, 'report': self.fx.store.artifact('reviews', json.dumps(report).encode(), '.json'),
+                  'artifacts': [], 'passed': False}
+        before = copy.deepcopy(self.fx.state)
+        events = (self.fx.store.run / 'events.jsonl').read_bytes()
+        immutable = (self.fx.store.run / ref['file']).read_bytes()
+        artifacts, failures = mixed_evidence.check(self.fx.store, self.fx.state, 'T01', report)
+        self.assertEqual(artifacts, [])
+        self.assertEqual({(r['criterion'], r['kind']) for r in failures},
+                         {(r['criterion'], r['kind']) for r in intent['routes']})
+        self.assertTrue(mixed_evidence.record_valid(self.fx.store, record),
+                        'sealed report must consume the same complete accepted intent')
+        self.assertEqual(self.fx.state, before)
+        self.assertEqual((self.fx.store.run / 'events.jsonl').read_bytes(), events)
+        self.assertEqual((self.fx.store.run / ref['file']).read_bytes(), immutable)
+        return ref, report, record
+
+    def test_scalable_saved_mixed_prose_reaches_live_and_sealed_consumers(self):
+        for field in ('reason', 'procedure', 'expected'):
+            with self.subTest(field=field):
+                if field != 'reason':
+                    self.doCleanups()
+                    self.setUp()
+                self.saved_consumer(self.intent(field=field))
+
+    def test_scalable_saved_mixed_route_count_reaches_live_and_sealed_consumers(self):
+        self.saved_consumer(self.intent(count=4097))
+
+    def test_legacy_mixed_admission_retains_route_count_and_prose_limits(self):
+        reports = [self.intent(scalable=False, field=field) for field in ('reason', 'procedure', 'expected')]
+        reports.append(self.intent(scalable=False, count=4097))
+        for report in reports:
+            # Each report is checked against its own complete task definition.
+            self.fx.state['tasks'][0]['criteria'] = report['criteria']
+            self.fx.store.append(self.fx.state, 'legacy-mixed-admission-fixture')
+            report['basis'] = contracts.task_basis(self.fx.store, self.fx.state, 'T01')
+            before = copy.deepcopy(self.fx.state)
+            events = (self.fx.store.run / 'events.jsonl').read_bytes()
+            with self.subTest(routes=len(report['routes']), reason=len(report['routes'][0]['reason'])):
+                with self.assertRaises(Invalid):
+                    self.fixture.save(report)
+                self.assertEqual(self.fx.state, before)
+                self.assertEqual((self.fx.store.run / 'events.jsonl').read_bytes(), events)
+
+    def test_explicit_legacy_history_validation_retains_route_limits(self):
+        for count, field in ((3, 'reason'), (4097, None)):
+            with self.subTest(count=count, field=field):
+                if count != 3:
+                    self.doCleanups()
+                    self.setUp()
+                report = self.intent(count=count, field=field)
+                ref = self.fixture.save(report)
+                self.assertTrue(test_intent.history_valid(self.fx.store, self.fx.state, 'T01'))
+                immutable = (self.fx.store.run / ref['file']).read_bytes()
+                # Isolated policy-revalidation fixture; real run policy is never migrated.
+                self.fx.state['policy']['scalableInputs'] = False
+                self.fx.store.append(self.fx.state, 'explicit-legacy-validation-fixture')
+                self.assertFalse(test_intent.valid(self.fx.store, self.fx.state, 'T01', require_green=False))
+                self.assertFalse(test_intent.history_valid(self.fx.store, self.fx.state, 'T01'))
+                self.assertEqual((self.fx.store.run / ref['file']).read_bytes(), immutable)
+
+    def test_scalable_saved_mixed_consumer_preserves_schema_and_source_guards(self):
+        ref, report, record = self.saved_consumer(self.intent(field='reason'))
+        for mutate in (lambda r: r['routeChecks'].pop(),
+                       lambda r: r['routeChecks'].append(copy.deepcopy(r['routeChecks'][0])),
+                       lambda r: r['routeChecks'][0].update(criterion='foreign'),
+                       lambda r: r['routeChecks'][0].update(status='unknown'),
+                       lambda r: r['routeChecks'][0].update(note='')):
+            wrong = copy.deepcopy(report)
+            mutate(wrong)
+            with self.assertRaises(Invalid):
+                mixed_evidence.check(self.fx.store, self.fx.state, 'T01', wrong)
+        for mutate in (lambda r: r['routes'].pop(),
+                       lambda r: r['routes'].append(copy.deepcopy(r['routes'][0])),
+                       lambda r: r['routes'][0].update(criterion='foreign'),
+                       lambda r: r['routes'][0].update(kind='unknown'),
+                       lambda r: r['routes'][0].update(reason=''),
+                       lambda r: r['routes'][0].update(procedure=3),
+                       lambda r: r['routes'][0].update(expected=None)):
+            contract = test_intent._saved(self.fx.store, ref)
+            mutate(contract['report'])
+            with self.assertRaises(Invalid):
+                mixed_evidence.check_contract(self.fx.store, contract, ref, report)
+        (self.fx.store.run / ref['file']).write_bytes(b'{}')
+        self.assertFalse(mixed_evidence.record_valid(self.fx.store, record))
+        with self.assertRaises(Invalid):
+            mixed_evidence.check(self.fx.store, self.fx.state, 'T01', report)
+
+
+class ScaleDiscoveryBudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.fx = WorkflowTests('test_empty_run_cannot_finish')
+        self.fx.setUp()
+        self.addCleanup(self.fx.tearDown)
+        self.fx.state['policy'] = {'scalableInputs': True}
+        self.fx.store.scale_enabled = True
+
+    def source(self, name, raw):
+        path = self.fx.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        return path.resolve()
+
+    def snapshot(self):
+        return (copy.deepcopy(self.fx.state), {
+            p.relative_to(self.fx.store.run).as_posix(): p.read_bytes() if p.is_file() else None
+            for p in self.fx.store.run.rglob('*')})
+
+    def test_discovery_source_memory_preflight_refuses_before_read_and_retries(self):
+        raw = b'Safe source paragraph.\n' * 1000
+        name = 'docs/large.md'
+        source = self.source(name, raw)
+        before = self.snapshot()
+        opened = []
+        original_open = Path.open
+
+        def track_source(path, *args, **kwargs):
+            if path == source:
+                opened.append(path)
+            return original_open(path, *args, **kwargs)
+
+        with patch.dict(os.environ, {'AISPA_MAX_MEMORY_BYTES': '4096'}):
+            with self.assertRaisesRegex(Invalid, 'RESOURCE_LIMIT.*maxMemoryBytes'):
+                self.fx.flow.read_input(source)
+            with patch.object(Path, 'open', track_source):
+                with self.assertRaisesRegex(Invalid, 'RESOURCE_LIMIT.*maxMemoryBytes.*continuation'):
+                    discovery.collect(self.fx.store, self.fx.state, paths=[name])
+        self.assertEqual(opened, [], 'known oversized materialization must refuse before opening the source')
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(source.read_bytes(), raw)
+        with patch.dict(os.environ, {'AISPA_MAX_MEMORY_BYTES': '1048576'}):
+            collected = discovery.collect(self.fx.store, self.fx.state, paths=[name])
+        row = next(r for r in collected['sources'] if r['path'] == name)
+        self.assertEqual(row['excerpt'].encode(), raw)
+        self.assertEqual(row['sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(collected['includedPaths'], [name])
+        self.assertEqual(row['omittedChars'], 0)
 
 
 if __name__ == '__main__':

@@ -256,15 +256,30 @@ def view(store, state, *, compact=True):
     if not compact:
         result["report"] = report
         return result
-    result["omitted"] = {}
     fields = ("challenge", "coverage", "areas", "assumptions", "additions", "sourceObservations")
+    result["omitted"] = {field: len(report.get(field, [])) for field in fields}
     for field in fields:
         result[field] = []
+    # The summary can exceed the entire view in scalable runs. Project only a
+    # prefix, accounting for JSON escaping; the immutable artifact stays exact.
+    if _size(result) > MAX_VIEW_CHARS - 256:
+        summary = report["summary"]
+        result["omitted"]["summaryChars"] = len(summary)
+        low, high = 0, min(len(summary), MAX_VIEW_CHARS)
+        while low < high:
+            middle = (low + high + 1) // 2
+            result["summary"] = summary[:middle]
+            result["omitted"]["summaryChars"] = len(summary) - middle
+            if _size(result) <= MAX_VIEW_CHARS - 256:
+                low = middle
+            else:
+                high = middle - 1
+        result["summary"] = summary[:low]
+        result["omitted"]["summaryChars"] = len(summary) - low
     # A stable budget is shared across lists. Important coverage is visible first;
     # a large list cannot silently exclude later observations from the artifact.
     for field in fields:
         rows = report.get(field, [])
-        result["omitted"][field] = len(rows)
         for row in rows:
             result[field].append(row)
             result["omitted"][field] -= 1
