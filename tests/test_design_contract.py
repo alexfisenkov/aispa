@@ -28,7 +28,7 @@ class DesignContractTests(unittest.TestCase):
         ]
         self.state["spec"] = self.store.artifact("specs", b"The export action writes a local CSV file.\n", ".md")
         self.reference = self.root / "README.md"
-        self.reference.write_text("Existing local CSV adapter.\n", encoding="utf-8")
+        self.reference.write_text("Existing local CSV adapter.\n", encoding="utf-8", newline="\n")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -208,7 +208,7 @@ class DesignContractTests(unittest.TestCase):
                          [{"interface": "csv.export", "provider": "T01", "consumers": ["T02"]}])
         with self.assertRaises(Invalid):
             design.validate_plan_bindings(self.store, self.state, self.tasks(depends=False))
-        self.reference.write_text("Changed implementation.\n", encoding="utf-8")
+        self.reference.write_text("Changed implementation.\n", encoding="utf-8", newline="\n")
         self.assertFalse(design.valid_interfaces(self.store, self.state))
         self.assertTrue(design.valid_interfaces(self.store, self.state, check_sources=False))
         self.assertEqual(self.store.text(design.reference_snapshots(self.store, self.state)[0]["snapshot"]),

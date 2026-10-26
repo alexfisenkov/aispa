@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -75,6 +76,83 @@ class AssessmentTests(unittest.TestCase):
         module = importlib.import_module("aispa_core.assessment")
         self.assertTrue(callable(getattr(module, "assess", None)), "Assessment must provide its real read-only collector")
         return module
+
+    def test_path_fallback_reads_real_file_when_direntry_identity_is_zero(self):
+        module = self.module()
+        real_scandir = module.os.scandir
+        class Entry:
+            def __init__(self, entry):
+                self.entry = entry
+            def __getattr__(self, name):
+                return getattr(self.entry, name)
+            def stat(self, **kwargs):
+                info = self.entry.stat(**kwargs)
+                # Windows DirEntry.stat documents zero identity fields;
+                # os.stat/fstat still supply the real opened-file identity.
+                return SimpleNamespace(st_mode=info.st_mode, st_size=info.st_size,
+                    st_mtime_ns=info.st_mtime_ns, st_dev=0, st_ino=0)
+        class Entries:
+            def __init__(self, path):
+                self.iterator = real_scandir(path)
+            def __iter__(self):
+                return self
+            def __next__(self):
+                return Entry(next(self.iterator))
+            def close(self):
+                self.iterator.close()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            source = b"# Ordinary Windows source\n"
+            (root / "README.md").write_bytes(source)
+            before = tree_bytes(root)
+            with no_effects(), patch.object(module.os, "supports_dir_fd", set()), \
+                 patch.object(module.os, "scandir", side_effect=Entries), \
+                 patch.object(module.os, "read", wraps=module.os.read) as reads:
+                report = module.assess(root)
+            self.assertEqual([row["path"] for row in report["facts"]], ["README.md"],
+                "Documented zero DirEntry identity must not discard an ordinary Windows file")
+            self.assertEqual(report["facts"][0]["sha256"], hashlib.sha256(source).hexdigest())
+            self.assertEqual(report["facts"][0]["excerpt"], source.decode("utf-8"))
+            self.assertGreater(reads.call_count, 0, "The real fd must supply the inspected bytes")
+            self.assertEqual(tree_bytes(root), before)
+
+    def test_path_fallback_refuses_substituted_open_file_before_reading(self):
+        module = self.module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root, replacement = Path(tmp).resolve() / "project", Path(tmp).resolve() / "replacement.md"
+            root.mkdir()
+            source = root / "README.md"
+            source.write_bytes(b"# Expected source\n")
+            replacement.write_bytes(b"SUBSTITUTED_SOURCE_MUST_NOT_BE_READ")
+            with no_effects():
+                checked_open = module.os.open
+                def substitute(path, flags, *args, **kwargs):
+                    return checked_open(replacement if Path(path) == source else path,
+                                        flags, *args, **kwargs)
+                with patch.object(module.os, "supports_dir_fd", set()), \
+                     patch.object(module.os, "open", side_effect=substitute), \
+                     patch.object(module.os, "read", wraps=module.os.read) as reads:
+                    report = module.assess(root)
+            self.assertEqual(report["facts"], [])
+            self.assertTrue(any(row["path"] == "README.md" and "identity changed" in row["reason"]
+                                for row in report["omissions"]))
+            reads.assert_not_called()
+
+    def test_path_fallback_refuses_reparse_point_before_opening(self):
+        module = self.module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            source = root / "README.md"
+            source.write_bytes(b"REPARSE_SOURCE_MUST_NOT_BE_READ")
+            ordinary_link_check = module.is_link
+            def reparse(path):
+                return Path(path) == source or ordinary_link_check(path)
+            with no_effects([source]), patch.object(module.os, "supports_dir_fd", set()), \
+                 patch.object(module, "is_link", side_effect=reparse):
+                report = module.assess(root)
+            self.assertEqual(report["facts"], [])
+            self.assertTrue(any(row["path"] == "README.md" and "reparse" in row["reason"]
+                                for row in report["omissions"]))
 
     def test_plain_project_reports_source_bound_facts_commands_and_repair_without_effects(self):
         module = self.module()
@@ -241,4 +319,4 @@ class AssessmentEntryTests(unittest.TestCase):
                 text = (PACKAGE / name).read_text(encoding="utf-8")
                 self.assertIn("audit-only", text, "Every real host entrypoint needs the explicit no-init audit route")
                 self.assertIn("assess", text)
-        self.assertIn("allow_implicit_invocation: false", (PACKAGE / "agents/openai.yaml").read_text())
+        self.assertIn("allow_implicit_invocation: false", (PACKAGE / "agents/openai.yaml").read_text(encoding="utf-8"))

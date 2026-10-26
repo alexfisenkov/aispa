@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, runtime adapters, dashboard or snapshot integrity)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, snapshot, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
+        options: [full, runtimes, dashboard, snapshot, portability, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
 permissions:
   contents: read
 jobs:
@@ -77,6 +77,17 @@ jobs:
           python -B -m unittest -v
           test_dashboard_snapshot test_dashboard_reader_cache test_calculation_scope
           test_verdict_read_scope test_verified_reads
+      - name: Portable audit, source text and CLI regressions
+        if: inputs.scope == 'portability'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_assessment test_cli.AuditOrdinaryTextCliTests
+          test_cli.CliTests.test_full_cli_scenario
+          test_design_contract.DesignContractTests.test_interfaces_have_hash_bound_references_and_plan_bindings
+          test_support_faq.SupportFaqTests.test_root_renderer_uses_same_canon_and_checks_generated_drift
+          test_dashboard_snapshot
       - name: Label release compatibility
         if: inputs.scope == 'labels'
         env:
@@ -129,7 +140,7 @@ jobs:
           python -B -m unittest -v
           test_mixed_evidence test_failure_checks test_check_mode_views
       - name: Study-plan pilot example tests
-        if: inputs.scope == 'full' || inputs.scope == 'snapshot'
+        if: inputs.scope == 'full' || inputs.scope == 'snapshot' || inputs.scope == 'portability'
         working-directory: examples/study-plan
         run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests

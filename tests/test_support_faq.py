@@ -122,11 +122,11 @@ class SupportFaqTests(unittest.TestCase):
             evidence = json.loads(receipt.read_bytes())
             self.assertEqual(evidence["canonicalSha256"], sha((PACKAGE / "references/support-faq.json").read_bytes()))
             self.assertEqual(evidence["outputSha256"], sha(output.read_bytes()))
-            self.assertNotIn(VERSION, output.read_text())
+            self.assertNotIn(VERSION, output.read_text(encoding="utf-8"))
             output.write_text("edited by hand", encoding="utf-8")
             checked = subprocess.run([*argv, "--check"], capture_output=True, text=True, encoding="utf-8", timeout=15)
             self.assertNotEqual(checked.returncode, 0, "Generated drift must fail rather than silently rewrite")
-            self.assertEqual(output.read_text(), "edited by hand")
+            self.assertEqual(output.read_text(encoding="utf-8"), "edited by hand")
 
     def test_producer_install_and_real_cli_consume_exact_packaged_faq_without_repo_docs(self):
         self.module()

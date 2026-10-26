@@ -22,7 +22,7 @@
       },
       {
         "path": "tools/aispa_core/assessment.py",
-        "sha256": "cf968cff9008e584aa3f6b533e7eca1aa26eaf4a697415254b1a471dc1601a11"
+        "sha256": "1afe104092222fc7457ec61446a8b16bb64400bbc8bdf00b8639bebb9eabee78"
       },
       {
         "path": "tools/aispa_core/updates.py",

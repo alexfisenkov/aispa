@@ -216,6 +216,10 @@ def assess(root, *, max_entries=1000, max_depth=4, max_file_bytes=131072,
                 continue
             try:
                 metadata = entry.stat(follow_symlinks=False)
+                if not descriptor_mode:
+                    # Windows DirEntry.stat has zero device/inode fields.
+                    # A fresh nofollow stat can be compared to the opened fd.
+                    metadata = os.stat(child, follow_symlinks=False)
                 if stat.S_ISLNK(metadata.st_mode) or (not descriptor_mode and is_link(child)):
                     omit(name, "link or reparse point excluded")
                 elif stat.S_ISDIR(metadata.st_mode):
