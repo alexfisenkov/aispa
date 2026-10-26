@@ -1,0 +1,294 @@
+{
+  "schema": 1,
+  "kind": "engineering-ci-verification-not-formal-acceptance",
+  "fullWindows": {
+    "runId": "40326835193",
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40326835193",
+    "commit": "51a1233b7c8ef95a868d0ccc2ac62c35171251f1",
+    "conclusion": "failure",
+    "jobs": [
+      {
+        "jobId": 121587761709,
+        "name": "python (windows-latest, 3.11, 0)",
+        "conclusion": "failure",
+        "discovered": 1393,
+        "orderedIdsSha256": "31e1264d05ca719d1a4d76025e6218764aa5a483310b6b4aa8757cc24a94cec3",
+        "selected": 697,
+        "shardIndex": 0,
+        "shards": 2,
+        "executedInSummary": 697,
+        "allSelectedExecuted": true,
+        "summaries": [
+          {
+            "tests": 1,
+            "seconds": 1.89
+          },
+          {
+            "tests": 697,
+            "seconds": 1529.496
+          }
+        ],
+        "immediateFailures": [
+          "IMMEDIATE FAIL: test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly (test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly) (path='Makefile', exists=True)",
+          "IMMEDIATE FAIL: test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly (test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly) (path='Dockerfile', exists=False)",
+          "IMMEDIATE FAIL: test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly (test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly) (path='LICENSE', exists=True)"
+        ],
+        "platformSkips": [
+          "test_cleanup_uncertainty_keeps_an_orphaned_reservation (test_process_runner.ManagedProcessRunnerTests.test_cleanup_uncertainty_keeps_an_orphaned_reservation) ... skipped 'POSIX cleanup uncertainty fixture'"
+        ],
+        "logSha256": "91c54da4e3bad9fbf2da23d46a965c2a4809c7a43778140094585089992099a4"
+      },
+      {
+        "jobId": 121587762077,
+        "name": "python (windows-latest, 3.11, 1)",
+        "conclusion": "failure",
+        "discovered": 1393,
+        "orderedIdsSha256": "31e1264d05ca719d1a4d76025e6218764aa5a483310b6b4aa8757cc24a94cec3",
+        "selected": 696,
+        "shardIndex": 1,
+        "shards": 2,
+        "executedInSummary": 696,
+        "allSelectedExecuted": true,
+        "summaries": [
+          {
+            "tests": 696,
+            "seconds": 2774.708
+          }
+        ],
+        "immediateFailures": [
+          "IMMEDIATE ERROR: test_full_cli_scenario (test_cli.CliTests.test_full_cli_scenario)"
+        ],
+        "platformSkips": [
+          "test_detached_writer_cannot_hang_or_create_false_success (test_process_runner.ProcessRunnerTests.test_detached_writer_cannot_hang_or_create_false_success) ... skipped 'POSIX setsid escape documents non-sandbox boundary'",
+          "test_file_boundary_rejects_special_file_without_opening_it (test_task_zone_extension.ZoneExtensionTests.test_file_boundary_rejects_special_file_without_opening_it) ... skipped 'POSIX special-file fixture'"
+        ],
+        "logSha256": "d705b0ad7ddc1a727b8a5818fe38b7f21eac67d7ca0dffae76546eaf9b5ae52c"
+      },
+      {
+        "jobId": 121587762109,
+        "name": "python (windows-latest, 3.13, 0)",
+        "conclusion": "failure",
+        "discovered": 1393,
+        "orderedIdsSha256": "31e1264d05ca719d1a4d76025e6218764aa5a483310b6b4aa8757cc24a94cec3",
+        "selected": 697,
+        "shardIndex": 0,
+        "shards": 2,
+        "executedInSummary": 697,
+        "allSelectedExecuted": true,
+        "summaries": [
+          {
+            "tests": 1,
+            "seconds": 2.153
+          },
+          {
+            "tests": 697,
+            "seconds": 1853.544
+          }
+        ],
+        "immediateFailures": [
+          "IMMEDIATE FAIL: test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly (test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly) (path='Makefile', exists=True)",
+          "IMMEDIATE FAIL: test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly (test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly) (path='Dockerfile', exists=False)",
+          "IMMEDIATE FAIL: test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly (test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly) (path='LICENSE', exists=True)"
+        ],
+        "platformSkips": [
+          "test_cleanup_uncertainty_keeps_an_orphaned_reservation (test_process_runner.ManagedProcessRunnerTests.test_cleanup_uncertainty_keeps_an_orphaned_reservation) ... skipped 'POSIX cleanup uncertainty fixture'"
+        ],
+        "logSha256": "45d5ab38d82688bc80de90756d93c5c4e27e5d44fbef90a225ccbe62225c1cd1"
+      },
+      {
+        "jobId": 121587762185,
+        "name": "python (windows-latest, 3.13, 1)",
+        "conclusion": "success",
+        "discovered": 1393,
+        "orderedIdsSha256": "31e1264d05ca719d1a4d76025e6218764aa5a483310b6b4aa8757cc24a94cec3",
+        "selected": 696,
+        "shardIndex": 1,
+        "shards": 2,
+        "executedInSummary": 696,
+        "allSelectedExecuted": true,
+        "summaries": [
+          {
+            "tests": 696,
+            "seconds": 1958.232
+          }
+        ],
+        "immediateFailures": [],
+        "platformSkips": [
+          "test_detached_writer_cannot_hang_or_create_false_success (test_process_runner.ProcessRunnerTests.test_detached_writer_cannot_hang_or_create_false_success) ... skipped 'POSIX setsid escape documents non-sandbox boundary'",
+          "test_file_boundary_rejects_special_file_without_opening_it (test_task_zone_extension.ZoneExtensionTests.test_file_boundary_rejects_special_file_without_opening_it) ... skipped 'POSIX special-file fixture'"
+        ],
+        "logSha256": "1a23c990f9a89943610f108cd51a5bb2c822a7403baba0d5591eba6636e33dd6"
+      }
+    ]
+  },
+  "targeted": [
+    {
+      "scope": "portability",
+      "url": "https://github.com/alexfisenkov/aispa/actions/runs/40325936120",
+      "commit": "0e8012eb629fd1ad17bbeaca2f094cc292ced967",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "jobId": 121582508291,
+          "name": "python (macos-latest, 3.11)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121582508357,
+          "name": "python (macos-latest, 3.13)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121582508495,
+          "name": "python (ubuntu-latest, 3.11)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121582508507,
+          "name": "python (ubuntu-latest, 3.13)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121582508519,
+          "name": "python (windows-latest, 3.13)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121582508667,
+          "name": "python (windows-latest, 3.11)",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "scope": "zone-portability",
+      "url": "https://github.com/alexfisenkov/aispa/actions/runs/40332101979",
+      "commit": "cff8bdad40555f882ce017110670613538fce902",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "jobId": 121603893901,
+          "name": "python (windows-latest, 3.13, 0)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121603893947,
+          "name": "python (ubuntu-latest, 3.11, 0)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121603893979,
+          "name": "python (windows-latest, 3.11, 0)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121603894110,
+          "name": "python (macos-latest, 3.11, 0)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121603894152,
+          "name": "python (macos-latest, 3.13, 0)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121603894192,
+          "name": "python (ubuntu-latest, 3.13, 0)",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "scope": "windows-cli-finish",
+      "url": "https://github.com/alexfisenkov/aispa/actions/runs/40335914427",
+      "commit": "937de6e95052193c5218b5073e6105979089894e",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "jobId": 121617310932,
+          "name": "python (windows-latest, 3.13, 0)",
+          "conclusion": "success"
+        },
+        {
+          "jobId": 121617311323,
+          "name": "python (windows-latest, 3.11, 0)",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "allNativeOccurrencesExecuted": true,
+  "limitations": [
+    "Original full-CI failures remain failures; targeted corrections are separate evidence.",
+    "No new full model projects or verified serving-model/token-cost claims.",
+    "T01 deferred and T06 blocked in the original pinned self-hosted run.",
+    "External lesson/support consumer delivery not confirmed.",
+    "No main merge, Release or global installation."
+  ],
+  "firstFullMatrix": {
+    "url": "https://github.com/alexfisenkov/aispa/actions/runs/40312054453",
+    "commit": "2de3af41d0bfd8ee75a07184c91683c782237d51",
+    "conclusion": "failure",
+    "jobs": [
+      {
+        "jobId": 121535390621,
+        "name": "python (windows-latest, 3.13)",
+        "conclusion": "cancelled"
+      },
+      {
+        "jobId": 121535390729,
+        "name": "python (ubuntu-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "jobId": 121535390752,
+        "name": "python (macos-latest, 3.13)",
+        "conclusion": "failure"
+      },
+      {
+        "jobId": 121535390807,
+        "name": "python (windows-latest, 3.11)",
+        "conclusion": "cancelled"
+      },
+      {
+        "jobId": 121535390879,
+        "name": "python (macos-latest, 3.11)",
+        "conclusion": "success"
+      },
+      {
+        "jobId": 121535391055,
+        "name": "python (ubuntu-latest, 3.13)",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "finishMeasurements": [
+    {
+      "name": "python (windows-latest, 3.13, 0)",
+      "jobId": 121617310932,
+      "conclusion": "success",
+      "elapsedSeconds": 18.746,
+      "callerTimeoutSeconds": 60,
+      "logSha256": "a65f141aab0bfb21a99e56cc1ba3817b2967f12b95bb389c2f3d5b78c9e78fd6"
+    },
+    {
+      "name": "python (windows-latest, 3.11, 0)",
+      "jobId": 121617311323,
+      "conclusion": "success",
+      "elapsedSeconds": 19.859,
+      "callerTimeoutSeconds": 60,
+      "logSha256": "03bd2dde76c38b065cba5260deb4f468c7a4f483f02e3688f3ae151492baac0c"
+    }
+  ],
+  "productSourceParity": {
+    "commits": {
+      "0e8012eb629fd1ad17bbeaca2f094cc292ced967": "ce0e7ae85e8dffd5cac6b2fe17a640417eb657b9",
+      "51a1233b7c8ef95a868d0ccc2ac62c35171251f1": "ce0e7ae85e8dffd5cac6b2fe17a640417eb657b9",
+      "cff8bdad40555f882ce017110670613538fce902": "ce0e7ae85e8dffd5cac6b2fe17a640417eb657b9",
+      "937de6e95052193c5218b5073e6105979089894e": "ce0e7ae85e8dffd5cac6b2fe17a640417eb657b9"
+    },
+    "productTreeUnchanged": true
+  },
+  "singleFullGreenRunOnFinalTree": false,
+  "interpretation": "The complete Windows run executed every discovered occurrence; historical fixture and timeout errors remain failures. Separate targeted corrected checks passed with unchanged product bytes. This is combined engineering evidence, not formal acceptance or a clean full PASS on the final test tree."
+}
