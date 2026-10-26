@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools
 from aispa_core import dashboard_server as dashboard
 from aispa_core.dashboard_reader import DisplayJournal, SUPPORTED_VERSIONS
 from aispa_core.store import Invalid, Journal, atomic_json
+from aispa_core.verified_reads import current_scope
 from test_preflight import optional_module
 
 
@@ -422,6 +423,85 @@ class DashboardServerTests(unittest.TestCase):
         self.assertEqual({path.relative_to(self.store.run): path.read_bytes()
                           for path in self.store.run.rglob("*") if path.is_file()}, before)
         self.assertEqual((self.store.home / "active.json").read_bytes(), active_before)
+
+    def test_refresh_view_preflight_owns_scope_and_finishes_before_mutation(self):
+        asset = self.store.home / "dashboard.html"
+        asset.write_bytes(b"original fixture viewer")
+        journal = (self.store.run / "events.jsonl").read_bytes()
+        observations = []
+        original_project, original_finish = dashboard.project, DisplayJournal.finish_snapshot
+        original_lifecycle, original_refresh = dashboard._lifecycle_lock, dashboard._refresh_asset
+
+        def projection(reader, state):
+            self.assertIs(current_scope(), reader._reads,
+                          "Compatible refresh preflight projected outside its own read scope")
+            observations.append(("project", reader))
+            return original_project(reader, state)
+
+        def finish(reader):
+            self.assertIs(current_scope(), reader._reads)
+            self.assertIs(observations[-1][1], reader)
+            result = original_finish(reader)
+            observations.append(("finish", reader))
+            return result
+
+        @contextmanager
+        def lifecycle(store):
+            self.assertEqual(observations[-1][0], "finish", "Service mutation preceded final snapshot validation")
+            self.assertIsNone(current_scope(), "Service mutation remained inside the read scope")
+            with original_lifecycle(store):
+                yield
+
+        def refresh(store, content):
+            self.assertEqual(observations[-1][0], "finish", "Asset mutation preceded final snapshot validation")
+            self.assertIsNone(current_scope(), "Asset mutation remained inside the read scope")
+            return original_refresh(store, content)
+
+        with patch.object(dashboard, "project", side_effect=projection), patch.object(
+                DisplayJournal, "finish_snapshot", finish), patch.object(
+                dashboard, "_lifecycle_lock", lifecycle), patch.object(dashboard, "_refresh_asset", side_effect=refresh):
+            info = dashboard.start(self.store, refresh_view=True)
+        self.assertTrue(info["running"])
+        self.assertEqual([row[0] for row in observations], ["project", "finish"])
+        self.assertEqual(asset.read_bytes(), dashboard.ASSET.read_bytes())
+        self.assertEqual((self.store.run / "events.jsonl").read_bytes(), journal)
+
+    def test_refresh_view_final_tamper_refusal_precedes_asset_and_service_mutation(self):
+        source = self.store.artifact("briefs", b"Original fixture source.\n", ".md")
+        self.state["briefs"] = [{**source, "id": "B001"}]
+        self.store.append(self.state, "fixture-source")
+        source_path = self.store.run / source["file"]
+        journal_path, pointer_path = self.store.run / "events.jsonl", self.store.home / "active.json"
+        original_source, original_journal, original_pointer = source_path.read_bytes(), journal_path.read_bytes(), pointer_path.read_bytes()
+        source_stat = source_path.stat()
+        asset = self.store.home / "dashboard.html"
+        asset.write_bytes(b"keep original fixture asset")
+        original_project = dashboard.project
+        for mutation in ("source", "journal", "active"):
+            with self.subTest(mutation=mutation):
+                def projection(reader, state):
+                    view = original_project(reader, state)
+                    if mutation == "source":
+                        source_path.write_bytes(b"Modified fixture source.\n")
+                        os.utime(source_path, ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns))
+                    elif mutation == "journal":
+                        journal_path.write_bytes(original_journal + b"invalid fixture tail\n")
+                    else:
+                        pointer_path.write_text(json.dumps({"run": "other-fixture-run"}), encoding="utf-8")
+                    return view
+                try:
+                    with patch.object(dashboard, "project", side_effect=projection), patch.object(
+                            dashboard, "_lifecycle_lock", side_effect=Invalid("Fixture mutation boundary reached")) as mutation_boundary:
+                        with self.assertRaises(Invalid):
+                            dashboard.start(self.store, refresh_view=True)
+                        mutation_boundary.assert_not_called()
+                    self.assertEqual(asset.read_bytes(), b"keep original fixture asset")
+                    self.assertFalse((self.store.home / "service").exists())
+                finally:
+                    source_path.write_bytes(original_source)
+                    os.utime(source_path, ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns))
+                    journal_path.write_bytes(original_journal)
+                    pointer_path.write_bytes(original_pointer)
 
     def test_compatible_reader_has_explicit_version_allowlist_and_blocks_writes(self):
         reader = DisplayJournal(self.store.root)

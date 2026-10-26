@@ -495,7 +495,10 @@ def start(store, port=0, *, refresh_view=False, on_admitted=None):
     expected = _expected_context(store, compatible_view=refresh_view, asset=asset)
     if refresh_view:
         reader = DisplayJournal(store.root)
-        project(reader, reader.load())  # Validate projection before any asset/service mutation.
+        state = reader.load()
+        with reader._reads.scope():
+            project(reader, state)
+            reader.finish_snapshot()  # Validate before any asset/service mutation.
     admission_failed = False
 
     def admitted(kind):
