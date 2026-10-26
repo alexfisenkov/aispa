@@ -187,7 +187,12 @@ def parser():
     critic = sub.add_parser("critic"); critic.add_argument("id"); critic.add_argument("--round", type=int, required=True, choices=(1, 2))
     critic.add_argument("--file", required=True)
     attempt = sub.add_parser("new-attempt"); attempt.add_argument("id")
-    attempt.add_argument("--brief", required=True); attempt.add_argument("--quote", required=True)
+    source = attempt.add_mutually_exclusive_group(required=True)
+    source.add_argument("--brief")
+    source.add_argument("--owner-source-file")
+    attempt.add_argument("--source-sha256")
+    attempt.add_argument("--owner-decision-id")
+    attempt.add_argument("--quote", required=True)
     switch = sub.add_parser("check-mode"); switch.add_argument("mode", choices=check_modes.MODES)
     switch.add_argument("--file", required=True, help="Файл с дословными словами владельца о смене режима")
     sub.add_parser("extra-wave").add_argument("id")
@@ -764,7 +769,17 @@ def execute(args):
         elif action == "critic":
             ok = flow.pipeline.review(args.id, args.round, args.file)
         elif action == "new-attempt":
-            receipt = {"attempt": flow.pipeline.new_attempt(args.id, args.brief, args.quote)}
+            if args.owner_source_file:
+                if not args.source_sha256 or not args.owner_decision_id:
+                    raise Invalid("Новая попытка по решению владельца требует --source-sha256 и --owner-decision-id")
+                opened = flow.owner_new_attempt(args.id, owner_source_file=args.owner_source_file,
+                                                source_sha256=args.source_sha256,
+                                                owner_decision_id=args.owner_decision_id, quote=args.quote)
+            else:
+                if args.source_sha256 or args.owner_decision_id:
+                    raise Invalid("--source-sha256 и --owner-decision-id допустимы только с --owner-source-file")
+                opened = flow.pipeline.new_attempt(args.id, args.brief, args.quote)
+            receipt = {"attempt": opened}
         elif action == "check-mode":
             receipt = {"mode": args.mode, "tasks": flow.check_mode(args.mode, args.file)}
         elif action == "extra-wave":

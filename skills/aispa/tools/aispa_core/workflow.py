@@ -92,6 +92,12 @@ class Workflow:
         self.running()
         return self.pipeline.switch_check_mode(mode, self.read_input(path))
 
+    def owner_new_attempt(self, tid, *, owner_source_file, source_sha256, owner_decision_id, quote):
+        """Open a single blocked task using an exact saved owner decision."""
+        return self.pipeline.owner_new_attempt(
+            tid, owner_source_file=owner_source_file, source_sha256=source_sha256,
+            owner_decision_id=owner_decision_id, quote=quote)
+
     def brief(self, path):
         self.running()
         text = self.read_input(path)

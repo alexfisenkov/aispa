@@ -2,13 +2,14 @@
 
 This module records declared native identities; it does not authenticate a
 model or spawn agents. Role cards and decisions are immutable local artifacts.
-Only a new quoted owner brief can open another attempt after consumed reviews.
+Another attempt requires a new quoted owner brief or a separate source-bound
+owner decision for one blocked task.
 """
 import copy
 import json
 import uuid
 
-from . import autonomy, timing, repairs, participants, integration, test_intent, mixed_evidence, review_policy, task_tiers, check_modes
+from . import autonomy, timing, repairs, participants, integration, test_intent, mixed_evidence, review_policy, task_tiers, check_modes, owner_task_attempt
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -175,6 +176,15 @@ def _history_valid(store, state, tid):
         if auth.get("kind") == "extra-wave":
             if (not previous.get("terminal") or task_tiers.worker_only(previous) or task_tiers.worker_only(attempt)
                     or sum((a.get("authorization") or {}).get("kind") == "extra-wave" for a in history) != 1):
+                return False
+            continue
+        if auth.get("kind") == owner_task_attempt.KIND:
+            if not owner_task_attempt.authorization_valid(store, state, tid, previous, attempt, auth):
+                return False
+            uses = list(owner_task_attempt.decision_uses(state, auth["decisionId"]))
+            if (sum(task_id == tid for task_id, _, _ in uses) != 1
+                    or any((source_sha, quote) != (auth["source"]["sha256"], auth["quote"])
+                           for _, source_sha, quote in uses)):
                 return False
             continue
         index, source = briefs.get(auth.get("brief"), (0, None))
@@ -1178,6 +1188,47 @@ class TaskPipeline:
             task.update(status="pending", phase="implementation")
             for key in ("proof", "note", "finishedAt", "phaseTiming", "deferred"):
                 task.pop(key, None)
+        self.host.save("owner-task-attempt:" + tid)
+        return new["id"]
+
+    def owner_new_attempt(self, tid, *, owner_source_file, source_sha256, owner_decision_id, quote):
+        """Retry one blocked task under a fresh local owner decision record."""
+        from .contracts import validate_plan
+        self.host.running()
+        task = self.host.task(tid)
+        require(self.s.get("sealed") is True and task.get("status") == "blocked",
+                "Новая попытка по решению владельца доступна только заблокированной задаче с закрытым объёмом")
+        require(_history_valid(self.store, self.s, tid), "Повреждена история разрешений на попытки")
+        old = _latest(self.s, tid)
+        require(old.get("contract") == task_contract(self.s, tid), "Контракт задачи устарел")
+        # Validate the current plan before writing any new source or team record.
+        candidate = validate_plan(self.s, [definition(row) for row in self.s["tasks"]])
+        require([definition(row) for row in candidate] == [definition(row) for row in self.s["tasks"]],
+                "Текущий план не соответствует допустимому объёму")
+        raw = owner_task_attempt.read_source(owner_source_file, source_sha256, quote, owner_decision_id)
+        for used_task, used_sha, used_quote in owner_task_attempt.decision_uses(self.s, owner_decision_id):
+            require(_history_valid(self.store, self.s, used_task),
+                    "Повреждена прежняя история этого решения владельца")
+            require(used_task != tid, "Этот ID решения уже использован для новой попытки задачи")
+            require((used_sha, used_quote) == (source_sha256, quote),
+                    "ID решения связан с другим источником или цитатой")
+        source = self.store.artifact("owner-attempt-requests", raw, ".txt")
+        auth = _seal(self.store, {"kind": owner_task_attempt.KIND, "run": self.s["run"],
+                                  "task": tid, "previousAttempt": old["id"],
+                                  "source": source, "quote": quote,
+                                  "decisionId": owner_decision_id, "at": timestamp()})
+        new = self._new(tid, auth)
+        new.update({key: copy.deepcopy(old[key]) for key in (*task_tiers.FIELDS, "plannedTier", "checkMode")
+                    if key in old})
+        if check_modes.enabled(self.s) and (check_modes.current(self.s) != "balanced" or "plannedTier" in old):
+            self._mode_class(new, task, self.s["taskHistory"][tid])
+        self.s["taskHistory"][tid].append(new)
+        timing.stop(task, timestamp())
+        task.update(status="pending", phase="implementation")
+        for key in ("proof", "note", "finishedAt", "phaseTiming", "deferred", "completionKind"):
+            task.pop(key, None)
+        self._cards(tid, new)
+        require(_history_valid(self.store, self.s, tid), "Новая попытка не прошла проверку истории")
         self.host.save("owner-task-attempt:" + tid)
         return new["id"]
 
