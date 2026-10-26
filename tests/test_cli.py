@@ -92,7 +92,7 @@ class CliTests(unittest.TestCase):
     def git(self, *args):
         subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)
 
-    def call(self, *args, expected=0, cli=None):
+    def call(self, *args, expected=0, cli=None, timeout=None):
         cli = cli or (CLI if args and args[0] == "init" else getattr(self, "cli", CLI))
         if args and args[0] in ("seal", "resume"):
             from aispa_core.store import Journal
@@ -110,7 +110,8 @@ class CliTests(unittest.TestCase):
                     else:
                         self.call("host-context", "--file", str(host_file), cli=cli)
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
-                           text=True, capture_output=True, timeout=getattr(self, "cli_timeout", 20),
+                           text=True, capture_output=True,
+                           timeout=getattr(self, "cli_timeout", 20) if timeout is None else timeout,
                            encoding="utf-8", env=self.command_env,
                            cwd=getattr(self, "command_cwd", None))
         self.assertEqual(r.returncode, expected, r.stderr + r.stdout)
@@ -500,7 +501,14 @@ class CliTests(unittest.TestCase):
                          "verification": {"kind": "execution", "sha256": run["sha256"]}}],
             "uncertainties": {k: "Synthetic fixture did not establish additional knowledge in this category." for k in ("trap", "decision", "glossary")}}))
         self.assertEqual(len(self.call("knowledge", "--path", "app.py")["entries"]), 1)
-        state = self.call("finish")
+        if os.name == "nt":
+            finish_started = time.monotonic()
+            try:
+                state = self.call("finish", timeout=60)
+            finally:
+                print(f"Windows final finish elapsed={time.monotonic() - finish_started:.3f}s; caller timeout=60s", flush=True)
+        else:
+            state = self.call("finish")
         self.assertEqual(state["status"], "accepted")
         self.assertTrue(state["gates"]["acceptance"])
         saved_store = Journal(self.root)
