@@ -12,8 +12,8 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
 from .store import Invalid, timestamp
 from . import timing, phase_receipts, execution_obligations
 from . import autonomy, project_documents, preflight
-from .team import TaskPipeline, task_proof_valid
-from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
+from .team import TaskPipeline, _history_valid, historical_proof_valid, task_proof_valid
+from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent, task_tiers, owner_task_attempt
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -258,6 +258,38 @@ class Workflow:
         require(result is not None, "Неизвестная задача")
         return result
 
+    def _final_retry_revalidates_dependencies(self, task):
+        """Only a started, owner-retried final heavy task may recheck stale ancestors."""
+        tid = task["id"]
+        if (not self.s.get("policy", {}).get("integrationReview")
+                or self.s.get("integrationTask") != tid
+                or type(task.get("attempts")) is not int or task["attempts"] < 1
+                or not task.get("startedAt")):
+            return False
+        history = self.s.get("taskHistory", {}).get(tid, [])
+        if len(history) < 2 or not _history_valid(self.store, self.s, tid):
+            return False
+        previous, current = history[-2:]
+        authorization = current.get("authorization") or {}
+        if (authorization.get("kind") != owner_task_attempt.KIND
+                or authorization.get("previousAttempt") != previous.get("id")
+                or current.get("tier", "heavy") != "heavy"
+                or previous.get("tier", "heavy") != "heavy"
+                or not previous.get("actors", {}).get("worker")):
+            return False
+        try:
+            return integration.choose_task(self.store, self.s, self.s["tasks"]) == tid
+        except (Invalid, KeyError, TypeError, ValueError, OSError):
+            return False
+
+    def _dependencies_ready(self, task, deferred):
+        tid = task["id"]
+        closure = {t["id"] for t in task_closure(self.s, tid)} - {tid}
+        stale = [dep for dep in task["dependsOn"] if dep not in deferred
+                 and not task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure)]
+        return not stale or (self._final_retry_revalidates_dependencies(task)
+                             and all(historical_proof_valid(self.store, self.s, dep) for dep in stale))
+
     def build_ready(self):
         self.running()
         require(self.s.get("sealed"), "Бриф изменён; нужна повторная фиксация")
@@ -284,10 +316,8 @@ class Workflow:
         require(task["status"] in ("pending", "blocked"), "Задача уже запущена или завершена")
         # Dependency proofs are read from the saved journal state, so they are checked before the guard
         # adds its (not yet saved) baseline to this task's attempt.
-        closure = {t["id"] for t in task_closure(self.s, tid)} - {tid}
         deferred = self.pipeline._deferred_ids()
-        require(all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure)
-                    for dep in task["dependsOn"] if dep not in deferred),
+        require(self._dependencies_ready(task, deferred),
                 "Зависимости задачи не приняты или доказательства устарели; включите актуального преемника в dependsOn")
         if self.pipeline.start_guard(tid):
             self.save("task-cards-refreshed:" + tid)
@@ -339,9 +369,7 @@ class Workflow:
         for task in unfinished:
             if task["wave"] != wave or task["status"] != "pending":
                 continue
-            closure = {t["id"] for t in task_closure(self.s, task["id"])} - {task["id"]}
-            if all(task_proof_valid(self.store, self.s, dep, allowed_task_ids=closure)
-                   for dep in task["dependsOn"] if dep not in deferred):
+            if self._dependencies_ready(task, deferred):
                 prior = [w for w in {t["wave"] for t in self.s["tasks"]} if w < wave and not self._wave_unchecked(w)]
                 if any(not self.s.get("waves", {}).get(str(w), {}).get("passed") for w in prior):
                     continue
