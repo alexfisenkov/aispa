@@ -204,17 +204,21 @@ def _verification_valid(store, value, candidate):
 
 
 def _record_valid(store, record):
-    if not _sealed_valid(store, record) or not artifact_valid(store, record.get("report", {})):
-        return False
-    if not all(artifact_valid(store, item) for item in record.get("artifacts", [])):
-        return False
-    if record.get("testIntent") and not artifact_valid(store, record["testIntent"]):
-        return False
-    if not mixed_evidence.record_valid(store, record):
-        return False
-    report = _object(store.json(record["report"]))
-    return (report.get("basis") == record.get("basis") and report.get("reviewer") == record.get("actor")
-            and _verification_valid(store, record.get("verification"), record.get("basis")))
+    from .verified_reads import current_scope
+    def check():
+        if not _sealed_valid(store, record) or not artifact_valid(store, record.get("report", {})):
+            return False
+        if not all(artifact_valid(store, item) for item in record.get("artifacts", [])):
+            return False
+        if record.get("testIntent") and not artifact_valid(store, record["testIntent"]):
+            return False
+        if not mixed_evidence.record_valid(store, record):
+            return False
+        report = _object(store.json(record["report"]))
+        return (report.get("basis") == record.get("basis") and report.get("reviewer") == record.get("actor")
+                and _verification_valid(store, record.get("verification"), record.get("basis")))
+    scope = current_scope()
+    return scope.verdict(store, "record_valid", record, check) if scope is not None else check()
 
 
 def _proof_ref(state, tid):

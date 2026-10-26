@@ -191,9 +191,10 @@ class IdeaTests(unittest.TestCase):
         self.assertFalse(ideas.valid(self.store, self.state))
         path.write_bytes(original)
         self.assertTrue(ideas.valid(self.store, self.state))
+        report = self.report()
         (self.store.run / self.state["briefs"][0]["file"]).write_text("Changed owner's words", encoding="utf-8")
         self.assertFalse(ideas.valid(self.store, self.state))
-        self.rejected(self.report())
+        self.rejected(report)
 
     def test_malformed_saved_report_and_path_never_escape_validation(self):
         receipt = record_synthetic_ideas(self.store, self.state)

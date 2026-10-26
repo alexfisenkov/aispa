@@ -8,14 +8,47 @@ from contextvars import ContextVar
 import copy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import stat
 
-from .store import Invalid, file_hash
+from .store import Invalid, confined, digest, file_hash
 
 
 _CURRENT = ContextVar("aispa_verified_reads", default=None)
+_VERDICTS = ContextVar("aispa_read_verdicts", default=None)
+
+
+def _json_native(value):
+    """JSON normalization must not merge Python predicate-distinct values."""
+    pending, active, completed = [(value, False)], set(), set()
+    while pending:
+        item, closing = pending.pop()
+        kind = type(item)
+        if kind is dict or kind is list:
+            # IDs are local cycle-walk bookkeeping, never verdict cache keys or
+            # a retained claim that a mutable object's content is unchanged.
+            identity = id(item)
+            if closing:
+                active.remove(identity)
+                completed.add(identity)
+                continue
+            if identity in active:
+                return False
+            if identity in completed:
+                continue
+            if kind is dict and any(type(key) is not str for key in item):
+                return False
+            active.add(identity)
+            pending.append((item, True))
+            pending.extend((child, False) for child in (item.values() if kind is dict else item))
+        elif kind is float:
+            if not math.isfinite(item):
+                return False
+        elif kind not in (str, int, bool, type(None)):
+            return False
+    return True
 
 
 def current_scope():
@@ -97,14 +130,105 @@ class VerifiedReads:
         self.expected = {}
         self.failure = None
         self.retained = 0
+        self._confinements = {}
+        self._confinement_bytes = 0
 
     @contextmanager
     def scope(self):
+        previous = _CURRENT.get()
         token = _CURRENT.set(self)
+        verdict_token = None
+        if previous is not self:
+            verdict_token = _VERDICTS.set({"scope": self, "owner": None, "identity": None,
+                                           "values": set(), "retained": 0})
         try:
             yield self
         finally:
+            if verdict_token is not None:
+                _VERDICTS.reset(verdict_token)
             _CURRENT.reset(token)
+
+    def _verdict_context(self, store):
+        context = _VERDICTS.get()
+        generation = getattr(store, "_journal_generation", None)
+        if (current_scope() is not self or getattr(store, "_reads", None) is not self
+                or context is None or context["scope"] is not self or generation is None):
+            return None
+        identity = (store.root, store.run, generation["path"], generation["sha256"])
+        if context["owner"] is None:
+            context.update(owner=store, identity=identity)
+        if context["owner"] is not store or context["identity"] != identity:
+            return None
+        return context
+
+    def _check_retained(self, extra=0):
+        from . import scale
+        context = _VERDICTS.get()
+        verdict_bytes = context["retained"] if context is not None and context["scope"] is self else 0
+        try:
+            scale.Budget().check_memory(self.retained + self._confinement_bytes + verdict_bytes + extra,
+                                        path="read validation memo")
+        except ResourceLimit as error:
+            self.failure = error
+            raise
+
+    def verdict(self, store, namespace, value, compute):
+        """Memo only a positive immutable predicate in this exact calculation.
+
+        Content is keyed in full, never by a mutable object identity. Unsupported
+        JSON key values fall back to the original predicate and its semantics.
+        """
+        context = self._verdict_context(store)
+        if context is None:
+            return compute()
+        self.check()
+        self._check_retained()
+        try:
+            if not _json_native(value):
+                raise TypeError("Not exact JSON-native predicate content")
+            key = (namespace, digest(value))
+        except (TypeError, ValueError, RecursionError, OverflowError):
+            result = compute()
+            self.check()
+            return result
+        if key in context["values"]:
+            return True
+        result = compute()
+        self.check()
+        if result is True:
+            # Conservative accounting of the small retained tuple/string/set
+            # entry; no payload or caller-owned dictionary is retained here.
+            accounted = 256 + len(namespace.encode("utf-8")) * 4 + len(key[1]) * 4
+            self._check_retained(accounted)
+            context["values"].add(key)
+            context["retained"] += accounted
+        return result
+
+    def _remember_confinement(self, base, name, resolved):
+        key = (Path(base), name)
+        resolved = Path(resolved)
+        previous = self._confinements.get(key)
+        if previous is not None:
+            if previous != resolved:
+                raise Invalid("AISpa read: confinement generation changed")
+            return
+        accounted = 256 + 4 * (len(str(base)) + len(name) + len(str(resolved)))
+        self._check_retained(accounted)
+        self._confinements[key] = resolved
+        self._confinement_bytes += accounted
+
+    def remember_reference(self, store, name, resolved):
+        if self._verdict_context(store) is not None:
+            self._remember_confinement(store.run, name, resolved)
+
+    def _remember_manifest(self, path):
+        raw = self.raw.get(path)
+        value = self.parsed.get(raw) if raw is not None else None
+        if isinstance(value, dict) and value.get("aispaManifest") == 1:
+            # read_file has already validated every complete child reference.
+            # Keep each original logical boundary, including other directories.
+            for ref in value["chunks"]:
+                self._remember_confinement(path.parent, ref["file"], confined(path.parent, ref["file"]))
 
     def check(self):
         if self.failure is not None:
@@ -123,6 +247,7 @@ class VerifiedReads:
             self.raw[path] = raw
             self.hashes[path] = self.value_hash(raw)
             self.retained += len(raw) * 4
+            self._remember_confinement(path.parent, path.name, path)
         raw = self.raw[path]
         budget.check(len(raw), path=str(path))
         if limit is not None and len(raw) > limit:
@@ -169,6 +294,8 @@ class VerifiedReads:
                     budget.check_memory(self.retained + len(payload) * 4, path=str(path))
                     self.retained += len(payload) * 4
                 self.payloads[key] = payload
+                if not literal:
+                    self._remember_manifest(path)
             except ResourceLimit as error:
                 self.failure = error
                 raise
@@ -185,10 +312,14 @@ class VerifiedReads:
         path = Path(path)
         if path not in self.hashes:
             self.hashes[path] = file_hash(path)  # binary/code remains streaming
+            self._remember_confinement(path.parent, path.name, path)
         return self.hashes[path] == expected_sha256
 
     def revalidate(self):
         self.check()
+        for (base, name), expected in self._confinements.items():
+            if confined(base, name) != expected:
+                raise Invalid("AISpa read: confinement generation changed")
         for path, sha in self.hashes.items():
             if path.is_symlink() or not path.is_file() or file_hash(path) != sha:
                 raise Invalid("AISpa read: source generation changed")

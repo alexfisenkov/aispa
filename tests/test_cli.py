@@ -559,11 +559,30 @@ class CliTests(unittest.TestCase):
 
     def test_dashboard_reads_while_verification_holds_writer_lock(self):
         self.init()
+        from aispa_core.store import Journal
+        from test_preflight import synthetic_host_snapshot
+        store = Journal(self.root)
+        host = synthetic_host_snapshot(store, store.load(), session="cli-writer-lock-fixture")
+        self.call("host-context", "--file", self.input(host, "writer-host.json"))
+        self.assertEqual(store.load()["hostSession"], "cli-writer-lock-fixture")
+        entered, release = self.inbox / "verification-entered", self.inbox / "verification-release"
+        program = ("from pathlib import Path\nimport sys,time\n"
+                   "entered,release=map(Path,sys.argv[1:])\n"
+                   "entered.write_text('started',encoding='utf-8')\n"
+                   "deadline=time.monotonic()+12\n"
+                   "while not release.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+                   "assert release.exists(), 'fixture release was not observed'\n"
+                   "print('checked')\n")
         with self.server() as url:
-            process = subprocess.Popen([sys.executable, "-B", str(CLI), "--root", str(self.root),
-                                        "verify", "--", sys.executable, "-c", "import time; time.sleep(2); print('checked')"],
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+            process = subprocess.Popen([sys.executable, "-B", str(self.cli), "--root", str(self.root),
+                                        "verify", "--", sys.executable, "-c", program, str(entered), str(release)],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                                       env=self.command_env)
             try:
+                deadline = time.monotonic() + 5
+                while not entered.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(entered.exists(), "The verification child was not admitted")
                 seen = False
                 for _ in range(40):
                     with self.status_response(url.replace("dashboard.html", "status.json")) as response:
@@ -574,9 +593,11 @@ class CliTests(unittest.TestCase):
                         break
                     time.sleep(.025)
                 self.assertTrue(seen, "The active verification was not visible")
+                release.write_text("release", encoding="utf-8")
                 stdout, stderr = process.communicate(timeout=10)
                 self.assertEqual(process.returncode, 0, stdout + stderr)
             finally:
+                release.write_text("release", encoding="utf-8")
                 if process.poll() is None:
                     process.terminate()
                 process.communicate(timeout=5)

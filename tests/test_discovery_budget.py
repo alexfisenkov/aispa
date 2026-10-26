@@ -1,7 +1,6 @@
 """Focused discovery resource boundaries; synthetic fixtures are not product acceptance."""
 import copy
 import hashlib
-import io
 import os
 from pathlib import Path
 import sys
@@ -60,26 +59,52 @@ class DiscoveryBudgetTests(unittest.TestCase):
         source = self.source(name, raw)
         before = self.snapshot()
         requests, received = [], []
-        original_open = Path.open
+        original_fdopen = os.fdopen
+        source_stat = source.stat()
+        identity = source_stat.st_dev, source_stat.st_ino
+        grown = []
 
-        class GrowingSource(io.BytesIO):
+        class GrowingSource:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+
+            def fileno(self):
+                return self.stream.fileno()
+
             def read(self, size=-1):
+                if not grown:
+                    # Grow the real disposable file only after physical_read's
+                    # stat/fstat checks, immediately before its first read.
+                    with source.open('ab') as writer:
+                        writer.write(b'Safe grown paragraph.\n' * 1000)
+                    grown.append(identity)
                 requests.append(size)
-                part = super().read(size)
+                part = self.stream.read(size)
                 received.append(len(part))
                 return part
 
-        def open_grown_source(path, *args, **kwargs):
-            if path == source and (args[0] if args else kwargs.get('mode', 'r')) == 'rb':
-                # Simulates an external writer growing the open file after stat;
-                # the real fixture source and every persisted byte stay intact.
-                return GrowingSource(b'Safe grown paragraph.\n' * 1000)
-            return original_open(path, *args, **kwargs)
+        def open_grown_source(fd, *args, **kwargs):
+            opened = os.fstat(fd)
+            stream = original_fdopen(fd, *args, **kwargs)
+            if (opened.st_dev, opened.st_ino) == identity:
+                return GrowingSource(stream)
+            return stream
 
-        with patch.dict(os.environ, {'AISPA_MAX_MEMORY_BYTES': '4096'}):
-            with patch.object(Path, 'open', open_grown_source):
-                with self.assertRaisesRegex(Invalid, 'RESOURCE_LIMIT.*maxMemoryBytes.*continuation'):
-                    discovery.collect(self.fx.store, self.fx.state, paths=[name])
+        try:
+            with patch.dict(os.environ, {'AISPA_MAX_MEMORY_BYTES': '4096'}):
+                with patch('aispa_core.verified_reads.os.fdopen', open_grown_source):
+                    with self.assertRaisesRegex(Invalid, 'RESOURCE_LIMIT.*maxMemoryBytes.*continuation'):
+                        discovery.collect(self.fx.store, self.fx.state, paths=[name])
+        finally:
+            source.write_bytes(raw)
+        self.assertEqual(grown, [identity])
         self.assertTrue(requests)
         self.assertTrue(all(0 < size <= 1025 for size in requests),
                         'reads must fit the remaining materialization budget plus one-byte overflow detection')

@@ -68,7 +68,12 @@ class ProjectDocumentIntegrationTests(unittest.TestCase):
         self.assertFalse((self.root / ".aispa/context/intent.md").exists())
 
     def test_missing_intent_needs_one_explicit_source_not_an_automatic_task_summary(self):
-        self.start()
+        store, state = self.start()
+        from test_preflight import synthetic_host_snapshot
+        host = synthetic_host_snapshot(store, state, session="project-documents-fixture")
+        host_file = self.write(".aispa/inbox/synthetic-host.json", json.dumps(host))
+        self.call("host-context", "--file", str(host_file))
+        self.assertEqual(store.load()["hostSession"], "project-documents-fixture")
         self.assertFalse((self.root / "INTENT.md").exists())
         self.assertEqual(self.call("project-documents")["roles"]["intent"]["status"], "absent")
         result = self.call("seal", code=2)

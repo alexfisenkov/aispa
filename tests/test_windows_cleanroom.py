@@ -105,7 +105,7 @@ class CleanroomAdapterTests(_Fixture, unittest.TestCase):
         self.assertEqual(actual, expected)
         run.assert_called_once_with([sys.executable], self.root, {"PATH": "test"}, 4,
                                     max_output=cleanroom.MAX_OUTPUT, secret_pattern=cleanroom.SECRET,
-                                    secrets=["secret"])
+                                    secrets=["secret"], resource_context=None, on_admitted=None)
 
     def test_git_binary_stdin_and_nul_delimited_output(self):
         result = cleanroom._git(self.root, "check-attr", "-z", "--stdin", "text", input_data=b"app.py\0")

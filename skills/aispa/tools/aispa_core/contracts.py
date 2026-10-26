@@ -119,22 +119,30 @@ def basis(store, state, kind, task_id=None):
 
 
 def artifact_valid(store, artifact):
-    try:
-        p = confined(store.run, artifact["file"])
-        if not p.is_file():
+    from .verified_reads import current_scope
+    scope = current_scope()
+    def check():
+        try:
+            p = confined(store.run, artifact["file"])
+            if not p.is_file():
+                return False
+            # The outer SHA binds ordered chunk identities; verify their bytes too.
+            if p.suffix in (".json", ".md"):
+                store.artifact_bytes(artifact)
+                valid = True
+            else:
+                valid = store.artifact_hash_valid(artifact)
+            if valid and scope is not None:
+                scope.remember_reference(store, artifact["file"], p)
+            return valid
+        except Invalid as error:
+            from .verified_reads import ResourceLimit
+            if isinstance(error, ResourceLimit):
+                raise
             return False
-        # The outer SHA binds ordered chunk identities; verify their bytes too.
-        if p.suffix in (".json", ".md"):
-            store.artifact_bytes(artifact)
-            return True
-        return store.artifact_hash_valid(artifact)
-    except Invalid as error:
-        from .verified_reads import ResourceLimit
-        if isinstance(error, ResourceLimit):
-            raise
-        return False
-    except (KeyError, OSError):
-        return False
+        except (KeyError, OSError):
+            return False
+    return scope.verdict(store, "artifact_valid", artifact, check) if scope is not None else check()
 
 
 def gate_valid(store, state, name, settled=False):
