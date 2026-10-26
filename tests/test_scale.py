@@ -40,11 +40,14 @@ class ScaleTests(unittest.TestCase):
         self.scale().write_manifest(path, raw, kind=kind, basis=digest({'fixture': name}), chunk_bytes=chunk_bytes)
         return path
 
-    def setup_scope(self, count=300):
-        text = '\n'.join(f'Build operation {i:04d} with exact outcome {i:04d}.' for i in range(count))
+    def setup_scope(self, count=300, source_text=None):
+        text = source_text if source_text is not None else '\n'.join(
+            f'Build operation {i:04d} with exact outcome {i:04d}.' for i in range(count))
+        lines = text.splitlines()
+        self.assertEqual(len(lines), count)
         self.flow.brief(self.manifest(text, 'brief-manifest.json', 'text'))
         rows = [{'id': f'R{i:04d}', 'text': f'Operation {i}', 'kind': 'requested',
-                 'brief': 'B001', 'quote': text.splitlines()[i], 'core': True,
+                 'brief': 'B001', 'quote': lines[i], 'core': True,
                  'acceptance': [f'Exact output {i}', f'Preserve failure {i}']} for i in range(count)]
         self.flow.requirements(self.manifest(rows, 'requirements-manifest.json'))
         return rows
@@ -67,7 +70,13 @@ class ScaleTests(unittest.TestCase):
             self.assertEqual(planning.analyze(self.store, self.state, tasks)['taskCount'], 110)
 
     def test_large_preparation_plan_and_reports_preserve_every_id_and_criterion(self):
-        rows = self.setup_scope()
+        self.exercise_large_chain()
+
+    def exercise_large_chain(self, source_text=None):
+        """Exercise the complete scale path with optional recovered source text."""
+        rows = self.setup_scope(source_text=source_text)
+        if source_text is not None:
+            self.assertEqual([row['quote'] for row in rows], source_text.splitlines())
         idea = synthetic_report(self.store, self.state)
         ideas.record(self.store, self.state, idea)
         self.assertEqual(ideas._saved_report(self.store, self.state), idea)
@@ -110,12 +119,15 @@ class ScaleTests(unittest.TestCase):
         report = {'checks': [{'requirement': rid, 'criterion': c, 'status': 'passed',
                               'note': 'Synthetic fixture observation.', 'artifact': evidence['file']} for rid, c in sorted(expected)]}
         self.assertFalse(contracts.evidence_rows(self.store, report, expected)[1])
-        report['checks'].pop()
+        final_check = report['checks'].pop()
         with self.assertRaises(Invalid):
             contracts.evidence_rows(self.store, report, expected)
+        report['checks'].append(final_check)
+        self.assertFalse(contracts.evidence_rows(self.store, report, expected)[1])
         packet = packets.write(self.store, {'kind': 'scale-regression', 'basis': digest(rows), 'requirements': rows, 'report': report})
         self.assertLessEqual(packet['envelopeBytes'], packets.MAX_PACKET_BYTES)
         self.assertGreater(packet['sectionCount'], 0)
+        return rows, tasks, report, packet
 
     def test_unicode_byte_splits_preserve_inline_manifest_semantics(self):
         text = 'Точный 🦊 e\u0301 исходник.\n' * 12

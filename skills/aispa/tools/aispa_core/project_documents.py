@@ -12,7 +12,7 @@ import re
 
 from .portable import is_link, relative_name
 from .store import Invalid, confined, digest
-from .verified_reads import ResourceLimit, current_scope
+from .verified_reads import ResourceLimit, current_scope, physical_read
 
 SCHEMA = 1
 ROLES = ("interview", "intent", "spec", "plan", "index")
@@ -71,14 +71,18 @@ def _source(store, name, names=None):
         return {"path": name, "status": "unsafe", "reason": "ignored-by-git"}, None
     if not path.is_file():
         return {"path": name, "status": "unsafe", "reason": "not-a-file"}, None
-    maximum = scale.Budget().max_bytes if getattr(store, "scale_enabled", False) else MAX_FILE_BYTES
-    if getattr(store, "scale_enabled", False):
-        scale.Budget().check(path.stat().st_size, path=name)
+    budget = scale.Budget() if getattr(store, "scale_enabled", False) else None
+    maximum = budget.max_bytes if budget is not None else MAX_FILE_BYTES
+    if budget is not None:
+        budget.check(path.stat().st_size, path=name)
     if path.stat().st_size > maximum:
         return {"path": name, "status": "unsafe", "reason": "oversized"}, None
     scope = current_scope()
     if scope is not None:
         raw = scope.artifact(path, None, literal=True, maximum=maximum)
+        discovery._safe_path(store.root, name)
+    elif budget is not None:
+        raw = physical_read(path, budget)
         discovery._safe_path(store.root, name)
     else:
         with path.open("rb") as stream:

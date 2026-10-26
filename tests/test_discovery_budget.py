@@ -1,6 +1,7 @@
 """Focused discovery resource boundaries; synthetic fixtures are not product acceptance."""
 import copy
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -8,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/aispa/tools'))
-from aispa_core import discovery
+from aispa_core import discovery, planning, project_documents
 from aispa_core.store import Invalid
 from tests import test_workflow as workflow_fixture
 
@@ -111,6 +112,108 @@ class DiscoveryBudgetTests(unittest.TestCase):
         self.assertLessEqual(sum(received), 1025, 'growth must stop before an oversized source allocation')
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(source.read_bytes(), raw)
+
+    def test_project_document_post_stat_growth_refuses_with_resource_limit_and_retries(self):
+        name = 'INTENT.md'
+        clauses = [f'Build operation {i:04d} with exact outcome {i:04d}.' for i in range(300)]
+        original = (clauses[0] + '\n').encode()
+        grown_raw = ('\n'.join(clauses) + '\n').encode()
+        source = self.source(name, original)
+        before = self.snapshot()
+        identity = source.stat().st_dev, source.stat().st_ino
+        original_path_open, original_fdopen = Path.open, os.fdopen
+        requests, received = [], []
+        grown = []
+
+        class GrowingSource:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+
+            def fileno(self):
+                return self.stream.fileno()
+
+            def read(self, size=-1):
+                if not grown:
+                    # Real source growth occurs after the opened reader's stat,
+                    # at its first physical read, whichever reader is selected.
+                    with original_path_open(source, 'ab') as writer:
+                        writer.write(grown_raw[len(original):])
+                    grown.append(True)
+                requests.append(size)
+                part = self.stream.read(size)
+                received.append(len(part))
+                return part
+
+        def open_path(path, mode='r', *args, **kwargs):
+            stream = original_path_open(path, mode, *args, **kwargs)
+            return GrowingSource(stream) if Path(path) == source and mode == 'rb' else stream
+
+        def open_fd(fd, *args, **kwargs):
+            opened = os.fstat(fd)
+            stream = original_fdopen(fd, *args, **kwargs)
+            return GrowingSource(stream) if (opened.st_dev, opened.st_ino) == identity else stream
+
+        with patch.dict(os.environ, {'AISPA_MAX_MEMORY_BYTES': '4096'}):
+            with patch.object(Path, 'open', open_path), patch('aispa_core.verified_reads.os.fdopen', open_fd):
+                with self.assertRaisesRegex(Invalid, 'RESOURCE_LIMIT.*maxMemoryBytes.*continuation'):
+                    project_documents.bind(self.fx.store, self.fx.state, 'intent', name,
+                                           hashlib.sha256(original).hexdigest(), 'Existing project purpose')
+        self.assertEqual(grown, [True])
+        self.assertTrue(requests)
+        self.assertTrue(all(0 < size <= 1025 for size in requests),
+                        'each physical read must fit the remaining memory budget plus one sentinel')
+        self.assertLessEqual(sum(received), 1025, 'growth must stop before oversized materialization')
+        self.assertEqual(self.snapshot(), before, 'refusal must not change state or journal artifacts')
+        self.assertEqual(source.read_bytes(), grown_raw, 'refusal must not damage the source')
+
+        with patch.dict(os.environ, {'AISPA_MAX_MEMORY_BYTES': '262144'}):
+            binding = project_documents.bind(self.fx.store, self.fx.state, 'intent', name,
+                                             hashlib.sha256(grown_raw).hexdigest(), 'Existing project purpose')
+        self.assertEqual(binding['acceptedSha256'], hashlib.sha256(grown_raw).hexdigest())
+        recovered = (self.fx.store.run / binding['snapshot']['file']).read_bytes()
+        self.assertEqual(recovered, grown_raw)
+        self.assertEqual(source.read_bytes(), grown_raw)
+
+        # Reuse the existing full-scale integration path in this same fixture.
+        # The recovered immutable document supplies every requirement quote.
+        from tests.test_scale import ScaleTests
+        chain = ScaleTests('test_large_preparation_plan_and_reports_preserve_every_id_and_criterion')
+        chain.fx, chain.store, chain.state, chain.flow = (self.fx, self.fx.store,
+                                                         self.fx.state, self.fx.flow)
+        rows, tasks, report, packet = chain.exercise_large_chain(source_text=recovered.decode())
+        self.assertEqual(len(rows), 300)
+        self.assertEqual(len(tasks), 110)
+        self.assertEqual([row['quote'] for row in rows], clauses)
+        self.assertEqual({(row['requirement'], row['criterion']) for row in report['checks']},
+                         {(row['id'], criterion) for row in rows for criterion in row['acceptance']})
+        envelope = json.loads(self.fx.store.text(packet))
+        self.assertGreater(packet['sectionCount'], 0)
+        self.assertTrue(envelope['sections'], 'large packet must expose explicit section references')
+
+        def section(key):
+            ref = envelope.get('sections', {}).get(key)
+            return json.loads(self.fx.store.text(ref)) if ref else envelope[key]
+
+        self.assertEqual(section('requirements'), rows)
+        self.assertEqual(section('report'), report)
+
+        before_invalid = self.snapshot()
+        bad_ref = dict(envelope['sections']['requirements'], sha256='0' * 64)
+        with self.assertRaises(Invalid):
+            self.fx.store.text(bad_ref)
+        bad_tasks = copy.deepcopy(tasks)
+        bad_tasks[0]['dependsOn'] = ['T9999']
+        with self.assertRaises(Invalid):
+            planning.analyze(self.fx.store, self.fx.state, bad_tasks)
+        self.assertEqual(self.snapshot(), before_invalid)
+        self.assertEqual(source.read_bytes(), grown_raw)
 
     def test_legacy_discovery_retains_its_original_limits(self):
         self.fx.state['policy'] = {}
