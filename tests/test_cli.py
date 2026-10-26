@@ -582,5 +582,112 @@ class CliTests(unittest.TestCase):
                 process.communicate(timeout=5)
 
 
+class AuditOrdinaryTextCliTests(unittest.TestCase):
+    """R12 repair: ordinary bounded text is selected independently of language."""
+
+    def test_real_compact_assess_keeps_mixed_languages_unknown_extension_and_extensionless_text(self):
+        import hashlib
+        from test_assessment import tree_bytes
+        sources = {
+            "main.c": b"int main(void) { return 0; }\n",
+            "main.cpp": b"int main() { return 0; }\n",
+            "Program.cs": b"class Program { static void Main() {} }\n",
+            "index.html": b"<!doctype html><p>Existing project</p>\n",
+            "styles.css": b"body { color: #123456; }\n",
+            "schema.sql": b"CREATE TABLE task (id INTEGER PRIMARY KEY);\n",
+            "build.sh": b"#!/bin/sh\ntouch SHOULD_NOT_EXECUTE\n",
+            "main.js": b"console.log('control');\n",
+            "domain.unregistered-source-format": "процесс заявки -> проверка -> ответ\n".encode("utf-8"),
+            "serviceplan": b"service app\n  entry main.cpp\n  port 8080\n",
+        }
+        with tempfile.TemporaryDirectory(prefix="audit mixed source 🙂 ") as tmp:
+            root = Path(tmp)
+            for name, data in sources.items():
+                (root / name).write_bytes(data)
+            before = tree_bytes(root)
+            result = subprocess.run([sys.executable, "-B", str(CLI), "--root", str(root), "--compact", "assess"],
+                cwd=root, capture_output=True, text=True, encoding="utf-8", timeout=15)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["mode"], "audit-only")
+            facts = {row["path"]: row for row in report["facts"]}
+            self.assertEqual(set(facts), set(sources),
+                "Ordinary source/text must not be discarded by a language-extension allowlist")
+            for name, data in sources.items():
+                self.assertEqual(facts[name]["sha256"], hashlib.sha256(data).hexdigest())
+                self.assertEqual(facts[name]["excerpt"], data.decode("utf-8"))
+            self.assertEqual(report["executedCommands"], [])
+            self.assertTrue(report["unknowns"], "Reading text cannot certify every language/runtime")
+            self.assertFalse(report["repair"]["authorized"])
+            self.assertEqual(tree_bytes(root), before)
+
+    def test_ordinary_text_selection_preserves_private_media_binary_link_and_special_guards(self):
+        from aispa_core import assessment
+        from test_assessment import no_effects, tree_bytes
+        with tempfile.TemporaryDirectory() as tmp:
+            root, outside = Path(tmp) / "project", Path(tmp) / "outside"
+            root.mkdir(); outside.mkdir()
+            (root / "module.c").write_text("int ready = 1;\n", encoding="utf-8")
+            forbidden = []
+            for name in ("private", "data", "vendor", "generated", "media", ".git"):
+                directory = root / name
+                directory.mkdir()
+                (directory / "ordinary.customsrc").write_text("PRIVATE_CANARY_DO_NOT_READ")
+                forbidden.append(directory)
+            for name in (".env", "client-secret.txt", "wallet.pem", "metrics.csv", "snapshot.sqlite", "clip.mp4", "banner.png"):
+                path = root / name
+                path.write_text("PRIVATE_OR_MEDIA_CANARY_DO_NOT_READ")
+                forbidden.append(path)
+            binaries = {"payload.unknown-binary": b"\0BINARY_CANARY\x01\x02",
+                        "signal.unknown-format": b"\x01\x02\x03" * 20 + b"BINARY_CANARY",
+                        "encoded.unknown-source": b"\xff\xfeBINARY_CANARY"}
+            for name, data in binaries.items():
+                (root / name).write_bytes(data)
+            (outside / "source.customsrc").write_text("OUTSIDE_CANARY_DO_NOT_READ")
+            forbidden.append(outside)
+            try:
+                (root / "external.customsrc").symlink_to(outside / "source.customsrc")
+            except OSError:
+                pass
+            if hasattr(os, "mkfifo"):
+                os.mkfifo(root / "stream.customsrc")
+            before = tree_bytes(root)
+            with no_effects(forbidden):
+                report = assessment.assess(root)
+            facts = {row["path"]: row for row in report["facts"]}
+            self.assertIn("module.c", facts, "Useful ordinary source cannot be excluded with unsafe inputs")
+            for path in forbidden:
+                if path.parent == root:
+                    self.assertNotIn(path.name, facts)
+            rendered = json.dumps(report)
+            for sentinel in ("PRIVATE_CANARY", "PRIVATE_OR_MEDIA_CANARY", "BINARY_CANARY", "OUTSIDE_CANARY"):
+                self.assertNotIn(sentinel, rendered)
+            for name in binaries:
+                self.assertNotIn("excerpt", facts.get(name, {}))
+                self.assertTrue(any(row["path"] == name for row in report["omissions"]))
+            self.assertTrue(report["omissions"])
+            self.assertFalse(report["complete"])
+            self.assertEqual(report["executedCommands"], [])
+            self.assertEqual(tree_bytes(root), before)
+
+    def test_unknown_text_sources_still_obey_read_budgets_without_launch_or_writes(self):
+        from aispa_core import assessment
+        from test_assessment import no_effects, tree_bytes
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "small.language-not-in-registry").write_text("source text\n", encoding="utf-8")
+            large = root / "large.unregistered-source"
+            large.write_text("oversized text\n" * 1000, encoding="utf-8")
+            before = tree_bytes(root)
+            with no_effects([large]):
+                report = assessment.assess(root, max_file_bytes=64, max_total_bytes=64)
+            self.assertIn("small.language-not-in-registry", {row["path"] for row in report["facts"]},
+                "Resource limits must bound ordinary text reads, not select a fixed language list")
+            self.assertTrue(any(row["path"] == large.name and "byte budget" in row["reason"] for row in report["omissions"]))
+            self.assertLessEqual(report["observed"]["bytes"], 64)
+            self.assertEqual(report["executedCommands"], [])
+            self.assertEqual(tree_bytes(root), before)
+
+
 if __name__ == "__main__":
     unittest.main()

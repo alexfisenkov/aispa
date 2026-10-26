@@ -12,6 +12,33 @@ from .portable import is_link
 from .store import Invalid
 
 
+# Audit selection is deliberately broader than discovery's representative
+# language/entrypoint selection. Exclude sensitive/opaque formats before read;
+# all other ordinary files get bounded text inspection, whatever their suffix.
+EXCLUDED_EXTENSIONS = frozenset({
+    ".pem", ".key", ".p8", ".p12", ".pfx", ".keystore", ".jks", ".der", ".crt", ".cer",
+    ".db", ".db3", ".sqlite", ".sqlite3", ".mdb", ".accdb", ".csv", ".tsv",
+    ".log", ".jsonl", ".ndjson", ".parquet", ".arrow", ".feather", ".avro", ".h5", ".hdf5",
+    ".npy", ".npz", ".pickle", ".pkl", ".pt", ".pth", ".ckpt",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".heic", ".heif", ".ico", ".svg",
+    ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".aiff",
+    ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v",
+    ".zip", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar", ".tar",
+    ".exe", ".dll", ".so", ".dylib", ".o", ".obj", ".a", ".lib", ".class", ".pyc", ".pyo", ".wasm", ".bin",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp",
+})
+
+
+def _ordinary_kind(name):
+    path = Path(name)
+    if (path.suffix.lower() in EXCLUDED_EXTENSIONS
+            or any(part.startswith(".") or discovery.SECRET_NAME.search(part) for part in path.parts)):
+        return None
+    # Keep useful existing labels, without using their absence as exclusion.
+    # Unknown text is not claimed to have passed a parser for its language.
+    return discovery._kind(name, explicit=True) or "text"
+
+
 def _positive(value, label, *, zero=False):
     if (isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or (value < 0 if zero else value <= 0)):
@@ -61,9 +88,9 @@ def assess(root, *, max_entries=1000, max_depth=4, max_file_bytes=131072,
         if not stat.S_ISREG(metadata.st_mode):
             omit(name, "special file or link excluded")
             return
-        kind = discovery._kind(name, explicit=True)
+        kind = _ordinary_kind(name)
         if kind is None:
-            omit(name, "unselected or private file type/name")
+            omit(name, "sensitive, private, media or opaque file type/name excluded")
             return
         if metadata.st_size > max_file_bytes:
             omit(name, "per-file byte budget")
@@ -110,7 +137,12 @@ def assess(root, *, max_entries=1000, max_depth=4, max_file_bytes=131072,
         try:
             text = data.decode("utf-8-sig")
         except UnicodeError:
+            fact["kind"] = "uninterpreted"
             omit(name, "non-UTF-8 content excluded from interpretation")
+            return
+        if any((ord(char) < 32 and char not in "\n\r\t\f") or 127 <= ord(char) <= 159 for char in text):
+            fact["kind"] = "uninterpreted"
+            omit(name, "binary/control content excluded from interpretation")
             return
         if discovery.SECRET_CONTENT.search(text):
             omit(name, "suspected inline secret: excerpt, commands and findings omitted")
