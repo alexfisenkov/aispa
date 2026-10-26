@@ -60,6 +60,17 @@ class CliOutputTests(unittest.TestCase):
         self.assertEqual(path, self.run / receipt["file"])
         return json.loads(raw)
 
+    def adopt_host_session(self):
+        from aispa_core import preflight
+        from aispa_core.workflow import Workflow
+        from test_preflight import synthetic_host_snapshot
+        store = Journal(self.root)
+        with store.lock():
+            state = store.load()
+            host = synthetic_host_snapshot(store, state, session="cli-output-fixture")
+            self.assertTrue(preflight.adopt(Workflow(store, state), host)["ok"])
+        self.assertEqual(Journal(self.root).load()["hostSession"], "cli-output-fixture")
+
     def saved_mutation_with_broken_view(self, compact_mode):
         self.init()
         spec = importlib.util.spec_from_file_location("aispa_saved_receipt_fixture", self.cli)
@@ -225,6 +236,7 @@ class CliOutputTests(unittest.TestCase):
 
     def test_failed_verify_keeps_exit_two_and_recoverable_failure_evidence(self):
         self.init()
+        self.adopt_host_session()
         result = self.call("verify", "--", sys.executable, "-c",
                            "import sys; print('failure-evidence'); sys.exit(7)", compact_mode=True, expected=2)
         receipt = json.loads(result.stdout)
@@ -287,6 +299,7 @@ class CliOutputTests(unittest.TestCase):
 
     def test_unavailable_compact_archive_preserves_failed_verify_and_evidence(self):
         self.init()
+        self.adopt_host_session()
         (self.run / "cli-output").write_bytes(b"blocked archive")
         result = self.call("verify", "--", sys.executable, "-c",
                            "import sys; print('real failure'); sys.exit(7)", compact_mode=True, expected=2)

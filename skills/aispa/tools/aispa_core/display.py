@@ -302,6 +302,14 @@ def project(store, state):
 
 
 def publish(store, state):
-    view = project(store, state)
+    from .dashboard_reader import SnapshotJournal
+    from .store import Invalid, digest
+    reader = SnapshotJournal(store.root)
+    committed = reader.load()
+    if committed["run"] != state["run"] or digest(committed) != digest(state):
+        raise Invalid("Dashboard publication state differs from the committed journal")
+    with reader._reads.scope():
+        view = project(reader, committed)
+        reader.finish_snapshot()
     atomic_json(store.home / "status.json", view)
     return view

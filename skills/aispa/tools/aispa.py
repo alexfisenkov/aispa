@@ -18,6 +18,7 @@ from aispa_core import check_modes, project_context, packets, discovery, carryov
 from aispa_core.cli_output import emit, saved_without_view
 from aispa_core import phase_receipts, dashboard_host, work_progress
 from aispa_core import autonomy, project_documents, preflight, brief_diagnostics, participants, timing
+from aispa_core import task_zone_extension
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -179,6 +180,10 @@ def parser():
         action = sub.add_parser(name); action.add_argument("id"); action.add_argument("--file", required=True)
     repair_plan = sub.add_parser("repair-plan")
     repair_plan.add_argument("id"); repair_plan.add_argument("--file")
+    zones = sub.add_parser("task-zone-extension")
+    zones.add_argument("id"); zones.add_argument("--file"); zones.add_argument("--actor")
+    zones.add_argument("--apply", action="store_true")
+    zones.add_argument("--expected-journal-sha256")
     critic = sub.add_parser("critic"); critic.add_argument("id"); critic.add_argument("--round", type=int, required=True, choices=(1, 2))
     critic.add_argument("--file", required=True)
     attempt = sub.add_parser("new-attempt"); attempt.add_argument("id")
@@ -444,6 +449,7 @@ def execute(args):
                                    "deliveryPlan": True, "repairDiagnosis": True, "deliveryDocs": True,
                                    "sourceAccounting": True, "designContract": True, "allRoleUsage": True,
                                    "integrationReview": True, "testIntent": True, "mixedEvidence": True,
+                                   "incrementalTestIntent": True,
                                    "adaptiveCritique": True, "phaseReceipts": True,
                                    "executionObligations": True, "finalWaveReuse": True,
                                    "errorBoundaryChecks": True, "taskTiers": True,
@@ -497,6 +503,7 @@ def execute(args):
                      or args.action == "resources" and args.operation == "view"
                      or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
+                     or args.action == "task-zone-extension" and not args.apply
                      or (args.action in ("idea", "repair-plan", "integration-review") and not args.file)
                      or (args.action == "documents" and not args.refresh)
                      or (args.action == "project-documents" and not any((args.role, args.path, args.sha256, args.reason))))
@@ -738,6 +745,22 @@ def execute(args):
             else:
                 print(json.dumps(repairs.view(store, state, args.id), ensure_ascii=False, indent=2))
                 return 0
+        elif action == "task-zone-extension":
+            if not args.file:
+                if args.apply or args.actor or args.expected_journal_sha256:
+                    raise Invalid("task-zone-extension: запись требует --file, --actor и свежий CAS")
+                print(json.dumps(task_zone_extension.inspect(store, state, args.id), ensure_ascii=False, indent=2))
+                return 0
+            if not args.actor:
+                raise Invalid("task-zone-extension: нужен реальный --actor planner/coordinator")
+            report = json.loads(flow.read_input(args.file))
+            if not args.apply:
+                if args.expected_journal_sha256:
+                    raise Invalid("task-zone-extension: CAS применяется только с --apply")
+                print(json.dumps(task_zone_extension.prepare(flow, args.id, report, actor=args.actor), ensure_ascii=False, indent=2))
+                return 0
+            receipt = task_zone_extension.apply(flow, args.id, report, actor=args.actor,
+                                                expected_journal_sha256=args.expected_journal_sha256)
         elif action == "critic":
             ok = flow.pipeline.review(args.id, args.round, args.file)
         elif action == "new-attempt":

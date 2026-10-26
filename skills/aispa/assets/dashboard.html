@@ -202,6 +202,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 .stages{grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
 .time-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-content:start;border-left:1px solid #51545B;padding-left:20px}
 .time-summary>div{gap:5px;min-width:0}.time-summary .sub{font-size:12px}.time-summary strong{font-family:var(--text);font-size:20px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}.time-summary .note{font-size:11px;line-height:1.4}
+#eta{overflow-wrap:normal;word-break:normal;white-space:normal}
 .waves-board{display:grid;gap:24px}.wave{gap:12px;padding-top:20px;border-top:1px solid var(--line)}.wave:first-child{padding-top:0;border-top:0}
 .wave-meta{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;font-size:12px;color:var(--muted)}
 .wave-review{padding:5px 9px;border-radius:8px;border:1px solid var(--line)}
@@ -361,7 +362,7 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 
 <footer>
   <span data-i18n="footer">Экран только отображает результат. Право назвать работу готовой определяет движок.</span>
-  <span id="refreshText">Обновляется каждые 5 с</span>
+  <span id="refreshText">Обновляется автоматически</span>
 </footer>
 </main>
 
@@ -489,6 +490,7 @@ var EN={
  'не требуется':'not needed','заблокирована':'blocked','нужна повторная проверка':'needs another check',
  'Демонстрационный пример · не реальный прогон':'Demo example · not a real run',
  'Состояние обновляется каждые 5 с · таймеры каждую секунду':'State refreshes every 5 s · clocks tick each second',
+ 'Состояние обновляется автоматически · таймеры каждую секунду':'State refreshes automatically · clocks tick each second',
  'Архивный снимок · без обновления':'Archived snapshot · no refresh'};
 Object.assign(EN,{
  'Оценка обновится после восстановления связи.':'The estimate will update after connection is restored.',
@@ -581,6 +583,7 @@ var params=new URLSearchParams(location.search),archiveData=typeof window!=='und
 var archiveMode=!!(archiveData&&archiveData.archive===true),demoMode=params.has('demo')&&!archiveMode;
 var previewStatus=demoMode?params.get('status'):null;
 var filter='all',last=null,lastCapturedAt=null,pendingCalculation=null,source='loading',receivedAt=0,inFlight=false,tabButtons={},taskExpanded={},renderedRun;
+var refreshTimer=null,pendingDelay=250,errorDelay=1000;
 function $(id){return document.getElementById(id)}
 function h(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
 function applyTheme(){var mode=theme;
@@ -595,7 +598,7 @@ function applyLocale(){if(document.documentElement)document.documentElement.lang
  if(document.querySelectorAll)document.querySelectorAll('[data-i18n]').forEach(function(el){var values=I18N[el.getAttribute('data-i18n')];if(values)el.textContent=values[locale==='en'?1:0]});
  if(document.querySelectorAll)document.querySelectorAll('[data-aria-i18n]').forEach(function(el){var values=I18N[el.getAttribute('data-aria-i18n')];if(values)el.setAttribute('aria-label',values[locale==='en'?1:0])});
  $('refreshText').textContent=archiveMode?tr('Архивный снимок · без обновления'):
-  demoMode?tr('Демонстрационный пример · не реальный прогон'):tr('Состояние обновляется каждые 5 с · таймеры каждую секунду');
+  demoMode?tr('Демонстрационный пример · не реальный прогон'):tr('Состояние обновляется автоматически · таймеры каждую секунду');
  renderSource();if(last)render(last);else if(source==='none'||source==='archive-invalid')renderEmpty();
 }
 function pad(n){return String(n).padStart(2,'0')}
@@ -618,9 +621,9 @@ function delta(){if(last&&ownerWaiting(last))return 0;
 function sourceSuffix(){return source==='archive'?' · '+tr('на дату снимка'):
  unavailableSource()?' · '+tr('последний снимок'):source==='demo'?' · '+tr('пример'):''}
 function taskLabel(t,d){
- var label=t.status==='completed'?tr('Реализовано'):
+ var label=t.deferred?tr('Отложено в остатки'):t.status==='completed'?tr('Реализовано'):
   t.phaseStale?tr('Проверки устарели'):
-  (source==='archive'||unavailableSource())&&t.status==='running'?tr('Была в работе'):
+  (source==='archive'||unavailableSource())&&t.status==='running'?(phaseName(t)||tr('Была в работе')):
   t.status==='running'&&(d.status!=='running'||ownerWaiting(d))?tr('Приостановлена'):
   t.status==='running'&&phaseName(t)?phaseName(t):
   t.status==='pending'&&t.assignment?tr('Исполнитель назначен'):
@@ -1028,6 +1031,11 @@ function validArchive(d){
     ['checks','blockedTasks','excluded','unmapped','inherited','execution','inheritedExecution'].some(function(k){return (d.remaining[k]||[]).length})))return false;
  return true;
 }
+function scheduleRefresh(delay){
+ if(refreshTimer!==null)clearTimeout(refreshTimer);
+ refreshTimer=setTimeout(function(){refreshTimer=null;refresh()},delay);
+}
+function sourceErrorDelay(){var delay=errorDelay;errorDelay=Math.min(errorDelay*2,10000);return delay;}
 async function refresh(){
  if(archiveMode){
   if(validArchive(archiveData)){source='archive';last=archiveData;receivedAt=performance.now();renderSource();render(last)}
@@ -1035,7 +1043,9 @@ async function refresh(){
   return;
  }
  if(demoMode){source='demo';last=makeDemo(previewStatus);receivedAt=performance.now();renderSource();render(last);return;}
- if(inFlight)return;inFlight=true;var controller=new AbortController(),timer=setTimeout(function(){controller.abort()},10000);
+ if(inFlight)return;
+ if(refreshTimer!==null){clearTimeout(refreshTimer);refreshTimer=null;}
+ inFlight=true;var nextDelay=REFRESH_SECONDS*1000,controller=new AbortController(),timer=setTimeout(function(){controller.abort()},10000);
  try{var endpoint='status.json'+(pendingCalculation?'?calculation='+encodeURIComponent(pendingCalculation):'');
   var response=await fetch(endpoint,{cache:'no-store',signal:controller.signal}),d=await response.json();
   if(object(d)&&object(d.calculation)&&['calculating','source_error'].includes(d.calculation.state)){
@@ -1043,17 +1053,20 @@ async function refresh(){
    var retained=d.lastSnapshot;
    if(retained!=null){if(!object(retained)||retained.freshness!=='historical'||!archiveDate(retained.capturedAt)||!valid(retained.view))throw new Error('snapshot');
     last=retained.view;lastCapturedAt=retained.capturedAt;}
-   pendingCalculation=d.calculation.state==='calculating'?d.calculation.id:null;
+   if(d.calculation.state==='calculating'){
+    pendingDelay=pendingCalculation===d.calculation.id?Math.min(pendingDelay*2,10000):250;
+    pendingCalculation=d.calculation.id;nextDelay=pendingDelay;errorDelay=1000;
+   }else{pendingCalculation=null;nextDelay=sourceErrorDelay();}
    source=d.calculation.state;renderSource();if(last)render(last);else renderEmpty();return;
   }
-  if(response.status===410){pendingCalculation=null;source='source_error';renderSource();if(last)render(last);else renderEmpty();return;}
+  if(response.status===410){pendingCalculation=null;nextDelay=sourceErrorDelay();source='source_error';renderSource();if(last)render(last);else renderEmpty();return;}
   if(!response.ok||!valid(d))throw new Error('shape');
   if(d.calculation&&d.calculation.state!=='ready')throw new Error('generation');
   if(d.snapshot&&(!object(d.snapshot)||d.snapshot.freshness!=='current'||!archiveDate(d.snapshot.capturedAt)))throw new Error('snapshot');
-  pendingCalculation=null;source='live';lastCapturedAt=d.snapshot?d.snapshot.capturedAt:d.observedAt||d.updatedAt;
+  pendingCalculation=null;pendingDelay=250;errorDelay=1000;source='live';lastCapturedAt=d.snapshot?d.snapshot.capturedAt:d.observedAt||d.updatedAt;
   render(d);last=d;receivedAt=performance.now();renderSource();tick();
- }catch(error){source='disconnected';renderSource();if(last)render(last);else renderEmpty();}
- finally{clearTimeout(timer);inFlight=false;}
+ }catch(error){nextDelay=sourceErrorDelay();source='disconnected';renderSource();if(last)render(last);else renderEmpty();}
+ finally{clearTimeout(timer);inFlight=false;scheduleRefresh(nextDelay);}
 }
 /* Демонстрационные данные не используются при чтении реального status.json. */
 function demoSteps(states){return Object.keys(PHASE_LABEL).map(function(id,i){return {id:id,label:PHASE_LABEL[id],status:states[i]}})}
@@ -1121,7 +1134,7 @@ try{if(window.matchMedia){var scheme=window.matchMedia('(prefers-color-scheme: d
  if(scheme.addEventListener)scheme.addEventListener('change',onScheme);else if(scheme.addListener)scheme.addListener(onScheme)}}catch(error){}
 $('refresh').addEventListener('click',refresh);
 if(archiveMode)$('refresh').hidden=true;
-refresh();if(!demoMode&&!archiveMode)setInterval(refresh,REFRESH_SECONDS*1000);if(!archiveMode)setInterval(tick,1000);
+refresh();if(!archiveMode)setInterval(tick,1000);
 })();
 </script>
 </body>

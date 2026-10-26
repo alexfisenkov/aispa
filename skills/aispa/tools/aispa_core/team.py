@@ -68,11 +68,12 @@ def _latest(state, tid):
 
 
 def _role_data(store, attempt, role):
+    from . import task_zone_extension
     record = attempt.get("roles", {}).get(role)
     require(record and artifact_valid(store, record), "Повреждена карточка роли")
     card = _object(store.json(record))
     require(card.get("role") == role and card.get("attempt") == attempt["id"]
-            and card.get("contract") == attempt.get("contract")
+            and card.get("contract") == task_zone_extension.card_contract(attempt, role, record)
             and card.get("checks") == record.get("checks")
             and card.get("specialization") == record.get("specialization")
             and card.get("reviewPolicy", review_policy.LEGACY) == review_policy.mode(attempt)
@@ -80,17 +81,47 @@ def _role_data(store, attempt, role):
             and all(artifact_valid(store, item) for item in card.get("briefs", []))
             and artifact_valid(store, card.get("spec", {})),
             "Карточка роли не соответствует попытке")
+    _card_closure(card, card.get("task"))
+    deferred = card.get("deferredDependencies", [])
+    require(deferred == attempt.get("deferredDependencies", []),
+            "Карточка роли изменила объявленные отложенные зависимости")
+    if attempt.get("zoneExtensions"):
+        original_ref = attempt["zoneExtensions"][0]["before"]["roles"][role]
+        require(artifact_valid(store, original_ref), "Повреждена исходная карточка эпохи")
+        original = store.json(original_ref)
+        require(original.get("deferredDependencies", []) == deferred
+                and {t["id"] for t in _card_closure(original, card["task"])}
+                    == {t["id"] for t in _card_closure(card, card["task"])},
+                "Эпоха изменила состав зависимостей исходной карточки")
     return card
 
 
+def _card_closure(card, tid):
+    """Honor the sealed declaration, including old epochs that re-added it.
+
+    Deferral is a card/attempt fact, not today's status of its predecessor.
+    _role_data binds that declaration to the attempt and epoch-zero artifact.
+    """
+    deferred = card.get("deferredDependencies", [])
+    closure = card.get("closure")
+    require(isinstance(tid, str) and isinstance(deferred, list)
+            and all(isinstance(t, str) and t for t in deferred)
+            and deferred == sorted(set(deferred)) and tid not in deferred
+            and isinstance(closure, list) and all(isinstance(t, dict) and isinstance(t.get("id"), str) for t in closure)
+            and len({t["id"] for t in closure}) == len(closure) and tid in {t["id"] for t in closure},
+            "Повреждён состав зависимостей карточки")
+    return [t for t in closure if t["id"] not in deferred]
+
+
 def _actor_valid(store, state, attempt, role, aid=None):
+    from . import task_zone_extension
     aid = aid or attempt.get("actors", {}).get(role)
     actor = state.get("actors", {}).get(aid)
     if not actor or not _sealed_valid(store, actor):
         return False
     return (actor.get("id") == aid == digest([actor.get("runtime"), actor.get("nativeId"), actor.get("session")])
             and actor.get("attempt") == attempt["id"] and actor.get("role") == role
-            and actor.get("card") == attempt["roles"][role]["sha256"]
+            and task_zone_extension.actor_card_valid(attempt, role, aid, actor.get("card"))
             and (role == "worker" or actor.get("fresh") is True))
 
 
@@ -101,6 +132,11 @@ def _history_valid(store, state, tid):
     if history[0].get("authorization") is not None:
         return False
     for attempt in history:
+        from . import task_zone_extension
+        try:
+            task_zone_extension.history_valid(store, state, tid, attempt)
+        except (Invalid, OSError, KeyError, ValueError, TypeError, IndexError):
+            return False
         for role in attempt.get("roles", {}):
             _role_data(store, attempt, role)
         records = [attempt.get("submitted"), attempt.get("repair"), attempt.get("acceptance"), attempt.get("verifiedCompletion"),
@@ -256,7 +292,7 @@ def acceptance_chain(store, state, tid, attempt, *, require_acceptor=True):
                 and all(row["status"] in ("resolved", "rejected") for row in resolutions),
                 "Второй критик не закрыл обязательные замечания")
     if test_intent.required(state, attempt):
-        require(attempt.get("testIntent") and all(record.get("testIntent") == attempt["testIntent"] for record in records)
+        require(attempt.get("testIntent") and test_intent.chain_matches(store, attempt, submitted, rounds, repair)
                 and test_intent.history_valid(store, state, tid), "Повреждена история тестового контракта")
     return final
 
@@ -300,7 +336,7 @@ def _historical_light(store, state, task, attempt):
     if task.get("proof") != {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}:
         return None
     inherited = accepted.get("inheritedProofs")
-    ancestors = {t["id"] for t in card["closure"]} - {task["id"]}
+    ancestors = {t["id"] for t in _card_closure(card, task["id"])} - {task["id"]}
     if not isinstance(inherited, list) or len(inherited) != len(ancestors) or {p["task"] for p in inherited} != ancestors:
         return None
     return inherited
@@ -338,20 +374,18 @@ def _historical_one(store, state, tid):
     if proof != {key: accepted[key] for key in ("attempt", "basis", "report", "artifacts", "inheritedProofs")}:
         return None
     coverage = {(row["requirement"], row["criterion"]) for row in accepted.get("coverage", [])}
-    expected = {(t["id"], c) for t in cards["acceptor"]["closure"] for c in t["criteria"]}
-    expected |= {(r["id"], c) for r in cards["acceptor"]["constraints"] for c in r["acceptance"]}
-    expected |= {(tid, c) for c in cards["acceptor"]["checks"]}
+    expected = _closure_expected(cards["acceptor"], tid)
     if coverage != expected:
         return None
     inherited = accepted.get("inheritedProofs")
-    closure_ids = {t["id"] for t in cards["acceptor"]["closure"]} - {tid}
+    closure_ids = {t["id"] for t in _card_closure(cards["acceptor"], tid)} - {tid}
     if not isinstance(inherited, list) or len(inherited) != len(closure_ids) or {p["task"] for p in inherited} != closure_ids:
         return None
     return inherited
 
 
 def _closure_expected(card, tid):
-    expected = {(t["id"], c) for t in card["closure"] for c in t["criteria"]}
+    expected = {(t["id"], c) for t in _card_closure(card, tid) for c in t["criteria"]}
     expected |= {(r["id"], c) for r in card["constraints"] for c in r["acceptance"]}
     return expected | {(tid, c) for c in card["checks"]}
 
@@ -382,7 +416,7 @@ def _historical_lean(store, state, task, attempt, accepted):
     if coverage != _closure_expected(card, tid):
         return None
     inherited = accepted.get("inheritedProofs")
-    closure_ids = {t["id"] for t in card["closure"]} - {tid}
+    closure_ids = {t["id"] for t in _card_closure(card, tid)} - {tid}
     if (not isinstance(inherited, list) or len(inherited) != len(closure_ids)
             or {p["task"] for p in inherited} != closure_ids
             or not isinstance(report.get("inheritedProofs"), list)
@@ -974,6 +1008,9 @@ class TaskPipeline:
                 "Исправление допускается между первым и вторым критиком")
         first = attempt["rounds"][0]
         require(_record_valid(self.store, first), "Повреждён отчёт первого критика")
+        if attempt.get("zoneExtensions"):
+            require(test_intent.valid(self.store, self.s, tid),
+                    "Расширенной эпохе нужен новый сохранённый RED/GREEN до ремонта")
         diagnosis = repairs.worker_guard(self.store, self.s, tid) if self.s.get("policy", {}).get("repairDiagnosis") else None
         text, report, artifacts, failures = self._read(tid, "worker", path)
         require(report.get("previousReport") == first["report"]["sha256"], "Исправление не связано с первым отчётом")

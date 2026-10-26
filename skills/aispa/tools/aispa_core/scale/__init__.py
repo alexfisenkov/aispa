@@ -45,23 +45,25 @@ class Budget:
         self.deadline = time.monotonic() + self.seconds
         self.base_memory = 0
 
-    def check_memory(self, size, *, path='', progress=0):
+    def check_memory(self, size, *, path='', progress=0, progress_unit='bytes'):
         size += self.base_memory
+        label = 'completedItems' if progress_unit == 'items' else 'completedBytes'
         if size > self.memory_bytes:
-            raise resource_limit(f'RESOURCE_LIMIT maxMemoryBytes: accountedBytes={size}, completedItems={progress}, path={path}; continuation: increase AISPA_MAX_MEMORY_BYTES and retry complete input')
-        self.check(0, path=path, progress=progress)
+            raise resource_limit(f'RESOURCE_LIMIT maxMemoryBytes: accountedBytes={size}, {label}={progress}, path={path}; continuation: increase AISPA_MAX_MEMORY_BYTES and retry complete input')
+        self.check(0, path=path, progress=progress, progress_unit=progress_unit)
 
     def check_metadata(self, size, *, path='', progress=0):
         self.check(size, path=path, progress=progress)
         if size > self.manifest_bytes:
             raise resource_limit(f'RESOURCE_LIMIT manifestBytes: bytes={size}, completedBytes={progress}, path={path}; continuation: increase AISPA_MAX_MANIFEST_BYTES or use larger chunks and retry complete input')
 
-    def check(self, size=0, *, path='', progress=0):
+    def check(self, size=0, *, path='', progress=0, progress_unit='bytes'):
         field = ('maxInputBytes' if size > self.max_bytes else
                  'maxMemoryBytes' if size * 4 > self.memory_bytes else
                  'operationSeconds' if time.monotonic() > self.deadline else None)
         if field:
-            raise resource_limit(f'RESOURCE_LIMIT {field}: bytes={size}, completedBytes={progress}, path={path}; '
+            label = 'completedItems' if progress_unit == 'items' else 'completedBytes'
+            raise resource_limit(f'RESOURCE_LIMIT {field}: bytes={size}, {label}={progress}, path={path}; '
                           'continuation: increase the named operation budget and retry the complete input; scope unchanged')
 
 

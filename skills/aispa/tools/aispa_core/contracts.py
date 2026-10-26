@@ -45,6 +45,14 @@ def task_basis(store, state, task_id):
     closure = task_closure(state, task_id)
     attempt = (state.get("taskHistory", {}).get(task_id) or [{}])[-1]
     skipped = set(attempt.get("deferredDependencies", []))  # a deferred task's later retry cannot break its dependants
+    # An epoch's additional zones are exact files even when initially absent.
+    # Candidate calculation runs before/after verification and at live proof
+    # consumers; saved historical receipts deliberately do not use this guard.
+    from . import task_zone_extension
+    for task in closure:
+        if task["id"] not in skipped:
+            current = (state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]
+            task_zone_extension.require_exact_files(store, current)
     # Its code is skipped with it: a retry writing its own zone must not stale the dependants' proofs.
     zones = sorted({z for task in closure if task["id"] not in skipped for z in task["zones"] + task.get("readZones", [])})
     if state.get("policy", {}).get("projectDocuments"):

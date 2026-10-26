@@ -54,14 +54,89 @@ def _validate(state, tid, report):
     return report
 
 
+def epoch_history(store, state, tid):
+    """Validate diagnosis provenance without rebasing any old receipt.
+
+    Schema 1 has no recorded author. Schema 2 records the assigned worker as
+    context, never as an inferred author, and binds the new diagnosis to an
+    exact journal append and zone epoch.
+    """
+    from .team import _actor_valid
+    from . import task_zone_extension
+    attempt = _attempt(state, tid)
+    refs = attempt.get("repairPlans", [])
+    require(isinstance(refs, list), "История диагностики повреждена")
+    seen, values = [], []
+    for marker in store.task_timeline(tid):
+        if marker["event"] not in {"repair-diagnosed:" + tid, "repair-plan-recorded:" + tid}:
+            continue
+        event, before = store.event_pair(marker["sequence"])
+        history = event["state"].get("taskHistory", {}).get(tid, [])
+        if not history or history[-1].get("id") != attempt["id"]:
+            continue
+        saved = history[-1]
+        event_refs = saved.get("repairPlans", [])
+        require(isinstance(event_refs, list)
+                and saved.get("repairPlan") == (event_refs[-1] if event_refs else None),
+                "История диагностики расходится с журналом")
+        require(event_refs[:-1] == seen and len(event_refs) == len(seen) + 1
+                and before and _attempt(before["state"], tid).get("repairPlans", []) == seen,
+                "История диагностики потеряла прежние квитанции")
+        ref = event_refs[-1]
+        require(artifact_valid(store, ref), "История диагностики повреждена")
+        value = store.json(ref)
+        common = {"schema", "run", "task", "report"}
+        require(value.get("run") == state["run"] and value.get("task") == tid,
+                "Диагностика относится к другому прогону или задаче")
+        _validate(event["state"], tid, value.get("report"))
+        if value.get("schema") == 1:
+            require(set(value) == common and not saved.get("zoneExtensions")
+                    and saved["actors"]["worker"] == saved["submitted"]["actor"],
+                    "Прежняя диагностика не соответствует исходной эпохе")
+        else:
+            require(value.get("schema") == 2 and set(value) == common | {
+                        "attempt", "taskContract", "epoch", "previous", "recordedAfterSequence", "provenance"}
+                    and value["attempt"] == attempt["id"]
+                    and value["taskContract"] == saved["contract"]
+                    == task_zone_extension.contract_at(attempt, event["sequence"])
+                    and value["epoch"] == len(saved.get("zoneExtensions", [])) > 0
+                    and value["previous"] == (seen[-1] if seen else None)
+                    and value["recordedAfterSequence"] == event["sequence"] - 1
+                    and value["provenance"] == {"author": None, "assignedWorker": saved["actors"]["worker"]}
+                    and _actor_valid(store, event["state"], saved, "worker"),
+                    "Диагностика новой эпохи потеряла provenance")
+        seen, values = event_refs, [*values, value]
+    require(refs == seen and attempt.get("repairPlan") == (refs[-1] if refs else None),
+            "История диагностики не сохранена или изменена")
+    return values
+
+
 def record(store, state, tid, report):
     attempt = _attempt(state, tid)
     require(not attempt["terminal"] and len(attempt["rounds"]) == 1 and not attempt.get("repair"),
             "Диагностика записывается между первым критиком и сдачей ремонта")
-    require(attempt["actors"]["worker"] == attempt["submitted"]["actor"],
-            "После назначения нового исполнителя диагностика заморожена")
     _validate(state, tid, report)
+    epoch = bool(attempt.get("zoneExtensions"))
+    previous = []
+    if epoch:
+        from . import task_zone_extension
+        from .team import _actor_valid
+        task_zone_extension.history_valid(store, state, tid, attempt)
+        task_zone_extension._stage(next(t for t in state["tasks"] if t["id"] == tid), attempt)
+        previous = epoch_history(store, state, tid)
+        require(_actor_valid(store, state, attempt, "worker"), "Исполнитель диагностики новой эпохи повреждён")
+        journal = store.read_journal()
+        require(digest(journal["last"]["state"]) == digest(state), "Сначала сохраните состояние перед диагностикой")
+    if attempt["actors"]["worker"] != attempt["submitted"]["actor"]:
+        require(epoch and previous and previous[-1]["report"]["basis"] != basis(state, tid)
+                and previous[-1]["report"]["route"] == report.get("route") == "fresh",
+                "После назначения нового исполнителя диагностика заморожена до новой эпохи")
     payload = {"schema": 1, "run": state["run"], "task": tid, "report": report}
+    if epoch:
+        payload.update(schema=2, attempt=attempt["id"], taskContract=attempt["contract"],
+                       epoch=len(attempt["zoneExtensions"]), previous=attempt.get("repairPlan"),
+                       recordedAfterSequence=journal["last"]["sequence"],
+                       provenance={"author": None, "assignedWorker": attempt["actors"]["worker"]})
     ref = store.artifact("repair-plans", (json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
     attempt.setdefault("repairPlans", []).append(ref)
     attempt["repairPlan"] = ref
@@ -74,8 +149,12 @@ def read(store, state, tid):
     require(isinstance(ref, dict) and attempt.get("repairPlans") and attempt["repairPlans"][-1] == ref,
             "До ремонта нужна записанная диагностика repair-plan")
     require(all(artifact_valid(store, r) for r in attempt["repairPlans"]), "История диагностики повреждена")
-    value = store.json(ref)
-    require(value.get("schema") == 1 and value.get("run") == state["run"] and value.get("task") == tid,
+    if attempt.get("zoneExtensions"):
+        values = epoch_history(store, state, tid)
+        value = values[-1]
+    else:
+        value = store.json(ref)
+    require(value.get("schema") in (1, 2) and value.get("run") == state["run"] and value.get("task") == tid,
             "Диагностика относится к другому прогону или задаче")
     return _validate(state, tid, value.get("report"))
 
@@ -98,6 +177,10 @@ def worker_guard(store, state, tid, actor=None):
     attempt = _attempt(state, tid)
     original = attempt["submitted"]["actor"]
     aid = actor or attempt["actors"]["worker"]
+    if attempt.get("zoneExtensions"):
+        from .team import _actor_valid
+        require(aid == attempt["actors"]["worker"] and _actor_valid(store, state, attempt, "worker", aid),
+                "Ремонт новой эпохи требует действительного назначенного исполнителя")
     require(report["route"] != "blocked", "Внешнее препятствие ещё не снято")
     if report["route"] == "same":
         require(aid == original, "Ремонт должен выполнять исходный исполнитель согласно диагнозу")

@@ -27,14 +27,19 @@ async function fixture(search='',data=sample(),options={}){
  const staticEls=[];for(const match of html.matchAll(/<[^>]*\bdata-i18n="([^"]+)"[^>]*>/g)){
   const el=new Element();el.setAttribute('data-i18n',match[1]);staticEls.push(el);
  }
- const intervals=[];let response=data,error=null,clock=0,calls=0;
+ const responseStatus=data=>data?.calculation?.state==='calculating'?202:data?.calculation?.state==='source_error'?409:200;
+ const intervals=[],timeouts=new Map(),requests=[];let response=data,error=null,clock=0,calls=0,timerId=0,status=responseStatus(data),holdNext=false,release=null,activeRequests=0,maxActiveRequests=0;
  const document={getElementById(id){return elements[id]||Object.values(elements).map(e=>descend(e,id)).find(Boolean)||null;},
   createElement(tag){const el=new Element(tag);el.ownerDocument=document;return el;},createTextNode(text){return new Element('#text',String(text));},
   documentElement:new Element('html'),querySelectorAll(selector){return selector==='[data-i18n]'?staticEls:[];}};
  const context={document,location:{search},URLSearchParams,Date,Set,Array,Number,AbortController,
-  performance:{now:()=>clock},setInterval:fn=>intervals.push(fn),setTimeout:()=>1,clearTimeout(){},
+  performance:{now:()=>clock},setInterval:(fn,delay)=>{intervals.push(fn);fn.delay=delay;return intervals.length;},
+  clearInterval:id=>{if(intervals[id-1])intervals[id-1].cleared=true;},
+  setTimeout:(fn,delay)=>{const id=++timerId;timeouts.set(id,{fn,delay,due:clock+delay});return id;},clearTimeout:id=>timeouts.delete(id),
   window:{AISPA_ARCHIVE:options.archive,matchMedia:()=>({matches:!!options.systemDark,addEventListener(){}})},
-  fetch:async()=>{calls++;if(error)throw Error('network');return {ok:true,json:async()=>response};}};
+  fetch:async(url)=>{calls++;requests.push(url);activeRequests++;maxActiveRequests=Math.max(maxActiveRequests,activeRequests);
+   try{if(holdNext){holdNext=false;await new Promise(resolve=>{release=resolve;});}if(error)throw Error('network');
+    return {ok:status>=200&&status<300,status,json:async()=>response};}finally{activeRequests--;}}};
  if(options.storage)context.localStorage=options.storage;
  vm.runInNewContext(script,context);
  async function settle(){for(let i=0;i<8;i++)await Promise.resolve();}
@@ -42,10 +47,18 @@ async function fixture(search='',data=sample(),options={}){
  return {el:id=>document.getElementById(id),text:id=>document.getElementById(id).textContent,
   staticText:key=>staticEls.find(el=>el.getAttribute('data-i18n')===key)?.textContent,
   htmlElement:document.documentElement,activeElement:()=>document.activeElement,
-  async update(data){response=data;error=null;await elements.refresh.click();await settle();},
+  async update(data){response=data;error=null;status=responseStatus(data);await elements.refresh.click();await settle();},
   async fail(){error=true;await elements.refresh.click();await settle();},
   advance(ms){clock+=ms;intervals.forEach(fn=>{if(fn.name==='tick')fn();});},
-  fetchCount:()=>calls,intervalCount:()=>intervals.length};
+  fetchCount:()=>calls,intervalCount:()=>intervals.filter(fn=>!fn.cleared).length,
+  requests:()=>requests.slice(),maxActiveRequests:()=>maxActiveRequests,activeRequests:()=>activeRequests,
+  reply(data,code=200){response=data;status=code;error=null;},holdNext(){holdNext=true;},
+  disconnect(){error=true;},async release(){assert.ok(release,'No held request to release');release();release=null;await settle();},
+  timerDelays:()=>[...timeouts.values()].map(timer=>timer.delay),timerCount:()=>timeouts.size,
+  refreshIntervals:()=>intervals.filter(fn=>!fn.cleared&&fn.name!=='tick').length,
+  async nextTimer(){const next=[...timeouts.entries()].sort((a,b)=>a[1].due-b[1].due)[0];
+   assert.ok(next,'Pending generation must schedule an addressed fast poll');timeouts.delete(next[0]);clock=next[1].due;next[1].fn();await settle();},
+  settle};
 }
 function sample(status='running'){
  return {version:'0.1.0-alpha.2',status,title:'Тестовый проект',stage:'build',displayStage:'build',
@@ -80,6 +93,79 @@ function pendingSnapshot(last=null,state='calculating'){
   ...(state==='source_error'?{error:{code:'snapshot_source_error'}}:{})};
 }
 function descendants(element){return [element,...element.children.filter(x=>typeof x==='object').flatMap(descendants)];}
+test('pending generation fast polls its addressed ID and becomes current without another generation',async()=>{
+ const d=sample('accepted'),f=await fixture('',pendingSnapshot(d));
+ assert.equal(f.refreshIntervals(),0,'A fixed refresh interval still starts polling independently of the request lifecycle');
+ assert.equal(f.timerCount(),1,'One pending generation must own exactly one next poll');
+ assert.ok(f.timerDelays()[0]>0&&f.timerDelays()[0]<=1000,'Pending generation did not receive a bounded fast first poll');
+ f.reply({...d,calculation:{id:'fixture-generation',state:'ready',startedAt:'2026-10-26T01:00:00Z'},
+  snapshot:{capturedAt:'2026-10-26T01:00:02Z',freshness:'current',basis:{journalSha256:'b'.repeat(64)}}});
+ await f.nextTimer();
+ assert.equal(f.requests()[1],'status.json?calculation=fixture-generation');
+ assert.match(f.text('sourceLabel'),/Живые данные/);assert.match(f.text('label'),/приняты/);
+ assert.equal(f.timerCount(),1,'Ready transition accumulated refresh timers');
+ f.reply(d);await f.nextTimer();assert.equal(f.requests()[2],'status.json');
+});
+test('repeated pending backs off within bounds and keeps one poll and one request',async()=>{
+ const d=sample(),f=await fixture('',pendingSnapshot(d)),delays=[];
+ for(let i=0;i<9;i++){
+  assert.equal(f.timerCount(),1,'Pending polling accumulated timers');
+  const delay=f.timerDelays()[0];delays.push(delay);
+  assert.ok(delay>=100&&delay<=10000,'Pending backoff escaped its resource bounds');
+  await f.nextTimer();assert.equal(f.requests().at(-1),'status.json?calculation=fixture-generation');
+ }
+ assert.ok(delays.some(delay=>delay>delays[0]),'Long calculations never backed off from fast polling');
+ assert.ok(delays.every((delay,index)=>index===0||delay>=delays[index-1]),'Pending backoff reset without a new generation');
+ f.holdNext();await f.nextTimer();assert.equal(f.activeRequests(),1);
+ const before=f.fetchCount();
+ for(let i=0;i<8;i++)await f.el('refresh').click();
+ assert.equal(f.fetchCount(),before,'Manual refresh overlapped the pending request');
+ assert.equal(f.maxActiveRequests(),1);assert.equal(f.timerCount(),1,'In-flight request retained extra polling timers');
+ f.reply(d);await f.release();assert.equal(f.timerCount(),1);assert.equal(f.maxActiveRequests(),1);
+});
+test('expired generations restart normally and source errors reconnect without stale current PASS',async()=>{
+ const d=sample('accepted'),f=await fixture('',pendingSnapshot(d));
+ f.reply({error:{code:'snapshot_generation_expired'}},410);await f.nextTimer();
+ assert.match(f.text('sourceLabel'),/ошибка источника/i);assert.doesNotMatch(f.text('gates'),/✓/);
+ assert.equal(f.timerCount(),1);f.reply(pendingSnapshot(d));await f.nextTimer();
+ assert.equal(f.requests().at(-1),'status.json','Expired generation ID leaked into a new calculation');
+ f.reply(pendingSnapshot(d,'source_error'),409);await f.nextTimer();
+ assert.match(f.text('sourceLabel'),/ошибка источника/i);assert.doesNotMatch(f.text('label'),/приняты/);
+ assert.equal(f.timerCount(),1);f.disconnect();await f.nextTimer();
+ assert.match(f.text('sourceLabel'),/нет связи/i);assert.equal(f.timerCount(),1);
+ assert.doesNotMatch(f.text('gates'),/✓/);f.reply(d);await f.nextTimer();
+ assert.equal(f.requests().at(-1),'status.json');assert.match(f.text('sourceLabel'),/Живые данные/);
+ assert.match(f.text('label'),/приняты/);assert.equal(f.maxActiveRequests(),1);
+});
+test('retained deferred and running lifecycle stays visible in RU EN historical task summaries',async()=>{
+ const d=sample();Object.assign(d.tasks[0],{status:'blocked',deferred:true,phaseStale:true,phase:'blocked'});
+ Object.assign(d.tasks[1],{status:'running',phase:'implementation',phaseLabel:'Реализация'});
+ for(const state of ['calculating','source_error','disconnected']){
+  const f=await fixture('',d);
+  if(state==='disconnected')await f.fail();else await f.update(pendingSnapshot(d,state));
+  assert.match(f.text('task-summary-T01'),/Отложено в остатки/,'Historical freshness erased the known deferred lifecycle');
+  assert.match(f.text('task-summary-T02'),/Реализация/,'Historical freshness erased the known running phase');
+  assert.match(f.text('task-summary-T01'),/последний снимок/);
+  f.el('language').change('en');
+  assert.match(f.text('task-summary-T01'),/Deferred to remaining/);assert.match(f.text('task-summary-T02'),/Implementation/);
+  assert.match(f.text('task-summary-T01'),/snapshot/);assert.doesNotMatch(f.text('gates'),/✓/);
+ }
+});
+test('ETA keeps normal word boundaries at narrow widths in the delivered CSS',()=>{
+ const css=html.match(/<style>([\s\S]*?)<\/style>/)[1],effective={};let order=0;
+ for(const rule of css.matchAll(/([^{}]+)\{([^{}]+)\}/g)){
+  for(const selector of rule[1].split(',').map(value=>value.trim())){
+   if(!['#eta','.time-summary #eta','.time-summary strong','strong'].includes(selector))continue;
+   const specificity=(selector.match(/#/g)||[]).length*100+(selector.match(/\./g)||[]).length*10+(selector.includes('strong')?1:0);
+   for(const declaration of rule[2].split(';')){const colon=declaration.indexOf(':');if(colon<0)continue;
+    const property=declaration.slice(0,colon).trim(),value=declaration.slice(colon+1).trim(),previous=effective[property];
+    if(!previous||specificity>=previous.specificity)effective[property]={value,specificity,order:order++};}
+  }
+ }
+ assert.equal(effective['overflow-wrap']?.value||'normal','normal','ETA can split ordinary words at arbitrary characters');
+ assert.equal(effective['word-break']?.value||'normal','normal');
+ assert.equal(effective['white-space']?.value||'normal','normal');
+});
 test('first calculation is observable without fabricated snapshot or PASS',async()=>{
  const f=await fixture('',pendingSnapshot());
  assert.match(f.text('sourceLabel'),/рассчитывается/i);

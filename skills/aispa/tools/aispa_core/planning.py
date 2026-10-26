@@ -101,7 +101,7 @@ def analyze(store, state, raw):
             "note": "Эвристика размера, не измерение токенов или качества. Сохраняйте осмысленные границы: heavy требует критиков и (кроме lean) отдельного приёмщика, light и standard — проверенное выполнение без этих ролей. Общее ревью и итоговая приёмка сохраняются. Замена исполнителя ремонта добавляет actor сверх оценки."}
 
 
-def review(store, state, final, report):
+def review(store, state, final, report, *, persist=True):
     require(isinstance(report, dict) and {"basis", "draft", "groups", "separate"} <= set(report)
             <= {"basis", "draft", "groups", "separate", "delivery"},
             "Разбор плана требует basis, draft, groups, separate и delivery для новых прогонов")
@@ -166,7 +166,8 @@ def review(store, state, final, report):
     require(seen == needed, "Остались мелкие связанные задачи без объяснения границ")
     if state.get("policy", {}).get("deliveryPlan") or "delivery" in report:
         delivery.validate(list(final.values()), report.get("delivery"), state=state)
-    record = store.artifact("plan-reviews", (json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
+    record = (store.artifact("plan-reviews", (json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
+              if persist else None)
     return {"report": record, "scopeBasis": basis(store, state, "coverage"),
             "planDigest": digest([definition(t) for t in final.values()]),
             "tasksBefore": len(draft), "tasksAfter": len(final),

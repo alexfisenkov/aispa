@@ -24,11 +24,27 @@ MAX_REASON = 1600
 MAX_TEST_BYTES = 2 * 1024 * 1024
 
 
+def revision_limit(state):
+    """Operational revision budget; legacy runs retain their original limit."""
+    return (scale._positive("AISPA_MAX_INTENT_REVISIONS", MAX_REVISIONS)
+            if scale.enabled(state) else MAX_REVISIONS)
+
+
 def _revision_budget(state, count):
     if scale.enabled(state):
-        maximum = scale._positive("AISPA_MAX_INTENT_REVISIONS", MAX_REVISIONS)
+        maximum = revision_limit(state)
         if count > maximum:
             raise Invalid(f"RESOURCE_LIMIT intentRevisions: {count}>{maximum}; continuation: increase AISPA_MAX_INTENT_REVISIONS and revalidate complete history")
+
+
+def require_revision_available(state, attempt):
+    """Shared preflight before recording intent or opening a mandatory epoch."""
+    history = attempt.get("testIntentHistory", [])
+    require(isinstance(history, list), "Test intent: история повреждена или исчерпана")
+    _revision_budget(state, len(history) + 1)
+    require(len(history) < revision_limit(state),
+            "Test intent: история повреждена или исчерпана (нет доступной revision)")
+    return history
 
 
 def _text(value, label, limit=MAX_REASON, *, state=None):
@@ -86,6 +102,9 @@ def _na_guard(store, state, task, attempt, report):
     require(base.get("run") == state["run"] and base.get("task") == task["id"]
             and base.get("attempt") == attempt["id"], "Test intent: чужой исходный снимок")
     old = dict(base["records"])
+    if attempt.get("zoneExtensions"):
+        from . import task_zone_extension
+        old.update(task_zone_extension.baseline_records(store, attempt))
     now = dict(store.code_records(task["zones"] + task.get("readZones", []), include_common=True))
     noncode_suffixes = {".md", ".rst", ".txt", ".json", ".toml", ".yaml", ".yml", ".ini", ".cfg",
                        ".lock", ".csv", ".tsv", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico"}
@@ -147,7 +166,7 @@ def _saved(store, ref):
         value = store.json(ref)
     except (ValueError, OSError, TypeError) as exc:
         raise Invalid("Test intent: повреждён JSON контракта") from exc
-    require(isinstance(value, dict) and value.get("schema") == SCHEMA,
+    require(isinstance(value, dict) and value.get("schema") in (SCHEMA, 2),
             "Test intent: неизвестная схема контракта")
     return value
 
@@ -308,10 +327,20 @@ def record(store, state, task_id, report):
 
     The caller must append the mutated state to Journal after this returns.
     """
+    from . import incremental_test_intent
+    if incremental_test_intent.addressed(state, report):
+        return incremental_test_intent.record(store, state, task_id, report)
     require(state.get("policy", {}).get("testIntent") is True and state.get("status") == "running",
             "Test intent: контракт нужен только активной задаче новой политики")
     task, attempt = _attempt(state, task_id)
-    require(task.get("status") == "running" and not attempt.get("rounds")
+    require(not attempt.get("testIntent") or _saved(store, attempt["testIntent"])["schema"] == SCHEMA,
+            "Test intent: адресный контракт нельзя заменить прежней схемой")
+    epoch_repair = bool(attempt.get("zoneExtensions"))
+    if epoch_repair:
+        from . import task_zone_extension
+        task_zone_extension.history_valid(store, state, task_id, attempt)
+        task_zone_extension._stage(task, attempt)
+    require(task.get("status") == "running" and (not attempt.get("rounds") or epoch_repair)
             and not attempt.get("acceptance") and not attempt.get("verifiedCompletion") and not attempt.get("terminal"),
             "Test intent: контракт заморожен после начала критики")
     _report(store, state, task, attempt, report)
@@ -319,11 +348,7 @@ def record(store, state, task_id, report):
     journal["events"] = store.task_timeline(task_id)
     require(digest(journal["last"]["state"]) == digest(state),
             "Test intent: сначала сохраните исполнение в журнал")
-    previous_refs = attempt.get("testIntentHistory", [])
-    if isinstance(previous_refs, list):
-        _revision_budget(state, len(previous_refs) + 1)
-    require(isinstance(previous_refs, list) and (scale.enabled(state) or len(previous_refs) < MAX_REVISIONS),
-            "Test intent: история повреждена или исчерпана")
+    previous_refs = require_revision_available(state, attempt)
     previous = _saved(store, previous_refs[-1]) if previous_refs else None
     first_submit = _first_submit(journal["events"], task_id, attempt["id"])
     require(previous is not None or first_submit is None,
@@ -332,12 +357,20 @@ def record(store, state, task_id, report):
         require(attempt.get("testIntent") == previous_refs[-1]
                 and previous.get("run") == state["run"] and previous.get("task") == task_id
                 and previous.get("attempt") == attempt["id"]
-                and previous.get("taskContract") == task_contract(state, task_id),
+                and (previous.get("taskContract") == task_contract(state, task_id)
+                     or epoch_repair and previous.get("taskContract") in
+                         {e["contract"] for e in task_zone_extension.epochs(attempt)}),
                 "Test intent: прежний контракт повреждён или устарел")
         require(previous["mode"] == report["mode"] or first_submit is None,
                 "Test intent: режим после первой сдачи менять нельзя")
     if previous:
         _transition(previous, report, first_submit is not None)
+    new_epoch = bool(epoch_repair and previous and previous.get("taskContract") != task_contract(state, task_id))
+    if new_epoch:
+        require(_has_red(report), "Test intent: расширенной эпохе нужен реальный новый RED")
+        require({r["path"] for r in previous["report"].get("newTestFiles", [])}
+                <= {r["path"] for r in report.get("newTestFiles", [])},
+                "Test intent: новая эпоха не удаляет прежние тесты")
     if state.get("policy", {}).get("mixedEvidence") and report["mode"] == "mixed":
         for prior_ref in previous_refs:
             prior = _saved(store, prior_ref)
@@ -345,12 +378,15 @@ def record(store, state, task_id, report):
                 _transition(prior, report, first_submit is not None)
     red = _red(store, state, task_id, attempt["id"], report) if _has_red(report) else None
     if red:
-        changed_tests = (previous is None or not _has_red(previous["report"])
+        changed_tests = (new_epoch or previous is None or not _has_red(previous["report"])
                          or [(r["path"], r["sha256"]) for r in previous["report"]["newTestFiles"]]
                          != [(r["path"], r["sha256"]) for r in report["newTestFiles"]])
         if changed_tests:
             require(red["candidate"] == task_basis(store, state, task_id),
                     "Test intent: новый RED должен предшествовать следующей реализации")
+            if new_epoch:
+                require(red["journal"]["sequence"] > attempt["zoneExtensions"][-1]["beforeSequence"] + 1,
+                        "Test intent: RED новой эпохи должен выполняться после расширения зон")
             if previous and _has_red(previous["report"]):
                 previous_event = _intent_event(journal["events"], task_id, attempt["id"], previous_refs[-1])
                 require(red["id"] != previous["redExecutionId"]
@@ -379,6 +415,15 @@ def record(store, state, task_id, report):
 
 def _valid(store, state, task_id, *, require_green, allow_source_changes=False, historical=False):
     task, attempt = _attempt(state, task_id)
+    if attempt.get("testIntent") and _saved(store, attempt["testIntent"])["schema"] == 2:
+        from . import incremental_test_intent
+        return incremental_test_intent.validate(store, state, task_id, require_green=require_green,
+            allow_source_changes=allow_source_changes, historical=historical)
+    from . import task_zone_extension
+    if attempt.get("zoneExtensions"):
+        task_zone_extension.history_valid(store, state, task_id, attempt)
+        if not historical:
+            task_zone_extension.require_exact_files(store, attempt)
     history = attempt.get("testIntentHistory")
     if isinstance(history, list):
         _revision_budget(state, len(history))
@@ -408,6 +453,9 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
                 and contract.get("recordedAfterSequence", 0) < event_sequences[index]
                 and contract.get("initialSourceBasis") == contracts[0].get("initialSourceBasis"),
                 "Test intent: история контракта расходится с журналом")
+        if attempt.get("zoneExtensions"):
+            require(contract.get("taskContract") == task_zone_extension.contract_at(attempt, event_sequences[index]),
+                    "Test intent: контракт принадлежит другой эпохе")
         if _has_red(contract["report"]):
             historical_red = _red(store, state, task_id, attempt["id"], contract["report"])
             require(historical_red["id"] == contract.get("redExecutionId")
@@ -425,10 +473,19 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
                 for prior in contracts[:index]:
                     if prior["mode"] == "behavior_change":
                         _transition(prior, contract["report"], submitted)
-        if index and _has_red(contract["report"]) and current_tests != previous_tests:
+        new_epoch = bool(index and contract.get("taskContract") != contracts[index - 1].get("taskContract"))
+        if new_epoch:
+            require(_has_red(contract["report"])
+                    and {p for p, _ in previous_tests} <= {p for p, _ in current_tests},
+                    "Test intent: новая эпоха требует RED и сохраняет прежние тесты")
+        if index and _has_red(contract["report"]) and (current_tests != previous_tests or new_epoch):
             require(contract.get("redExecutionId") != contracts[index - 1].get("redExecutionId")
                     and contract.get("redJournalSequence", 0) > event_sequences[index - 1],
                     "Test intent: изменённые тесты не прошли новый RED")
+            if new_epoch:
+                epoch = next(e for e in task_zone_extension.epochs(attempt) if e["contract"] == contract["taskContract"])
+                require(contract.get("redJournalSequence", 0) > epoch["afterSequence"],
+                        "Test intent: RED предшествует новой эпохе")
     latest = contracts[-1]
     require(latest.get("taskContract") == task_contract(state, task_id)
             and latest.get("mode") in ("behavior_change", "not_applicable", "mixed")
@@ -466,6 +523,25 @@ def _valid(store, state, task_id, *, require_green, allow_source_changes=False, 
     if require_green:
         require(task_verified(store, state, task_id), "Test intent: нужна свежая GREEN проверка задачи")
     return True
+
+
+def chain_matches(store, attempt, submitted, rounds, repair):
+    """Old worker/critic1 keep their intent; repair/critic2 use the new epoch."""
+    if attempt.get("testIntent") and _saved(store, attempt["testIntent"])["schema"] == 2:
+        from . import incremental_test_intent
+        return incremental_test_intent.chain_matches(store, attempt, submitted, rounds, repair)
+    if not attempt.get("zoneExtensions"):
+        return all(r.get("testIntent") == attempt.get("testIntent")
+                   for r in [submitted, *rounds, *([repair] if repair else [])])
+    original = submitted.get("testIntent")
+    first_contract = attempt["zoneExtensions"][0]["before"]["contract"]
+    if (not original or rounds[0].get("testIntent") != original
+            or _saved(store, original).get("taskContract") != first_contract):
+        return False
+    latest = attempt.get("testIntent")
+    return bool(latest and _saved(store, latest).get("taskContract") == attempt["contract"]
+                and repair and repair.get("testIntent") == latest
+                and all(r.get("testIntent") == latest for r in rounds[1:]))
 
 
 def required(state, attempt):

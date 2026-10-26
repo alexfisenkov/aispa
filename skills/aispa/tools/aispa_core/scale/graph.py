@@ -16,7 +16,7 @@ class DependencyIndex:
             stack, visiting = [(root, False)], set()
             while stack:
                 if budget:
-                    budget.check(0, path="dependency DAG validation", progress=len(done))
+                    budget.check(0, path="dependency DAG validation", progress=len(done), progress_unit="items")
                 tid, leaving = stack.pop()
                 if leaving:
                     visiting.remove(tid)
@@ -44,7 +44,7 @@ class DependencyIndex:
                 digits = (position + sys.int_info.bits_per_digit) // sys.int_info.bits_per_digit
                 projected = sys.getsizeof(0) + digits * sys.int_info.sizeof_digit
                 budget.check_memory(index_bytes + sys.getsizeof(self.bits) + mask_bytes + projected,
-                                    path="dependency ancestor masks", progress=len(self.bits))
+                                    path="dependency ancestor masks", progress=len(self.bits), progress_unit="items")
             bits = 1 << position
             for dep in self.tasks[tid]['dependsOn']:
                 bits |= self.bits[dep]
@@ -52,7 +52,7 @@ class DependencyIndex:
             mask_bytes += sys.getsizeof(bits)
             if budget:
                 budget.check_memory(index_bytes + sys.getsizeof(self.bits) + mask_bytes,
-                                    path="dependency ancestor masks", progress=len(self.bits))
+                                    path="dependency ancestor masks", progress=len(self.bits), progress_unit="items")
 
     def contains(self, tid, ancestor):
         return bool(self.bits[tid] & (1 << self.positions[ancestor]))
