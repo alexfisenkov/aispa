@@ -47,8 +47,10 @@ class DashboardSnapshotTests(unittest.TestCase):
 
     def test_simultaneous_http_requests_join_one_observable_calculation(self):
         entered, release = threading.Event(), threading.Event()
+        all_arrived = threading.Event()
         calls, lock = [], threading.Lock()
-        original = dashboard.project
+        arrivals = []
+        original, original_get = dashboard.project, dashboard.SnapshotCoordinator.get
 
         def slow(reader, state):
             with lock:
@@ -58,7 +60,15 @@ class DashboardSnapshotTests(unittest.TestCase):
                 raise Invalid("fixture calculation was not released")
             return original(reader, state)
 
-        with self.inline_server(slow) as url, ThreadPoolExecutor(max_workers=6) as pool:
+        def observed_get(coordinator, generation=None):
+            if generation is None:
+                with lock:
+                    arrivals.append(threading.get_ident())
+                    if len(arrivals) == 6:
+                        all_arrived.set()
+            return original_get(coordinator, generation)
+
+        with patch.object(dashboard.SnapshotCoordinator, "get", observed_get), self.inline_server(slow) as url, ThreadPoolExecutor(max_workers=6) as pool:
             start = threading.Barrier(6)
 
             def fetch():
@@ -66,18 +76,24 @@ class DashboardSnapshotTests(unittest.TestCase):
                 return response(url)
 
             requests = [pool.submit(fetch) for _ in range(6)]
-            self.assertTrue(entered.wait(2))
-            # A slow calculation must return observable pending responses before
-            # it completes, so none of these clients needs to release the job.
-            completed, _ = wait(requests, timeout=.6)
-            release.set()
-            replies = [future.result(timeout=3) for future in requests]
-            self.assertEqual(len(calls), 1, "Concurrent HTTP clients duplicated projection")
-            self.assertEqual(len(completed), 6, "Calculating responses waited for full projection")
-            self.assertEqual({code for code, _ in replies}, {202})
-            self.assertEqual({row["calculation"]["state"] for _, row in replies}, {"calculating"})
-            self.assertEqual(len({row["calculation"]["id"] for _, row in replies}), 1)
-            self.assertTrue(all(row.get("lastSnapshot") is None for _, row in replies))
+            try:
+                self.assertTrue(entered.wait(2))
+                # Client dispatch does not prove server admission. Keep the job
+                # blocked until all six real handlers have reached get(), then
+                # retain the bounded pending-response assertion while it runs.
+                self.assertTrue(all_arrived.wait(2), "HTTP clients did not all reach snapshot admission")
+                completed, _ = wait(requests, timeout=.6)
+                self.assertEqual(len(completed), 6, "Calculating responses waited for full projection")
+                replies = [future.result(timeout=3) for future in requests]
+                self.assertFalse(release.is_set(), "Pending replies were checked only after calculation release")
+                self.assertEqual(len(arrivals), 6)
+                self.assertEqual(len(calls), 1, "Concurrent HTTP clients duplicated projection")
+                self.assertEqual({code for code, _ in replies}, {202})
+                self.assertEqual({row["calculation"]["state"] for _, row in replies}, {"calculating"})
+                self.assertEqual(len({row["calculation"]["id"] for _, row in replies}), 1)
+                self.assertTrue(all(row.get("lastSnapshot") is None for _, row in replies))
+            finally:
+                release.set()
             code, ready = self.await_ready(url, replies[0][1])
             self.assertEqual(code, 200)
             self.assertEqual(ready["run"], self.state["run"])

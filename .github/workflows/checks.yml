@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Verification scope (full suite, runtime adapters or dashboard startup)
+        description: Verification scope (full suite, runtime adapters, dashboard or snapshot integrity)
         type: choice
         default: full
-        options: [full, runtimes, dashboard, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
+        options: [full, runtimes, dashboard, snapshot, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
 permissions:
   contents: read
 jobs:
@@ -69,6 +69,14 @@ jobs:
           python -B -m unittest -v
           test_workflow.WorkflowTests.test_live_projection_includes_blockers_before_final_delivery
           test_timing
+      - name: Snapshot generation and read-scope regressions
+        if: inputs.scope == 'snapshot'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_dashboard_snapshot test_dashboard_reader_cache test_calculation_scope
+          test_verdict_read_scope test_verified_reads
       - name: Label release compatibility
         if: inputs.scope == 'labels'
         env:
@@ -121,7 +129,7 @@ jobs:
           python -B -m unittest -v
           test_mixed_evidence test_failure_checks test_check_mode_views
       - name: Study-plan pilot example tests
-        if: inputs.scope == 'full'
+        if: inputs.scope == 'full' || inputs.scope == 'snapshot'
         working-directory: examples/study-plan
         run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests
