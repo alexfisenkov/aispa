@@ -95,6 +95,26 @@ class UpdateTests(unittest.TestCase):
         with self.network([self.release()]):
             return updates.prepare(self.package)
 
+    def test_timeout_contract_accepts_60_and_120_for_check_and_prepare(self):
+        for timeout in (60, 120):
+            with self.subTest(timeout=timeout), self.network([self.release()]):
+                self.assertEqual(updates.check(self.package, timeout=timeout)["status"], "available")
+                prepared = updates.prepare(self.package, timeout=timeout)
+                self.assertEqual(prepared["status"], "prepared")
+                self.assertEqual((self.package / "SKILL.md").read_bytes(), self.old["SKILL.md"])
+
+    def test_invalid_timeout_never_reads_update_network_or_changes_install(self):
+        for timeout in (True, False, float("nan"), float("inf"), -float("inf"), 0, -1, 120.01, "30", None):
+            with self.subTest(timeout=timeout), patch.object(updates, "_download") as download:
+                with self.assertRaises(Invalid):
+                    updates._deadline(timeout)
+                self.assertEqual(updates.check(self.package, timeout=timeout)["status"], "invalid_release")
+                with self.assertRaises(Invalid):
+                    updates.prepare(self.package, timeout=timeout)
+                download.assert_not_called()
+                self.assertEqual((self.package / "SKILL.md").read_bytes(), self.old["SKILL.md"])
+                self.assertEqual(list(self.package.parent.glob(".aispa-update-*")), [])
+
     def test_https_context_preserves_valid_default_ca_and_windows_native_trust(self):
         clean_env = {key: value for key, value in os.environ.items() if key not in ("SSL_CERT_FILE", "SSL_CERT_DIR")}
         for platform, cafile, capath in (("darwin", "/configured/ca.pem", None),

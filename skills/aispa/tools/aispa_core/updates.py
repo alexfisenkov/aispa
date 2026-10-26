@@ -11,6 +11,7 @@ import hashlib
 import http.client
 import io
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -37,6 +38,7 @@ MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_METADATA_BYTES = 2 * 1024 * 1024
+MAX_TIMEOUT_SECONDS = 120
 _SEMVER = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?"
@@ -254,6 +256,8 @@ def _download(url, limit, deadline):
             # read1 avoids waiting for an attacker to fill a large buffered read.
             reader = getattr(response, "read1", response.read)
             block = reader(min(65536, limit + 1 - len(data)))
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Истекло время загрузки обновления")
             if not block:
                 break
             data.extend(block)
@@ -277,8 +281,9 @@ def _json(data):
 
 
 def _deadline(timeout):
-    if not isinstance(timeout, (int, float)) or not 0 < timeout <= 60:
-        raise Invalid("Тайм-аут обновления должен быть от 0 до 60 секунд")
+    if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+            or not 0 < timeout <= MAX_TIMEOUT_SECONDS or not math.isfinite(timeout)):
+        raise Invalid("Тайм-аут обновления должен быть конечным числом: 0 < timeout <= 120 секунд")
     return time.monotonic() + timeout
 
 

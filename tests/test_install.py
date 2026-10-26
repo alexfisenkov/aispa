@@ -1,4 +1,5 @@
 import contextlib
+import ast
 import hashlib
 import importlib.util
 import io
@@ -100,6 +101,177 @@ class InstallerTests(unittest.TestCase):
     def preview(self):
         with self.network():
             return install.preview(destination=self.destination, cache_dir=self.cache, tag=self.tag)
+
+    @contextlib.contextmanager
+    def release_source_network(self, *, clock=None, costs=None, legacy=False,
+                               advertised_max_source=None):
+        """Wire/source fixtures; import and run the release's actual verifier."""
+        costs = costs or {}
+        clock = clock if clock is not None else {"now": 100.0}
+        source_hashes = []
+        opened = []
+        modules_before = set(sys.modules)
+
+        def clone(tag, commit, destination, timeout):
+            self.assertEqual((tag, commit), (self.tag, self.commit))
+            package = destination / "skills/aispa/tools/aispa_core"
+            shutil.copytree(ROOT / "skills/aispa/tools/aispa_core", package,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            verifier_path = package / "updates.py"
+            if legacy:
+                # Synthetic older release contract, not today's imported module.
+                text = verifier_path.read_text(encoding="utf-8")
+                lines = text.splitlines(keepends=True)
+                edits = []
+                for node in ast.parse(text).body:
+                    if isinstance(node, ast.FunctionDef) and node.name == "_deadline":
+                        edits.append((node.lineno - 1, node.end_lineno,
+                            "def _deadline(timeout):\n"
+                            "    if not isinstance(timeout, (int, float)) or not 0 < timeout <= 60:\n"
+                            "        raise Invalid('Historical verifier supports at most 60 seconds')\n"
+                            "    return time.monotonic() + timeout\n"))
+                    elif isinstance(node, ast.Assign) and any(
+                            isinstance(target, ast.Name) and target.id == "MAX_TIMEOUT_SECONDS"
+                            for target in node.targets):
+                        edits.append((node.lineno - 1, node.end_lineno, ""))
+                for start, end, replacement in sorted(edits, reverse=True):
+                    lines[start:end] = [replacement]
+                verifier_path.write_text("".join(lines) + "\nLEGACY_TIMEOUT_FIXTURE = True\n", encoding="utf-8")
+            if advertised_max_source is not None:
+                with verifier_path.open("a", encoding="utf-8") as stream:
+                    stream.write("\nMAX_TIMEOUT_SECONDS = " + advertised_max_source + "\n")
+            source_hashes.append(hashlib.sha256(verifier_path.read_bytes()).hexdigest())
+            clock["now"] += costs.get("clone", 0)
+
+        def open_wire(request, *, timeout):
+            url = request.full_url
+            opened.append((url, timeout))
+            if url == install.API + "/releases/tags/" + urllib.parse.quote(self.tag, safe=""):
+                data = json.dumps(self.release).encode()
+                cost = costs.get("release", 0)
+            elif url == install.API + "/git/ref/tags/" + urllib.parse.quote(self.tag, safe=""):
+                data = json.dumps({"ref": "refs/tags/" + self.tag,
+                                   "object": {"type": "commit", "sha": self.commit}}).encode()
+                cost = costs.get("source", 0)
+            else:
+                data = self.assets[url]
+                cost = costs.get("archive" if url.endswith("aispa.zip") else "manifest", 0)
+            stream = io.BytesIO(data)
+            response = Mock(headers={})
+            response.geturl.return_value = url
+            def read(size):
+                clock["now"] += cost
+                return stream.read(size)
+            response.read1.side_effect = read
+            return contextlib.nullcontext(response)
+
+        opener = Mock()
+        opener.open.side_effect = open_wire
+        try:
+            with patch.object(install, "_clone_verified", side_effect=clone), \
+                 patch.object(install.time, "monotonic", side_effect=lambda: clock["now"]), \
+                 patch.object(install.urllib.request, "build_opener", return_value=opener):
+                yield {"sourceHashes": source_hashes, "opened": opened}
+        finally:
+            for name in set(sys.modules) - modules_before:
+                if name.startswith("_aispa_verified_"):
+                    del sys.modules[name]
+
+    def test_current_release_verifier_accepts_60_and_120_through_real_preview(self):
+        current_hash = hashlib.sha256((ROOT / "skills/aispa/tools/aispa_core/updates.py").read_bytes()).hexdigest()
+        for timeout in (60, 120):
+            with self.subTest(timeout=timeout), self.release_source_network() as fixture:
+                receipt = install.preview(destination=self.destination, cache_dir=self.cache,
+                                          tag=self.tag, timeout=timeout)
+                self.assertEqual(receipt["status"], "prepared")
+                self.assertEqual(fixture["sourceHashes"], [current_hash])
+                self.assertEqual((self.cache / receipt["candidateId"] / "package/SKILL.md").read_bytes(),
+                                 self.files["SKILL.md"])
+                self.assertFalse(self.destination.exists())
+
+    def test_invalid_timeout_is_rejected_before_installer_network(self):
+        for timeout in (True, False, float("nan"), float("inf"), -float("inf"), 0, -1, 120.01, "30", None):
+            with self.subTest(timeout=timeout), \
+                 patch.object(install, "_fetch") as fetch, \
+                 patch.object(install, "_releases") as releases, \
+                 self.assertRaises(install.InstallError):
+                install.preview(destination=self.destination, cache_dir=self.cache, timeout=timeout)
+            fetch.assert_not_called()
+            releases.assert_not_called()
+        for entry in (lambda value: install._fetch(install.RELEASES_URL, 100, value), install._releases):
+            for timeout in (True, float("nan"), float("inf"), 0, 121):
+                with self.subTest(entry=entry, timeout=timeout), \
+                     patch.object(install.urllib.request, "build_opener") as opener, \
+                     self.assertRaises(install.InstallError):
+                    entry(timeout)
+                opener.assert_not_called()
+
+    def test_preview_total_deadline_includes_lookup_clone_and_archive_cleanup(self):
+        # Each response has two reads; lookup12 + source12 + clone12 +
+        # manifest8 + source12 consumes56 of60 before the archive can finish.
+        costs = {"release": 6, "source": 6, "clone": 12, "manifest": 4, "archive": 3}
+        with self.release_source_network(costs=costs), \
+             self.assertRaisesRegex((install.InstallError, TimeoutError), "[Ии]стекло время"):
+            install.preview(destination=self.destination, cache_dir=self.cache, tag=self.tag, timeout=60)
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(list(self.cache.iterdir()), [])
+
+    def test_annotated_source_lookup_cannot_restart_timeout(self):
+        clock = {"now": 100.0}
+        budgets = []
+        tag_sha = "b" * 40
+        def fetch(url, limit, timeout):
+            budgets.append(timeout)
+            if "/git/ref/" in url:
+                clock["now"] += 3
+            return json.dumps({"ref": "refs/tags/" + self.tag,
+                "object": {"type": "tag", "sha": tag_sha}} if "/git/ref/" in url else
+                {"object": {"type": "commit", "sha": self.commit}}).encode()
+        with patch.object(install, "_fetch", side_effect=fetch), \
+             patch.object(install.time, "monotonic", side_effect=lambda: clock["now"]):
+            self.assertEqual(install._source_commit(self.tag, 5), self.commit)
+        self.assertEqual(budgets, [5, 2])
+
+    def test_clone_and_head_check_share_remaining_timeout(self):
+        clock = {"now": 100.0}
+        budgets = []
+        source = self.root / "source"
+        def git(args, *, timeout, cwd=None):
+            budgets.append(timeout)
+            if args[0] == "clone":
+                clock["now"] += 3
+                package = source / "skills/aispa/tools/aispa_core"
+                package.mkdir(parents=True)
+                (package / "updates.py").write_text("# source fixture\n", encoding="utf-8")
+                return ""
+            return self.commit
+        with patch.object(install, "_git", side_effect=git), \
+             patch.object(install.time, "monotonic", side_effect=lambda: clock["now"]):
+            install._clone_verified(self.tag, self.commit, source, 5)
+        self.assertEqual(budgets, [5, 2])
+
+    def test_historical_verifier_is_release_bound_and_120_fails_with_guidance(self):
+        with self.release_source_network(legacy=True):
+            receipt = install.preview(destination=self.destination, cache_dir=self.cache,
+                                      tag=self.tag, timeout=60)
+            self.assertEqual(receipt["status"], "prepared")
+        existing = set(self.cache.iterdir())
+        with self.release_source_network(legacy=True), \
+             self.assertRaisesRegex(install.InstallError, "[Vv]erifier.*60|60.*[Vv]erifier"):
+            install.preview(destination=self.destination, cache_dir=self.cache,
+                            tag=self.tag, timeout=120)
+        self.assertEqual(set(self.cache.iterdir()), existing)
+        self.assertFalse(self.destination.exists())
+
+    def test_malformed_release_verifier_timeout_contract_fails_closed(self):
+        for source in ("True", "float('nan')", "float('inf')", "0", "121", "'120'", "None"):
+            with self.subTest(advertised=source), \
+                 self.release_source_network(advertised_max_source=source), \
+                 self.assertRaisesRegex(install.InstallError, "[Vv]erifier"):
+                install.preview(destination=self.destination, cache_dir=self.cache,
+                                tag=self.tag, timeout=60)
+            self.assertFalse(self.destination.exists())
+            self.assertEqual(list(self.cache.iterdir()), [])
 
     def metadata_network(self, responses):
         def fetch(url, limit, timeout):

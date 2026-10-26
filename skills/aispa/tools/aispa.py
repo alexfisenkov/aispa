@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 import sys
 
+sys.dont_write_bytecode = True
+
 from aispa_core import VERSION
 from aispa_core.contracts import basis, active, task_closure
 from aispa_core.display import publish, project
@@ -33,6 +35,15 @@ def parser():
                    help="Краткий ответ изменений/status/init со ссылкой и SHA-256 полного JSON; перед подкомандой")
     p.add_argument("--version", action="version", version=VERSION)
     sub = p.add_subparsers(dest="action", required=True)
+    audit = sub.add_parser("assess", help="audit-only: bounded filesystem reading without a run, writes or commands")
+    for name, default in (("max-entries", 1000), ("max-depth", 4), ("max-file-bytes", 131072),
+                          ("max-total-bytes", 1048576), ("max-excerpt-chars", 2000)):
+        audit.add_argument("--" + name, type=int, default=default)
+    audit.add_argument("--timeout", type=float, default=2)
+    faq = sub.add_parser("faq", help="Read source-bound support facts from this exact package, without a run")
+    faq.add_argument("--version", dest="faq_version", required=True, help="Detected installed/pinned package version")
+    faq.add_argument("--id", action="append")
+    faq.add_argument("--sha256", help="Expected canonical input SHA-256")
     pack = sub.add_parser("pack", help="Prepare a verified chunked input without changing a run")
     pack.add_argument("--file", required=True)
     pack.add_argument("--output", required=True)
@@ -333,6 +344,18 @@ def resources_command(store, state, flow, args):
 
 
 def execute(args):
+    if args.action == "assess":
+        from aispa_core import assessment
+        result = assessment.assess(args.root, max_entries=args.max_entries, max_depth=args.max_depth,
+            max_file_bytes=args.max_file_bytes, max_total_bytes=args.max_total_bytes,
+            max_excerpt_chars=args.max_excerpt_chars, timeout=args.timeout)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.action == "faq":
+        from aispa_core import support_faq
+        print(json.dumps(support_faq.select(PACKAGE, version=args.faq_version, ids=args.id,
+                         expected_sha256=args.sha256), ensure_ascii=False, indent=2))
+        return 0
     if args.action == "init":
         autonomy.interview_setting(args.interview_scope, args.interview_minutes)
     if args.action == "pack":

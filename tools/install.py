@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
@@ -36,6 +37,7 @@ MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_FILES = 2048
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_PACKAGE_BYTES = 64 * 1024 * 1024
+MAX_TIMEOUT_SECONDS = 120
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _CANDIDATE = re.compile(r"aispa-install-[A-Za-z0-9_-]{8,64}\Z")
@@ -80,6 +82,22 @@ def _need(ok, message):
         raise InstallError(message)
 
 
+def _valid_timeout(timeout):
+    return (isinstance(timeout, (int, float)) and not isinstance(timeout, bool)
+            and 0 < timeout <= MAX_TIMEOUT_SECONDS and math.isfinite(timeout))
+
+
+def _deadline(timeout):
+    _need(_valid_timeout(timeout), "Тайм-аут должен быть конечным числом: 0 < timeout <= 120 секунд")
+    return time.monotonic() + timeout
+
+
+def _remaining(deadline):
+    remaining = deadline - time.monotonic()
+    _need(remaining > 0, "Истекло время подготовки установки")
+    return remaining
+
+
 def _json(data):
     def unique(pairs):
         value = {}
@@ -116,14 +134,13 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
 
 def _fetch(url, limit, timeout):
     _trusted_url(url)
-    _need(isinstance(timeout, (int, float)) and 0 < timeout <= 120, "Некорректный тайм-аут")
+    deadline = _deadline(timeout)
     headers = {"User-Agent": "AISpa-first-installer", "Accept": "application/vnd.github+json"}
     if urllib.parse.urlsplit(url).hostname == "api.github.com":
         headers["Cache-Control"] = "no-cache"
     request = urllib.request.Request(url, headers=headers)
     opener = urllib.request.build_opener(_SafeRedirect())
-    deadline = time.monotonic() + timeout
-    with opener.open(request, timeout=min(timeout, 20)) as response:
+    with opener.open(request, timeout=min(_remaining(deadline), 20)) as response:
         _trusted_url(response.geturl(), redirect=True)
         length = response.headers.get("Content-Length")
         if length is not None:
@@ -133,6 +150,7 @@ def _fetch(url, limit, timeout):
             _need(time.monotonic() < deadline, "Истекло время загрузки выпуска")
             reader = getattr(response, "read1", response.read)
             chunk = reader(min(65536, limit + 1 - len(data)))
+            _remaining(deadline)
             if not chunk:
                 return bytes(data)
             data.extend(chunk)
@@ -159,8 +177,7 @@ def _semver(version):
 
 
 def _releases(timeout):
-    _need(isinstance(timeout, (int, float)) and 0 < timeout <= 120, "Некорректный тайм-аут")
-    deadline = time.monotonic() + timeout
+    deadline = _deadline(timeout)
     rows = []
 
     def metadata(url):
@@ -261,8 +278,9 @@ def _select_release(rows, tag=None):
 
 
 def _source_commit(tag, timeout):
+    deadline = _deadline(timeout)
     quoted = urllib.parse.quote(tag, safe="")
-    ref = _json(_fetch(f"{API}/git/ref/tags/{quoted}", MAX_METADATA_BYTES, timeout))
+    ref = _json(_fetch(f"{API}/git/ref/tags/{quoted}", MAX_METADATA_BYTES, _remaining(deadline)))
     _need(isinstance(ref, dict) and ref.get("ref") == "refs/tags/" + tag,
           "Git tag выпуска не подтверждён")
     obj = ref.get("object")
@@ -272,7 +290,7 @@ def _source_commit(tag, timeout):
         if obj.get("type") == "commit":
             return obj["sha"]
         _need(obj.get("type") == "tag", "Tag не указывает на commit")
-        tag_object = _json(_fetch(f"{API}/git/tags/{obj['sha']}", MAX_METADATA_BYTES, timeout))
+        tag_object = _json(_fetch(f"{API}/git/tags/{obj['sha']}", MAX_METADATA_BYTES, _remaining(deadline)))
         _need(isinstance(tag_object, dict), "Некорректный annotated tag")
         obj = tag_object.get("object")
     raise InstallError("Слишком длинная цепочка annotated tag")
@@ -292,10 +310,12 @@ def _git(args, *, timeout, cwd=None):
 
 
 def _clone_verified(tag, commit, destination, timeout):
+    deadline = _deadline(timeout)
     _need(_COMMIT.fullmatch(commit) is not None, "Некорректный source commit")
     _git(["clone", "--depth", "1", "--single-branch", "--branch", tag,
-          "--", GIT_URL, str(destination)], timeout=timeout)
-    head = _git(["-C", str(destination), "rev-parse", "HEAD"], timeout=10)
+          "--", GIT_URL, str(destination)], timeout=_remaining(deadline))
+    head = _git(["-C", str(destination), "rev-parse", "HEAD"], timeout=_remaining(deadline))
+    _remaining(deadline)
     _need(head == commit, "Clone HEAD не совпал с опубликованным Git tag")
     _need((destination / "skills/aispa/tools/aispa_core/updates.py").is_file(),
           "В commit выпуска отсутствует штатный verifier")
@@ -314,6 +334,25 @@ def _load_pinned_verifier(repo):
     verifier = importlib.import_module(name + ".updates")
     _need(verifier.REPOSITORY == REPOSITORY, "Verifier выпуска указывает на другой publisher")
     return verifier
+
+
+def _verifier_deadline(verifier, timeout, deadline):
+    # Older published verifiers predate the explicit timeout contract and cap
+    # their own validator at60. Keep that release's code and validation intact.
+    maximum = getattr(verifier, "MAX_TIMEOUT_SECONDS", 60)
+    _need(_valid_timeout(maximum), "Verifier выпуска объявляет некорректный предел тайм-аута")
+    _need(timeout <= maximum,
+          f"Verifier выбранного выпуска поддерживает максимум {maximum:g} секунд; "
+          f"повторите preview с --timeout {maximum:g} или выберите совместимый Release")
+    _remaining(deadline)
+    try:
+        checked = verifier._deadline(timeout)
+    except ValueError as exc:
+        raise InstallError("Verifier выбранного выпуска не поддерживает запрошенный тайм-аут") from exc
+    _need(isinstance(checked, (int, float)) and not isinstance(checked, bool)
+          and math.isfinite(checked), "Verifier выпуска вернул некорректный deadline")
+    # Validation does not grant a fresh budget after discovery/source/clone.
+    return min(deadline, checked)
 
 
 def _is_link(path):
@@ -442,17 +481,19 @@ def _safe_member(name):
 def preview(*, runtime=None, scope=None, project_root=None, destination=None,
             tag=None, cache_dir=None, home=None, timeout=30):
     """Stage exactly one published release without touching the destination."""
+    deadline = _deadline(timeout)
     target = choose_destination(runtime=runtime, scope=scope, project_root=project_root,
                                 destination=destination, home=home)
-    _need(isinstance(timeout, (int, float)) and 0 < timeout <= 120, "Тайм-аут должен быть 0–120 секунд")
     _system_ca_bundle()
-    release = _tag_release(tag, timeout) if tag is not None else _select_release(_releases(timeout))
-    commit = _source_commit(release["tag"], timeout)
+    release = (_tag_release(tag, _remaining(deadline)) if tag is not None
+               else _select_release(_releases(_remaining(deadline))))
+    commit = _source_commit(release["tag"], _remaining(deadline))
+    _remaining(deadline)
     cache = _cache(cache_dir)
     candidate = Path(tempfile.mkdtemp(prefix="aispa-install-", dir=cache))
     try:
         clone = candidate / "source"
-        _clone_verified(release["tag"], commit, clone, timeout)
+        _clone_verified(release["tag"], commit, clone, _remaining(deadline))
         verifier = _load_pinned_verifier(clone)
         # The already pinned publisher verifier checks exact release asset URLs,
         # manifest schema, ZIP entries, modes, sizes and per-file hashes.
@@ -464,7 +505,7 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
         validated = verifier._release([raw], verifier._semver("0.0.0-alpha.0"))
         _need(validated is not None and validated["tag"] == release["tag"],
               "Verifier не подтвердил опубликованный выпуск")
-        deadline = verifier._deadline(timeout)
+        deadline = _verifier_deadline(verifier, timeout, deadline)
         manifest_bytes = verifier._download(validated["assets"]["aispa-update.json"],
                                             verifier.MAX_METADATA_BYTES, deadline)
         manifest = verifier._json(manifest_bytes)
@@ -484,6 +525,7 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
         _need(actual == _disk_records(records), "Файлы не совпали с manifest после распаковки")
         _require_runtime(staged, runtime)
         _need(_safe_destination(target) == target, "Назначение изменилось во время подготовки")
+        _remaining(deadline)
         receipt = {"schema": 1, "status": "prepared", "candidateId": candidate.name,
                    "repository": REPOSITORY, "destination": str(target), "runtime": runtime,
                    "version": validated["version"], "tag": validated["tag"],
