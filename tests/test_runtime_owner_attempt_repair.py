@@ -163,6 +163,7 @@ class OwnerAttemptRuntimeRepairTests(unittest.TestCase):
         manifest = Path(prepared["manifestPath"])
         other = Path(self.temp.name) / "manifest-copy.json"
         other.write_bytes(manifest.read_bytes())
+        manifest.chmod(0o644)  # Disposable fixture only; Windows cannot unlink a read-only file.
         manifest.unlink()
         manifest.symlink_to(other)
         with self.assertRaises(Invalid):
@@ -380,14 +381,12 @@ class OwnerAttemptRuntimeRepairTests(unittest.TestCase):
         """Real old pin + actual new CLI command on a short synthetic blocked task."""
         f = team_tests.TeamTests(methodName="test_new_attempt_requires_new_quoted_owner_brief")
         old = zone_tests.ZoneRuntimeRepairTests(methodName="test_second_immutable_repair_preserves_first_manifest_prefix_runtime_and_attempts")
-        f.setUp()
         old.setUp()
+        old.official_init(f.setUp)
         try:
             f.state["tasks"][0]["requirements"].append("G01")
             f.team.prepare()
-            shutil.copytree(zone_tests.ZoneRuntimeRepairTests.package, f.store.run / "runtime")
-            f.state["runtimeDigest"] = zone_tests.repair.OFFICIAL_DIGEST
-            f.host.save("synthetic-official-runtime")
+            f.host.save("synthetic-official-runtime-confirmed")
             old.first_maintenance()  # Constructs exact 3dce187 source in a disposable root.
             first_source = Path(old.temp.name) / "first-maintenance"
 

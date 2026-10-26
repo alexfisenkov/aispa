@@ -187,6 +187,7 @@ def _scan_run(root):
     zone_rows, owner_rows = [], []
     previous_state = None
     owner_selected = None
+    expected_runtime_digest = zone.OFFICIAL_DIGEST
     count, hasher = 0, hashlib.sha256()
     with cursor["path"].open("rb") as history:
         for raw in history:
@@ -195,6 +196,12 @@ def _scan_run(root):
             count += 1
             current = row["state"]
             _need(current.get("version") == zone.VERSION, "журнал содержит другую версию")
+            if row["event"] in (zone.EVENT, zone.DEFERRED_EVENT, EVENT):
+                # The addressed zone/owner receipts validate these transitions.
+                expected_runtime_digest = current.get("runtimeDigest")
+            else:
+                _need(current.get("runtimeDigest") == expected_runtime_digest,
+                      "runtimeDigest изменён вне выбранного ремонта")
             store._verify_sources(current)
             zone._zone_local_artifacts(store, current, checked, external)
             zone._mixed_record_closure(store, current, validated)
@@ -457,10 +464,8 @@ def apply(root, *, manifest_file, expected_manifest_sha256, expected_journal_sha
         raise Invalid("Owner-attempt runtime repair: manifest вне этого run") from exc
     ref = {"file": name, "sha256": expected_manifest_sha256}
     approval = Path(approval_file).absolute()
-    _need(approval.is_file() and not is_link(approval), "нужен обычный approval-file")
-    approval_raw = approval.read_bytes()
-    _need(0 < len(approval_raw) <= 131072
-          and hashlib.sha256(approval_raw).hexdigest() == expected_approval_sha256
+    approval_raw = zone._approval_bytes(approval, link_check=is_link)
+    _need(hashlib.sha256(approval_raw).hexdigest() == expected_approval_sha256
           and owner_quote in approval_raw.decode("utf-8"),
           "approval-file не совпадает с просмотренным решением и точной цитатой")
     with store.lock():
@@ -474,7 +479,7 @@ def apply(root, *, manifest_file, expected_manifest_sha256, expected_journal_sha
               and manifest["parentManifest"] == state["runtimeZoneRepair"]["manifest"]
               and manifest["approvalSha256"] == expected_approval_sha256
               and manifest["ownerQuote"] == owner_quote
-              and file_hash(approval) == expected_approval_sha256,
+              and zone._approval_bytes(approval, link_check=is_link) == approval_raw,
               "подготовка устарела")
         stage = confined(store.run, "runtime-repairs/" + manifest["id"])
         history_path = confined(store.run, "events.jsonl")

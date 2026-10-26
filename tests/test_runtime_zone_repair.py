@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/aispa/tools"))
@@ -19,6 +20,20 @@ MAINTENANCE_COMMIT = "e2f3ddb8284bb6539c1eaa3e1eddd5d1501eda98"
 
 
 class ZoneRuntimeRepairTests(unittest.TestCase):
+    def official_init(self, setup):
+        """Give a synthetic fixture the official pin from its first event."""
+        original_create = Journal.create
+        def create_with_official_pin(store, slug, title, initializer=None):
+            def initialize(state):
+                if initializer is not None:
+                    initializer(state)
+                state["runtimeDigest"] = repair.OFFICIAL_DIGEST
+            state = original_create(store, slug, title, initialize)
+            shutil.copytree(self.package, store.run / "runtime")
+            return state
+        with patch.object(Journal, "create", create_with_official_pin):
+            setup()
+
     @classmethod
     def setUpClass(cls):
         cls.release = tempfile.TemporaryDirectory(prefix="aispa-exact-040-")
@@ -38,10 +53,14 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
             path = cls.maintenance / name.removeprefix("skills/aispa/")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(subprocess.check_output(["git", "show", MAINTENANCE_COMMIT + ":" + name], cwd=ROOT))
-        # These source tools remain the exact historical bounded implementation.
-        # Other current features must not be smuggled into its candidate package.
-        for name in ("tools/aispa_core/runtime_zone_repair.py", "tools/repair_task_zones.py"):
-            assert (ROOT / "skills/aispa" / name).read_bytes() == (cls.maintenance / name).read_bytes(), name
+        # The fixture must stay the exact historical package even when the
+        # current repair readers receive later safety fixes.
+        historical_tools = {
+            "tools/aispa_core/runtime_zone_repair.py": "679efa6e3f571c53c741ce0108b1427ed174339ffbeadd19481af612aa9e08fc",
+            "tools/repair_task_zones.py": "a5d50af397f3360369d22fd9210f1d34d56d950fe4bf2863fb8014a5b10a8f7a",
+        }
+        for name, expected_sha in historical_tools.items():
+            assert file_hash(cls.maintenance / name) == expected_sha, name
 
     @classmethod
     def tearDownClass(cls):
@@ -172,7 +191,7 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         import test_mixed_evidence
         from aispa_core.team import _seal
         fixture = test_mixed_evidence.MixedEvidenceTests(methodName="test_receipts_and_attachments_bound_and_sealed")
-        fixture.setUp()
+        self.official_init(fixture.setUp)
         self.addCleanup(fixture.doCleanups)
         module, report, observations = fixture.observations()
         fx = fixture.fx
@@ -198,9 +217,7 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         structural = fx.store.artifact("evidence", b"actual structural attachment", ".txt")
         fx.state["gates"]["fixture"] = {"report": fx.store.artifact("reviews",
             json.dumps({"nestedProof": structural}).encode(), ".json")}
-        shutil.copytree(self.package, fx.store.run / "runtime")
-        fx.state["runtimeDigest"] = repair.OFFICIAL_DIGEST
-        fx.store.append(fx.state, "synthetic-mixed-runtime")
+        fx.store.append(fx.state, "synthetic-mixed-evidence")
         return fx, {"blob": blob, "observation": observation, "screenshot": screenshot, "structural": structural}
 
     def test_mixed_attachment_foreign_description_is_opaque_with_or_without_synthetic_flag(self):
@@ -303,11 +320,9 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         from aispa_core.contracts import basis
         from aispa_core.team import _history_valid, acceptance_chain
         fixture = ZoneExtensionTests(methodName="test_same_attempt_old_fail_new_red_green_and_second_critic")
-        fixture.setUp()
+        self.official_init(fixture.setUp)
         try:
             state, store = fixture.state, fixture.store
-            shutil.copytree(self.package, store.run / "runtime")
-            state["runtimeDigest"] = repair.OFFICIAL_DIGEST
             author = participants.register(store, state, "coverage", "fixture", "synthetic-coverage", "synthetic-session")
             ref = store.artifact("reviews", b"{}\n", ".json")
             state["gates"]["coverage"] = {"passed": True, "basis": basis(store, state, "coverage"), "report": ref}

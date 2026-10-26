@@ -90,13 +90,13 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
         self.assertEqual(repair.inspect(self.root)["newRuntimeDigest"], selected["newRuntimeDigest"])
         cli = Path(selected["cli"])
         called = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root),
-                                 "start", "--help"], capture_output=True, text=True, timeout=30)
+                                 "start", "--help"], capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(called.returncode, 0, called.stderr)
         self.assertIn("context", called.stdout)
         write = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root),
                                 "participant", "--role", "coordinator", "--runtime", "codex",
                                 "--native-id", "synthetic-after-final-bridge", "--session", "synthetic"],
-                               capture_output=True, text=True, timeout=30)
+                               capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(write.returncode, 0, write.stdout + write.stderr)
         self.assertEqual(repair.inspect(self.root)["newRuntimeDigest"], selected["newRuntimeDigest"])
         with self.assertRaises(Invalid):
@@ -188,23 +188,10 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
             zone_fixture.before_state["runtimeDigest"] = original
             zone_fixture.store.append(zone_fixture.before_state, "synthetic-pre-zone-digest-restore")
             zone_fixture.sha = file_hash(zone_fixture.history)
-            zone_fixture.first_maintenance()
-            zone_fixture.apply(zone_fixture.prepare())
-            decision = Path(zone_fixture.temp.name) / "owner-retry.txt"
-            decision.write_text("Question: Retry T01 and T06?\nOwner: Да давай\n", encoding="utf-8")
-            journal_sha = file_hash(zone_fixture.history)
-            parent = owner_tests.repair.prepare(
-                zone_fixture.root, candidate_package=ROOT / "skills/aispa",
-                expected_journal_sha256=journal_sha,
-                expected_approval_sha256=file_hash(decision), owner_quote="Да давай")
-            owner_tests.repair.apply(
-                zone_fixture.root, manifest_file=parent["manifestPath"],
-                expected_manifest_sha256=parent["manifest"]["sha256"],
-                expected_journal_sha256=journal_sha, approval_file=decision,
-                expected_approval_sha256=file_hash(decision),
-                owner_quote="Да давай", confirm=True)
-            with self.assertRaises(Invalid):
-                repair.inspect(zone_fixture.root)
+            frozen = zone_fixture.history.read_bytes()
+            with self.assertRaisesRegex(Invalid, "runtimeDigest"):
+                zone_tests.repair.inspect(zone_fixture.root)
+            self.assertEqual(zone_fixture.history.read_bytes(), frozen)
         finally:
             zone_fixture.tearDown()
 
@@ -219,9 +206,12 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
             old.state["runtimeDigest"] = original
             old.store.append(old.state, "synthetic-pre-owner-digest-restore")
             old.sha = file_hash(old.journal)
-            old.apply(old.prepare())
-            with self.assertRaises(Invalid):
-                repair.inspect(old.root)
+            frozen = old.journal.read_bytes()
+            with self.assertRaisesRegex(Invalid, "runtimeDigest"):
+                owner_tests.repair.inspect(old.root)
+            with self.assertRaisesRegex(Invalid, "runtimeDigest"):
+                old.prepare()
+            self.assertEqual(old.journal.read_bytes(), frozen)
         finally:
             old.tearDown()
 
@@ -479,7 +469,7 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
                             "--expected-manifest-sha256", prepared["manifest"]["sha256"],
                             "--expected-journal-sha256", sha, "--approval-file", str(old.approval), "--confirm"]
                 result = subprocess.run([sys.executable, "-B", str(cli), "--root", str(f.root), action, *args],
-                                        capture_output=True, text=True, timeout=30)
+                                        capture_output=True, text=True, encoding="utf-8", timeout=30)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 return json.loads(result.stdout)
 
@@ -506,9 +496,9 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
             old_call = subprocess.run(
                 [sys.executable, "-B", owner_selected["cli"], "--root", str(f.root),
                  "start", "T06", "--context", old_context],
-                capture_output=True, text=True, timeout=30)
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
             self.assertNotEqual(old_call.returncode, 0)
-            self.assertIn("Зависимости задачи", old_call.stderr)
+            self.assertIn("Зависимости задачи", (old_call.stderr or "") + (old_call.stdout or ""))
             current_sha = file_hash(f.store.run / "events.jsonl")
             fresh = repair.prepare(
                 f.root, candidate_package=ROOT / "skills/aispa",
@@ -525,8 +515,8 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
             new_call = subprocess.run(
                 [sys.executable, "-B", selected["cli"], "--root", str(f.root),
                  "start", "T06", "--context", context],
-                capture_output=True, text=True, timeout=30)
-            self.assertEqual(new_call.returncode, 0, new_call.stdout + new_call.stderr)
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(new_call.returncode, 0, (new_call.stdout or "") + (new_call.stderr or ""))
             check_store = Journal(f.root)
             final_state = check_store.load()
             self.assertEqual(next(t for t in final_state["tasks"] if t["id"] == "T06")["status"], "running")

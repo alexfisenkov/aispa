@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import uuid
 
 from .portable import is_link
@@ -37,11 +38,52 @@ ALLOWED_DIFF = frozenset({
 # maintenance manifest. New preparations must still equal this tool's entire
 # own package, including its repairs.py, before any copy is selected.
 REQUIRED_DIFF = ALLOWED_DIFF - {"references/task-zone-extension.md", "tools/aispa_core/repairs.py"}
+MAX_APPROVAL_BYTES = 131072
 
 
 def _need(value, message):
     if not value:
         raise Invalid("Zone runtime repair: " + message)
+
+
+def _approval_bytes(path, *, link_check=None):
+    """Read one ordinary approval file with a physical cap and no link/FIFO wait."""
+    if link_check is None:
+        link_check = is_link
+    try:
+        before = path.lstat()
+        _need(not link_check(path) and stat.S_ISREG(before.st_mode)
+              and 0 < before.st_size <= MAX_APPROVAL_BYTES,
+              "нужен ограниченный обычный approval-file")
+        flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        fd = os.open(path, flags)
+        try:
+            opened = os.fstat(fd)
+            _need(stat.S_ISREG(opened.st_mode)
+                  and (opened.st_dev, opened.st_ino) == (before.st_dev, before.st_ino)
+                  and 0 < opened.st_size <= MAX_APPROVAL_BYTES,
+                  "approval-file изменён при открытии")
+            chunks, remaining = [], MAX_APPROVAL_BYTES + 1
+            while remaining:
+                block = os.read(fd, remaining)
+                if not block:
+                    break
+                chunks.append(block)
+                remaining -= len(block)
+            raw = b"".join(chunks)
+            _need(os.fstat(fd).st_size == len(raw),
+                  "approval-file изменён при чтении")
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, TypeError) as exc:
+        raise Invalid("Zone runtime repair: не удалось прочитать обычный approval-file") from exc
+    _need(0 < len(raw) <= MAX_APPROVAL_BYTES, "approval-file превышает предел")
+    try:
+        _need(bool(raw.decode("utf-8").strip()), "файл разрешения пуст")
+    except UnicodeError as exc:
+        raise Invalid("Zone runtime repair: approval-file не является UTF-8") from exc
+    return raw
 
 
 def _zone_local_artifacts(store, value, checked, external):
@@ -162,11 +204,19 @@ def _load(root):
     _need(not state.get("journalRecovery", {}).get("pending"), "сначала согласуйте восстановленный журнал")
     journal = store.read_journal(include_events=True)
     checked, external, validated_records = set(), set(), set()
+    expected_runtime_digest = OFFICIAL_DIGEST
     for event in journal["events"]:
-        _need(event["state"].get("version") == VERSION, "журнал содержит другую версию")
-        store._verify_sources(event["state"])
-        _zone_local_artifacts(store, event["state"], checked, external)
-        _mixed_record_closure(store, event["state"], validated_records)
+        current = event["state"]
+        _need(current.get("version") == VERSION, "журнал содержит другую версию")
+        if event["event"] in (EVENT, DEFERRED_EVENT):
+            # The manifest/receipt chain below validates this exact transition.
+            expected_runtime_digest = current.get("runtimeDigest")
+        else:
+            _need(current.get("runtimeDigest") == expected_runtime_digest,
+                  "runtimeDigest изменён вне выбранного ремонта")
+        store._verify_sources(current)
+        _zone_local_artifacts(store, current, checked, external)
+        _mixed_record_closure(store, current, validated_records)
     original = _tree(confined(store.run, "runtime"))
     _need(digest(original) == OFFICIAL_DIGEST, "оригинальный runtime не совпадает с официальным 0.4.0")
     selected = state.get("runtimeZoneRepair")
@@ -309,14 +359,14 @@ def apply(root, *, manifest_file, expected_manifest_sha256, expected_journal_sha
         raise Invalid("Zone runtime repair: manifest должен быть подготовлен внутри этого run") from exc
     ref = {"file": name, "sha256": expected_manifest_sha256}
     approval = Path(approval_file).absolute()
-    _need(approval.is_file() and not is_link(approval), "нужен файл исходного разрешения владельца")
-    approval_raw = approval.read_bytes()
-    _need(bool(approval_raw.decode("utf-8").strip()), "файл разрешения пуст")
+    approval_raw = _approval_bytes(approval)
     with store.lock():
         loaded = _load(root)
         _cas(loaded, expected_journal_sha256)
         store, state, journal = loaded[:3]
         manifest = _manifest(store, ref)
+        _need(_approval_bytes(approval) == approval_raw,
+              "файл разрешения изменился после проверки")
         if (state.get("runtimeZoneRepair") or {}).get("manifest") == ref:
             selected = state["runtimeZoneRepair"]
             _need(selected["manifest"] == ref and selected["approval"]["sha256"] == hashlib.sha256(approval_raw).hexdigest(),
