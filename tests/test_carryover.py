@@ -5,13 +5,116 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import hashlib
+import shutil
+import os
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import carryover, project_context
 from aispa_core.contracts import task_basis
-from aispa_core.store import Invalid, Journal
+from aispa_core.store import Invalid, Journal, digest
 from aispa_core.team import ROLES, TaskPipeline, task_proof_valid
 from test_team import Host
+from aispa_core import scale
+from aispa_core.store import file_hash
+
+
+class ManifestCarryoverTests(unittest.TestCase):
+    def test_manifest_capture_resource_refusal_propagates_without_partial_handoff(self):
+        from aispa_core.verified_reads import ResourceLimit
+        self.pack(self.state["briefs"][0])
+        self.state["status"] = "cancelled"
+        self.store.append(self.state, "bounded-manifest-capture")
+        before = set(self.store.run.rglob("*"))
+        with patch.dict(os.environ, {"AISPA_MAX_INPUT_BYTES": "8"}), self.assertRaises(ResourceLimit):
+            carryover.capture(self.store, self.state)
+        self.assertEqual(set(self.store.run.rglob("*")), before)
+
+    setUp = lambda self: CarryoverTests.setUp(self)
+    tearDown = lambda self: CarryoverTests.tearDown(self)
+    add_brief = lambda self, *a, **kw: CarryoverTests.add_brief(self, *a, **kw)
+    add_requirement = lambda self, *a, **kw: CarryoverTests.add_requirement(self, *a, **kw)
+    close = lambda self, *a, **kw: CarryoverTests.close(self, *a, **kw)
+    next_run = lambda self, *a, **kw: CarryoverTests.next_run(self, *a, **kw)
+
+    def pack(self, ref):
+        path = self.store.run / ref["file"]
+        raw = scale.read_file(path)
+        self.serial += 1
+        packed = path.parent / ("manifest-" + str(self.serial) + ".json")
+        value = scale.write_manifest(packed, raw, kind="text", basis=digest("manifest-fixture"), chunk_bytes=12)
+        ref.update(file=packed.relative_to(self.store.run).as_posix(), sha256=file_hash(packed))
+        self.state["policy"] = {"scalableInputs": True}
+        self.store.scale_enabled = True
+        return raw, value
+
+    def test_manifest_brief_preserves_decoded_text_and_physical_origin_through_three_runs_offline(self):
+        original_run = self.store.run
+        ref = self.state["briefs"][0]
+        original, _manifest = self.pack(ref)
+        physical = ref["sha256"]
+        payload = self.close()
+        source = next(row for row in payload["sources"] if row["kind"] == "owner_brief")
+        self.assertEqual(source["text"], original.decode())
+        self.assertEqual(source["origin"]["sha256"], physical)
+        self.assertEqual(source["payloadSha256"], hashlib.sha256(original).hexdigest())
+        self.assertNotEqual(source["payloadSha256"], physical)
+        first = self.next_run(payload)
+        second_payload = self.close("accepted")
+        second = self.next_run(second_payload)
+        shutil.move(str(original_run), str(Path(self.temp.name) / "old-run-offline"))
+        self.assertEqual(carryover.view(self.store, self.state)["items"], second)
+        third = self.next_run(self.close("delivered_with_remaining"))
+        self.assertEqual([row["id"] for row in first], [row["id"] for row in third])
+        self.assertEqual(self.state["requirements"], [])
+        self.assertEqual(self.state["gates"], {})
+        self.assertFalse(any(row["currentProof"] for row in third))
+
+    def test_manifest_chunk_tampering_and_secret_after_first_chunk_abort_capture(self):
+        ref = self.state["briefs"][0]
+        original, value = self.pack(ref)
+        self.store.append(self.state, "manifest-fixture")
+        chunk = self.store.run / Path(ref["file"]).parent / value["chunks"][-1]["file"]
+        before = chunk.read_bytes()
+        chunk.write_bytes(before + b"tampered")
+        self.state["status"] = "cancelled"
+        self.store.append(self.state, "closed-fixture")
+        with self.assertRaises(Invalid):
+            carryover.capture(self.store, self.state)
+        chunk.write_bytes(before)
+        path = self.store.run / "briefs/secret-manifest.json"
+        raw = original + b"\npassword=" + b"z" * 30
+        scale.write_manifest(path, raw, kind="text", basis=digest("secret-fixture"), chunk_bytes=12)
+        ref.update(file=path.relative_to(self.store.run).as_posix(), sha256=file_hash(path))
+        self.store.append(self.state, "secret-manifest-fixture")
+        with self.assertRaisesRegex(Invalid, "секрет|secret"):
+            carryover.capture(self.store, self.state)
+
+    def test_recomputed_outer_and_payload_digests_do_not_authorize_forged_manifest_text(self):
+        self.pack(self.state["briefs"][0])
+        payload = self.close()
+        source = next(row for row in payload["sources"] if row["kind"] == "owner_brief")
+        self.assertEqual(source["text"], "Build A. Build B. Keep data private.")
+        forged = copy.deepcopy(payload)
+        changed = next(row for row in forged["sources"] if row["kind"] == "owner_brief")
+        changed["text"] += " Forged new authorization."
+        changed["payloadSha256"] = hashlib.sha256(changed["text"].encode()).hexdigest()
+        forged["digest"] = digest({k: v for k, v in forged.items() if k != "digest"})
+        self.state = self.store.create("next", "New empty scope")
+        before = copy.deepcopy(self.state)
+        with self.assertRaises(Invalid):
+            carryover.attach(self.store, self.state, forged)
+        self.assertEqual(self.state, before)
+
+    def test_same_decoded_owner_words_repacked_are_not_new_authorization(self):
+        old_text, _manifest = self.pack(self.state["briefs"][0])
+        item = self.next_run(self.close())[0]
+        new = self.add_brief(old_text.decode())
+        self.pack(self.state["briefs"][-1])
+        self.store.append(self.state, "repacked-identical-owner-words")
+        with self.assertRaisesRegex(Invalid, "старого брифа|новые|new|копия"):
+            carryover.decide(self.store, self.state, item["id"], "defer", brief=new, quote="Build A.")
 
 
 class CarryoverTests(unittest.TestCase):

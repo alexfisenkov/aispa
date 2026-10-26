@@ -4,6 +4,52 @@ import math
 
 FIELDS = ("startedAt", "activeSince", "elapsedSeconds", "finishedAt", "attempts")
 TASK_PHASES = ("implementation", "critic_1", "repair", "critic_2", "task_acceptance")
+WAIT_KINDS = frozenset({"owner_question", "owner_wait", "resource_wait", "blocked", "paused"})
+
+
+def waiting(state):
+    value = state.get("waiting")
+    return isinstance(value, dict) and value.get("kind") in WAIT_KINDS
+
+
+def begin_wait(state, kind, at):
+    from .contracts import require
+    require(kind in WAIT_KINDS, "Timing: unknown waiting kind")
+    if waiting(state):
+        old = state["waiting"]["kind"]
+        stop(state.setdefault("waitTiming", {}).setdefault(old, {}), at)
+    stop(state, at)
+    for task in state.get("tasks", []):
+        stop(task, at)
+        if task.get("phaseTiming"):
+            stop(task["phaseTiming"], at)
+    if state.get("workProgress"):
+        stop(state["workProgress"], at)
+    state["waiting"] = {"kind": kind, "since": at}
+    start(state.setdefault("waitTiming", {}).setdefault(kind, {}), at)
+
+
+def end_wait(state, at):
+    if waiting(state):
+        stop(state.setdefault("waitTiming", {}).setdefault(state["waiting"]["kind"], {}), at)
+    state["waiting"] = None
+    if state.get("status") == "running":
+        start(state, at)
+        for task in state.get("tasks", []):
+            if task.get("status") == "running":
+                start(task, at)
+                if task.get("phaseTiming"):
+                    start(task["phaseTiming"], at)
+        if state.get("workProgress") and not state["workProgress"].get("finishedAt"):
+            start(state["workProgress"], at)
+
+
+def summary(state, at):
+    endpoint = state.get("finishedAt") or at
+    return {"wallSeconds": difference(endpoint, state["startedAt"]) if state.get("startedAt") else None,
+            "activeSeconds": elapsed(state, at),
+            "waitSeconds": {kind: elapsed(row, at) for kind, row in state.get("waitTiming", {}).items()},
+            "measurement": "recorded wall-clock intervals; actor intervals are not summed"}
 
 
 def difference(end, start):

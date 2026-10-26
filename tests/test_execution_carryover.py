@@ -8,10 +8,41 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import carryover, execution_obligations as execution
 from aispa_core.store import Invalid, digest
+from aispa_core import scale
+from aispa_core.store import file_hash
 from test_adaptive_acceptance import Fixture
 
 
 class ExecutionCarryoverTests(Fixture):
+    def test_manifest_execution_sources_preserve_physical_record_identity_and_pending_result(self):
+        self.prepared(sealed=False)
+        refs = [*self.state["briefs"], self.state["executionObligations"][0]["record"]]
+        self.state["policy"]["scalableInputs"] = True
+        self.store.scale_enabled = True
+        for ref in refs:
+            path = self.store.run / ref["file"]
+            raw = path.read_bytes()
+            packed = path.with_name("manifest-" + path.stem + ".json")
+            scale.write_manifest(packed, raw, kind="json" if ref is refs[-1] else "text",
+                                 basis=digest("execution-manifest"), chunk_bytes=16)
+            ref.update(file=packed.relative_to(self.store.run).as_posix(), sha256=file_hash(packed))
+        # The fixture updates its seal before closing, rather than pretending
+        # an old seal still binds changed physical records.
+        self.source_account()
+        self.flow.seal()
+        record = copy.deepcopy(self.state["executionObligations"][0]["record"])
+        payload = self.close_capture()
+        row = payload["executionRemainders"][0]
+        self.assertEqual(row["origin"]["recordSha256"], record["sha256"])
+        sources = {source["id"]: source for source in payload["sources"]}
+        self.assertIn('"event"', sources[row["obligationSource"]]["text"])
+        self.assertEqual(sources[row["obligationSource"]]["origin"]["sha256"], record["sha256"])
+        self.assertNotEqual(sources[row["obligationSource"]]["payloadSha256"], record["sha256"])
+        inherited = self.attach_next(payload)[0]
+        self.assertEqual(inherited["sourceRecordSHA"], record["sha256"])
+        self.assertEqual(inherited["status"], "pending")
+        self.assertFalse(inherited["currentProof"])
+
     def test_finish_and_projection_keep_inherited_execution_visible(self):
         from aispa_core.workflow import Workflow
         from aispa_core.display import project

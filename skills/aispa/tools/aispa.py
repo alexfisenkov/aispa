@@ -15,7 +15,7 @@ from aispa_core.workflow import Workflow
 from aispa_core import check_modes, project_context, packets, discovery, carryover, cleanroom, blind, docmeta, ideas, planning, knowledge, executions, repairs, handoff, controls, dashboard_server, integration
 from aispa_core.cli_output import emit, saved_without_view
 from aispa_core import phase_receipts, dashboard_host, work_progress
-from aispa_core import autonomy, project_documents
+from aispa_core import autonomy, project_documents, preflight, brief_diagnostics, participants, timing
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -51,6 +51,8 @@ def parser():
     init.add_argument("--mode", required=True, choices=("auto", "important", "interview"))
     init.add_argument("--runtime", required=True, choices=project_context.RUNTIMES)
     init.add_argument("--depth", choices=("strict", "balanced", "deep"), default="balanced")
+    init.add_argument("--interview-scope", choices=("compact", "standard", "deep"), default="standard")
+    init.add_argument("--interview-minutes", type=int, default=15)
     init.add_argument("--check", required=True, choices=check_modes.MODES,
                       help="Сколько проверять: fast (быстро), balanced (сбалансированно), max (максимум)")
     controls.parsers(sub)
@@ -89,9 +91,30 @@ def parser():
     writer.add_argument("--runtime", required=True, choices=project_context.RUNTIMES)
     writer.add_argument("--native-id", required=True); writer.add_argument("--session", required=True)
     writer.add_argument("--model")
+    writer.add_argument("--reasoning"); writer.add_argument("--model-evidence")
     sub.add_parser("knowledge-record").add_argument("--file", required=True)
     for name in ("seal", "finish", "resume", "status"):
-        sub.add_parser(name)
+        command = sub.add_parser(name)
+        if name == "resume":
+            command.add_argument("--host"); command.add_argument("--expected-basis")
+    for name in ("preflight", "host-context"):
+        command = sub.add_parser(name)
+        command.add_argument("--file", required=name == "host-context")
+        command.add_argument("--purpose", choices=preflight.PURPOSES, default="continue")
+        command.add_argument("--expected-basis")
+        if name == "preflight":
+            command.add_argument("--write", action="store_true")
+    sub.add_parser("brief-diagnostics")
+    observation = sub.add_parser("model-observe")
+    observation.add_argument("--actor", required=True); observation.add_argument("--file", required=True)
+    resource = sub.add_parser("resources")
+    resource.add_argument("operation", choices=("profile", "reserve", "bind", "finish", "heartbeat", "reconcile", "view", "wait-end"))
+    resource.add_argument("--file"); resource.add_argument("--kind", choices=("agents", "browsers", "testProcesses", "services"))
+    resource.add_argument("--lease"); resource.add_argument("--owner", default="coordinator"); resource.add_argument("--session")
+    resource.add_argument("--task"); resource.add_argument("--role"); resource.add_argument("--model"); resource.add_argument("--reasoning")
+    resource.add_argument("--model-evidence"); resource.add_argument("--confirmed", action="store_true")
+    resource.add_argument("--outcome", choices=("completed", "launch_failed"), default="completed")
+    resource.add_argument("--complete", action="store_true")
     ctx = sub.add_parser("context")
     ctx.add_argument("--kind", choices=("coverage", "task", "wave", "acceptance", "blind", "knowledge"), required=True)
     ctx.add_argument("--task")
@@ -139,7 +162,8 @@ def parser():
     assignment.add_argument("--role", required=True, choices=("worker", "critic1", "critic2", "acceptor"))
     assignment.add_argument("--runtime", required=True, choices=project_context.RUNTIMES)
     assignment.add_argument("--native-id", required=True); assignment.add_argument("--session", required=True)
-    assignment.add_argument("--model", help="Фактический ID выбранной модели из среды, если она его сообщает")
+    assignment.add_argument("--model", help="Запрошенный ID; actual требует отдельного host/provider metadata")
+    assignment.add_argument("--reasoning"); assignment.add_argument("--model-evidence")
     for name in ("submit", "repair"):
         action = sub.add_parser(name); action.add_argument("id"); action.add_argument("--file", required=True)
     repair_plan = sub.add_parser("repair-plan")
@@ -244,7 +268,66 @@ def batch(args):
     return 0 if code == 0 else 2
 
 
+def resources_command(store, state, flow, args):
+    from aispa_core import resources, task_tiers
+    from aispa_core.contracts import require
+    require(resources.enabled(state), "Resources: нужен новый managedExecution init")
+    value = json.loads(flow.read_input(args.file)) if args.file else None
+    if args.operation == "profile":
+        flow.running()
+        receipt = resources.configure(store, state, value)
+        flow.save("resource-profile-configured")
+    elif args.operation == "wait-end":
+        require(timing.waiting(state) and state["waiting"]["kind"] == "resource_wait", "Resources: нет resource wait")
+        timing.end_wait(state, timestamp())
+        flow.save("resource-wait-ended")
+        receipt = timing.summary(state, timestamp())
+    else:
+        require(args.session is None or args.session == state.get("hostSession"), "Resources: session не принята через host-context")
+        ctx = resources.context(store, state, owner=args.owner, session=args.session, allow_paused=True)
+        launch = None
+        if args.operation == "reserve":
+            require(args.kind is not None, "Resources: reserve требует --kind")
+            if args.kind in ("agents", "browsers"):
+                preflight.require_adopted(store, state, purpose="browser" if args.kind == "browsers" else "continue")
+            if args.kind == "agents":
+                task = flow.task(args.task) if args.task else None
+                evidence = json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None
+                launch = participants.launch_plan(store, state, runtime=state["runtime"], session=ctx["session"],
+                    model=args.model, reasoning=args.reasoning, evidence=evidence, sensitive=task_tiers.sensitive_task(state, task))
+        try:
+            if args.operation == "reserve":
+                receipt = resources.reserve(ctx, args.kind)
+                if launch is not None:
+                    receipt = {"lease": receipt, "launchPlan": launch}
+            elif args.operation == "view":
+                receipt = resources.view(ctx)
+            elif args.operation == "reconcile":
+                require(isinstance(value, list), "Resources: reconcile требует observations array")
+                receipt = resources.reconcile(ctx, value, complete=args.complete)
+            else:
+                require(args.lease is not None, "Resources: нужен --lease")
+                if args.operation == "bind":
+                    receipt = resources.bind(ctx, args.lease, value)
+                elif args.operation == "finish":
+                    receipt = resources.finish(ctx, args.lease, handle=value, outcome=args.outcome, confirmed=args.confirmed)
+                else:
+                    receipt = resources.heartbeat(ctx, args.lease, handle=value)
+        except resources.CapacityRefused as error:
+            timing.begin_wait(state, "resource_wait", timestamp())
+            state["waiting"].update(note=str(error), resourceKind=error.kind)
+            flow.save("resource-capacity-awaited")
+            emit(store, {"ok": False, "run": state["run"], "receipt": {"code": error.code,
+                "kind": error.kind, "cap": error.cap, "occupied": error.occupied}, "timing": timing.summary(state, timestamp())},
+                compact_mode=args.compact)
+            return 2
+    emit(store, {"ok": True, "run": state["run"], "receipt": receipt}, compact_mode=args.compact)
+    return 0
+
+
 def execute(args):
+    if args.action == "init":
+        autonomy.interview_setting(args.interview_scope, args.interview_minutes)
     if args.action == "pack":
         from aispa_core import scale
         from aispa_core.workflow import read_input
@@ -283,7 +366,8 @@ def execute(args):
     if args.action == "dashboard" and args.operation != "archive":
         if args.operation in ("start", "refresh-view"):
             value = dashboard_server.start(store, port=args.port, refresh_view=args.operation == "refresh-view")
-            value = {**value, "requiredHostActions": dashboard_host.open_request(value)}
+            dashboard_state = store.load()
+            value = {**value, "requiredHostActions": dashboard_host.open_request(value, managed=preflight.enabled(dashboard_state))}
         elif args.operation == "stop":
             value = dashboard_server.stop(store)
         else:
@@ -321,10 +405,12 @@ def execute(args):
                                    "errorBoundaryChecks": True, "taskTiers": True,
                                    "leanControl": True, "projectDocuments": True,
                                    "firstBriefingClosure": True, "scalableInputs": True,
-                                   "criticalProductFlows": True}
+                                   "criticalProductFlows": True, "managedExecution": True}
                 store.scale_enabled = True
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
+                state["interview"] = autonomy.interview_setting(args.interview_scope, args.interview_minutes)
+                state["projectRoot"] = str(store.root)
                 check_modes.initialize(state, args.check)
                 state["runtime"] = args.runtime
                 state["runtimeDigest"] = runtime_digest()
@@ -351,7 +437,7 @@ def execute(args):
             project_context.refresh(store, state)
             try:
                 output = {**publish(store, state), "autonomy": autonomy.view(state),
-                          "requiredHostActions": dashboard_host.start_request()}
+                          "requiredHostActions": dashboard_host.start_request(managed=True)}
             except (Invalid, OSError, ValueError, KeyError, TypeError):
                 output = saved_without_view(store, state, {"run": state["run"]}, ok=True)
                 if output is None:
@@ -363,7 +449,8 @@ def execute(args):
         preparation_write = (args.action in ("template", "brief-source", "brief-map-context") and args.write
                              or args.action == "context" and args.with_template)
         read_only = not preparation_write and (
-                     args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands", "page")
+                     args.action in ("status", "context", "memory", "discovery", "plan-check", "knowledge", "commands", "page", "preflight", "brief-diagnostics")
+                     or args.action == "resources" and args.operation == "view"
                      or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
                      or (args.action in ("idea", "repair-plan", "integration-review") and not args.file)
@@ -380,7 +467,25 @@ def execute(args):
         receipt = None
         first_briefing_closure = False
         action = args.action
-        if action == "progress":
+        if action == "preflight":
+            host = json.loads(flow.read_input(args.file)) if args.file else None
+            result = preflight.check(store, state, host, purpose=args.purpose)
+            if args.write:
+                result = {"ok": result["ok"], "preflight": packets.write(store, result)}
+            emit(store, result, compact_mode=args.compact)
+            return 0 if result["ok"] else 2
+        elif action == "host-context":
+            receipt = preflight.adopt(flow, json.loads(flow.read_input(args.file)), purpose=args.purpose,
+                                       expected_basis=args.expected_basis)
+        elif action == "brief-diagnostics":
+            emit(store, brief_diagnostics.analyze(store, state), compact_mode=args.compact)
+            return 0
+        elif action == "model-observe":
+            receipt = participants.observe_model(store, state, args.actor, json.loads(flow.read_input(args.file)))
+            flow.save("model-observation-recorded")
+        elif action == "resources":
+            return resources_command(store, state, flow, args)
+        elif action == "progress":
             receipt = flow.progress_begin(args.phase) if args.progress_action == "begin" else flow.progress_end()
         elif action in controls.READS | controls.WRITES:
             receipt = controls.execute(store, state, flow, args)
@@ -443,7 +548,8 @@ def execute(args):
             flow.save("project-knowledge-checkpointed")
         elif action == "knowledge-assign":
             flow.running()
-            receipt = {"actor": knowledge.assign(store, state, args.runtime, args.native_id, args.session, model=args.model)}
+            receipt = {"actor": knowledge.assign(store, state, args.runtime, args.native_id, args.session, model=args.model,
+                reasoning=args.reasoning, model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)}
             flow.save("knowledge-writer-assigned")
         elif action == "knowledge-record":
             flow.running()
@@ -451,8 +557,10 @@ def execute(args):
             flow.save("project-knowledge-recorded")
         elif action == "seal":
             first_briefing_closure = flow.seal()
-        elif action in ("finish", "resume"):
-            getattr(flow, action)()
+        elif action == "resume":
+            receipt = flow.resume(host=json.loads(flow.read_input(args.host)) if args.host else None, expected_basis=args.expected_basis)
+        elif action == "finish":
+            flow.finish()
         elif action == "scope":
             flow.scope(args.id, args.decision, args.brief, args.quote)
         elif action == "context":
@@ -561,7 +669,8 @@ def execute(args):
         elif action == "team":
             receipt = flow.pipeline.team(args.file)
         elif action == "assign":
-            receipt = {"actor": flow.pipeline.assign(args.id, args.role, args.runtime, args.native_id, args.session, model=args.model)}
+            receipt = {"actor": flow.pipeline.assign(args.id, args.role, args.runtime, args.native_id, args.session, model=args.model,
+                reasoning=args.reasoning, model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)}
         elif action == "submit":
             result = flow.pipeline.submit(args.id, args.file)
             receipt = {"report": result.get("report"), "phase": flow.task(args.id).get("phase"),
@@ -641,7 +750,7 @@ def execute(args):
         if first_briefing_closure:
             output["requiredHostActions"] = autonomy.start_request(state)
         if action == "resume" and ok:
-            output["requiredHostActions"] = dashboard_host.start_request()
+            output["requiredHostActions"] = dashboard_host.start_request(managed=preflight.enabled(state))
         emit(store, output, compact_mode=args.compact)
         return 0 if ok else 2
 

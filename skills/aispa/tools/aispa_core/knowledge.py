@@ -118,10 +118,13 @@ def _actor(store, state, actor):
     _require(_read(store, actor.get("artifact")) == {k: v for k, v in actor.items() if k != "artifact"},
              "изменена карточка автора знаний")
     _unused_identity(state, actor["nativeId"], actor["id"])
+    from . import participants, task_tiers
+    participants.require_model_route(store, state, participants.resolve(store, state, actor["id"]),
+                                      sensitive=task_tiers.sensitive_task(state))
     return actor
 
 
-def assign(store, state, runtime, native_id, session, fresh=True, model=None):
+def assign(store, state, runtime, native_id, session, fresh=True, model=None, reasoning=None, model_evidence=None):
     """Bind a fresh native writer. The caller must append before record()."""
     _require(state.get("status") == "running", "назначение возможно только в активном прогоне")
     runtime = _safe_text(runtime, 100).casefold()
@@ -149,6 +152,10 @@ def assign(store, state, runtime, native_id, session, fresh=True, model=None):
                      for actor in previous), "этот автор знаний уже использовался; нужен свежий контекст")
     actor = {"id": aid, "runtime": runtime, "nativeId": native_id, "session": session, "fresh": True,
              "model": model, "role": "knowledge-writer", "run": state["run"], "at": timestamp()}
+    from . import participants, task_tiers
+    actor.update(participants.model_metadata(store, state, runtime, native_id, session,
+                 model=model, reasoning=reasoning, evidence=model_evidence))
+    participants.require_model_route(store, state, actor, sensitive=task_tiers.sensitive_task(state))
     actor["artifact"] = _artifact(store, actor)
     memory = copy.deepcopy(memory)
     if memory.get("writer"):

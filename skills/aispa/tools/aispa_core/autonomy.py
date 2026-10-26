@@ -2,6 +2,12 @@
 from .contracts import require
 
 
+def interview_setting(scope="standard", duration_minutes=15):
+    require(scope in ("compact", "standard", "deep"), "Interview: invalid scope")
+    require(type(duration_minutes) is int and duration_minutes > 0, "Interview: duration must be a positive integer")
+    return {"scope": scope, "durationMinutes": duration_minutes}
+
+
 def enabled(state):
     return state.get("policy", {}).get("firstBriefingClosure") is True
 

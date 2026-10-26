@@ -5,17 +5,18 @@ attach to the empty new run, then append. Dispositions also need a caller append
 Only immutable handoff/receipt artifacts are authoritative; derived views are not.
 """
 import copy
+from contextlib import nullcontext
 import hashlib
 import json
 from pathlib import Path
 import re
 
 from .contracts import nonempty, require
-from . import execution_history
+from . import execution_history, scale
 from .store import Invalid, digest, timestamp
 from .portable import is_link, relative_name
 from .team import historical_proof_valid, task_proof_valid
-from .verified_reads import current_scope
+from .verified_reads import ResourceLimit, VerifiedReads, current_scope
 
 
 SCHEMA = 1
@@ -61,17 +62,21 @@ def _run(store):
         raise Invalid("Carryover: прогон вне проекта") from exc
 
 
-def _read(store, artifact, limit=MAX_HANDOFF_BYTES):
-    require(isinstance(artifact, dict) and isinstance(artifact.get("file"), str),
+def _read(store, artifact, limit=MAX_HANDOFF_BYTES, *, state=None, scalable=False):
+    require(isinstance(artifact, dict) and isinstance(artifact.get("file"), str)
+            and isinstance(artifact.get("sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", artifact["sha256"]),
             "Carryover: некорректный источник")
     path = _safe(_run(store), artifact["file"])
-    require(path.is_file() and path.stat().st_size <= limit, "Carryover: источник отсутствует или слишком велик")
-    scope = current_scope()
-    raw = (scope.artifact(path, artifact.get("sha256"), literal=True, maximum=limit)
-           if scope is not None else path.read_bytes())
+    scalable = scalable or scale.enabled(state or {})
+    require(path.is_file(), "Carryover: источник отсутствует")
+    if not scalable:
+        require(path.stat().st_size <= limit, "Carryover: источник отсутствует или слишком велик")
+    scope = current_scope() or VerifiedReads()
+    # Source-run policy controls transport interpretation. In particular, a
+    # legacy owner's literal JSON must never become a manifest retroactively.
+    raw = scope.artifact(path, artifact.get("sha256"), allow_manifest=scalable,
+                         literal=not scalable, maximum=None if scalable else limit)
     _safe(_run(store), artifact["file"])
-    require((scope.value_hash(raw) if scope is not None else hashlib.sha256(raw).hexdigest()) == artifact.get("sha256"),
-            "Carryover: изменён неизменный источник: " + artifact["file"])
     return raw
 
 
@@ -84,12 +89,14 @@ def _text(raw):
     return text
 
 
-def _load(store, artifact):
+def _load(store, artifact, *, state=None, scalable=False):
     try:
-        raw = _read(store, artifact)
+        raw = _read(store, artifact, state=state, scalable=scalable)
         text = _text(raw)
         scope = current_scope()
         value = scope.json(raw) if scope is not None else json.loads(text)
+    except ResourceLimit:
+        raise
     except (ValueError, UnicodeError) as exc:
         raise Invalid("Carryover: повреждён JSON источника") from exc
     require(isinstance(value, dict), "Carryover: ожидается объект")
@@ -107,6 +114,15 @@ def _artifacts(value):
     elif isinstance(value, list):
         for child in value:
             yield from _artifacts(child)
+
+
+def _archive_scalable(state, artifact):
+    """An inherited archive's budget never changes current legacy input policy."""
+    carry = state.get("carryover") or {}
+    return carry.get("scalableInputs") is True and any(
+        artifact == {k: ref[k] for k in ("file", "sha256")}
+        for ref in [carry.get("handoff", {}), *carry.get("decisions", [])]
+        if "file" in ref and "sha256" in ref)
 
 
 def _journal(store, state):
@@ -143,9 +159,72 @@ def _journal(store, state):
 
 
 def _source(store, state, artifact, kind):
-    text = _text(_read(store, artifact, MAX_SOURCE_BYTES))
+    scope = current_scope()
+    reads = scope or VerifiedReads()
+    with (nullcontext(reads) if scope is not None else reads.scope()):
+        raw = _read(store, artifact, MAX_SOURCE_BYTES, state=state)
+        text = _text(raw)
+        encoded = reads.artifact(_safe(_run(store), artifact["file"]), artifact["sha256"],
+                                 literal=True, maximum=None if scale.enabled(state) else MAX_SOURCE_BYTES)
     origin = {"run": state["run"], "file": artifact["file"], "sha256": artifact["sha256"]}
-    return {"id": digest(origin), "origin": origin, "kind": kind, "text": text}
+    source = {"id": digest(origin), "origin": origin, "kind": kind, "text": text}
+    if scale.enabled(state) and scale.is_manifest(encoded, cache=reads):
+        # Keep exact envelope bytes, not a reserialized JSON object: origin SHA
+        # binds those bytes, whose full-payload digest then binds the text.
+        source.update(payloadSha256=reads.value_hash(raw), manifestEnvelope=_text(encoded))
+    return source
+
+
+def payload_identity(source):
+    """Owner words identify authorization; physical packaging identifies origin."""
+    return hashlib.sha256(source["text"].encode("utf-8")).hexdigest()
+
+
+def _source_valid(source):
+    origin = source["origin"]
+    payload_sha = payload_identity(source)
+    has_binding = "manifestEnvelope" in source or "payloadSha256" in source
+    if not has_binding:
+        require(payload_sha == origin.get("sha256"), "Carryover: изменён текст источника handoff")
+        return
+    envelope = source.get("manifestEnvelope")
+    require(isinstance(envelope, str) and source.get("payloadSha256") == payload_sha
+            and hashlib.sha256(envelope.encode("utf-8")).hexdigest() == origin.get("sha256"),
+            "Carryover: потеряна физическая привязка manifest handoff")
+    try:
+        manifest = json.loads(envelope)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise Invalid("Carryover: повреждён manifest handoff") from exc
+    fields = {"aispaManifest", "schema", "kind", "basis", "digest", "totalBytes", "chunks"}
+    require(isinstance(manifest, dict) and set(manifest) == fields
+            and type(manifest["aispaManifest"]) is int and manifest["aispaManifest"] == 1
+            and type(manifest["schema"]) is int and manifest["schema"] == 1
+            and manifest["kind"] in ("json", "text")
+            and isinstance(manifest["basis"], str) and re.fullmatch(r"[a-f0-9]{64}", manifest["basis"])
+            and manifest["digest"] == payload_sha and type(manifest["totalBytes"]) is int
+            and manifest["totalBytes"] == len(source["text"].encode("utf-8")) > 0
+            and isinstance(manifest["chunks"], list) and manifest["chunks"],
+            "Carryover: manifest не подтверждает полный текст handoff")
+    seen, total = set(), 0
+    for index, ref in enumerate(manifest["chunks"]):
+        require(isinstance(ref, dict) and set(ref) == {"file", "sha256", "index", "bytes"}
+                and type(ref["index"]) is int and ref["index"] == index
+                and type(ref["bytes"]) is int and ref["bytes"] > 0
+                and isinstance(ref["sha256"], str) and re.fullmatch(r"[a-f0-9]{64}", ref["sha256"])
+                and isinstance(ref["file"], str) and ref["file"] not in seen,
+                "Carryover: повреждены ссылки manifest handoff")
+        try:
+            require(relative_name(ref["file"]) == ref["file"], "Carryover: небезопасный путь manifest")
+        except ValueError as exc:
+            raise Invalid("Carryover: небезопасный путь manifest") from exc
+        seen.add(ref["file"])
+        total += ref["bytes"]
+    require(total == manifest["totalBytes"], "Carryover: неполный manifest handoff")
+    if manifest["kind"] == "json":
+        try:
+            json.loads(source["text"])
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise Invalid("Carryover: повреждён JSON payload handoff") from exc
 
 
 def _merge_sources(target, sources):
@@ -154,8 +233,8 @@ def _merge_sources(target, sources):
                 and isinstance(source.get("text"), str), "Carryover: повреждён источник handoff")
         origin = source["origin"]
         require(source.get("id") == digest(origin)
-                and hashlib.sha256(source["text"].encode()).hexdigest() == origin.get("sha256")
                 and not SECRET.search(source["text"]), "Carryover: повреждён или небезопасен источник handoff")
+        _source_valid(source)
         require(source["id"] not in target or target[source["id"]] == source,
                 "Carryover: конфликт происхождения источника")
         target[source["id"]] = copy.deepcopy(source)
@@ -166,8 +245,16 @@ def _payload_valid(payload):
     require(isinstance(payload, dict) and payload.get("schema") == SCHEMA
             and payload.get("digest") == digest({k: v for k, v in payload.items() if k != "digest"}),
             "Carryover: повреждён handoff")
-    require(len(_json(payload)) <= MAX_HANDOFF_BYTES, "Carryover: handoff превышает безопасный размер")
-    require(not SECRET.search(_json(payload).decode()), "Carryover: возможный секрет в handoff")
+    encoded = _json(payload)
+    require("scalableInputs" not in payload or payload["scalableInputs"] is True,
+            "Carryover: некорректная policy handoff")
+    if payload.get("scalableInputs") is True:
+        budget = scale.Budget()
+        budget.check(len(encoded), path="carryover handoff")
+        budget.check_memory(len(encoded) * 4, path="carryover handoff")
+    else:
+        require(len(encoded) <= MAX_HANDOFF_BYTES, "Carryover: handoff превышает безопасный размер")
+    require(not SECRET.search(encoded.decode()), "Carryover: возможный секрет в handoff")
     sources = {}
     _merge_sources(sources, payload.get("sources", []))
     items = payload.get("items")
@@ -209,13 +296,14 @@ def _ledger(store, state, *, effective=True):
     if not carry:
         return {"items": [], "sources": [], "runs": [], "decisions": []}
     require(carry.get("schema") == SCHEMA, "Carryover: неподдерживаемая схема")
-    base = _payload_valid(_load(store, carry["handoff"]))
+    scalable = carry.get("scalableInputs") is True
+    base = _payload_valid(_load(store, carry["handoff"], scalable=scalable))
     items = {i["id"]: copy.deepcopy(i) for i in base["items"]}
     execution_items = {i["id"]: copy.deepcopy(i) for i in base.get("executionRemainders", [])}
     sources = {}
     _merge_sources(sources, base["sources"])
     for artifact in carry.get("decisions", []):
-        receipt = _load(store, artifact)
+        receipt = _load(store, artifact, scalable=scalable)
         ident = receipt.get("item")
         if isinstance(ident, str) and ident in execution_items:
             require(receipt.get("schema") == SCHEMA and receipt.get("run") == state["run"]
@@ -297,7 +385,7 @@ def _open_reasons(store, state, req, tasks, journal, reports):
     def report_reasons(artifact, *, task=None, attempt=None, role="acceptance", final=False):
         key = (artifact["file"], artifact["sha256"])
         if key not in reports:
-            reports[key] = _load(store, artifact)  # Verify hash and secrets before extracting anything.
+            reports[key] = _load(store, artifact, state=state)  # Check complete decoded report before extraction.
         report = reports[key]
         source = {"run": state["run"], **{k: artifact[k] for k in ("file", "sha256")}}
         metadata = {"role": role}
@@ -352,7 +440,8 @@ def capture(previous_store, previous_state):
     journal = _journal(previous_store, previous_state)
     artifacts = _unique(list(_artifacts(previous_state)))
     for artifact in artifacts:
-        _read(previous_store, artifact)
+        _read(previous_store, artifact, state=previous_state,
+              scalable=_archive_scalable(previous_state, artifact))
     inherited = _ledger(previous_store, previous_state)
     sources = {}
     _merge_sources(sources, inherited["sources"])
@@ -416,6 +505,8 @@ def capture(previous_store, previous_state):
                "runs": _unique(inherited.get("runs", []) + [checkpoint]),
                "sources": list(sources.values()), "items": items, "decisions": _unique(decisions),
                "capturedArtifacts": artifacts, "evidencePolicy": "Historical only; new run needs fresh local native roles and reviews."}
+    if scale.enabled(previous_state) or inherited.get("scalableInputs") is True:
+        payload["scalableInputs"] = True
     execution = execution_history.capture(previous_store, previous_state, inherited, sources, briefs)
     if execution:
         payload["executionRemainders"] = execution
@@ -442,7 +533,8 @@ def attach(store, state, payload):
     journal = _journal(previous, old_state)
     require(journal["last"]["hash"] == payload["previous"]["eventDigest"], "Carryover: после capture предыдущий прогон изменился")
     for artifact in payload["capturedArtifacts"]:
-        _read(previous, artifact)
+        _read(previous, artifact, state=old_state,
+              scalable=_archive_scalable(old_state, artifact))
     # Exact recomputation prevents a supplied payload from omitting or inventing
     # execution remainders while retaining a valid previous journal checkpoint.
     inherited = _ledger(previous, old_state)
@@ -459,6 +551,8 @@ def attach(store, state, payload):
     _safe(_run(store), "carryover")
     handoff = store.artifact("carryover", _json(payload), ".json")
     state["carryover"] = {"schema": SCHEMA, "handoff": handoff, "decisions": []}
+    if payload.get("scalableInputs") is True:
+        state["carryover"]["scalableInputs"] = True
     return state["carryover"]
 
 
@@ -562,13 +656,17 @@ def _authorization(store, state, ledger, item, brief, quote):
     saved = _source(store, state, source, "owner_brief")
     require(quote in saved["text"], "Carryover: цитата отсутствует в новом брифе")
     # Identical archived text isn't new owner authorization, even under a new ID.
-    require(saved["origin"]["sha256"] not in {s["origin"]["sha256"] for s in ledger["sources"]
+    require(payload_identity(saved) not in {payload_identity(s) for s in ledger["sources"]
             if s["origin"]["run"] != state["run"] and s["kind"] == "owner_brief"},
             "Carryover: копия старого брифа не разрешает новую попытку")
     order = {b["id"]: index for index, b in enumerate(state["briefs"])}
     prior = [h for h in item["history"] if h["run"] == state["run"] and h.get("brief")]
     require(not prior or order[brief] > order[prior[-1]["brief"]],
             "Carryover: изменение решения требует более нового брифа владельца")
+    prior_sources = {event.get("source") for event in prior}
+    require(payload_identity(saved) not in {payload_identity(s) for s in ledger["sources"]
+            if s["id"] in prior_sources},
+            "Carryover: изменение решения требует новых слов владельца")
     return saved
 
 
@@ -592,8 +690,8 @@ def _decide_execution(store, state, ledger, item, action, current_requirement, b
         source = _authorization(store, state, ledger, {"history": item.get("dispositions", [])}, brief, quote)
         prior_sources = {event["source"] for event in item.get("dispositions", []) if event.get("source")}
         prior_sources.add(item["source"]["source"])
-        require(source["origin"]["sha256"] not in {
-            prior["origin"]["sha256"] for prior in ledger["sources"] if prior["id"] in prior_sources},
+        require(payload_identity(source) not in {
+            payload_identity(prior) for prior in ledger["sources"] if prior["id"] in prior_sources},
             "Carryover: новое решение по этому исполнению требует новых слов владельца")
         sources.append(source)
         event.update(brief=brief, quote=quote, source=source["id"])

@@ -22,6 +22,15 @@ T3 = "2026-10-22T10:03:00+00:00"
 
 
 class WorkProgressTests(unittest.TestCase):
+    def test_resource_wait_is_not_restarted_by_unrelated_journal_saves(self):
+        state = self.state()
+        work_progress.begin(state, "spec", T0)
+        state["waiting"] = {"kind": "resource_wait", "note": "Agent budget is occupied"}
+        work_progress.sync(state, "resource-wait-started", T1)
+        work_progress.sync(state, "agent-decision-recorded", T2)
+        self.assertEqual(work_progress.view(state, T3)["elapsedSeconds"], 60)
+        self.assertNotIn("activeSince", state["workProgress"])
+
     def state(self):
         return {"status": "running", "waiting": None, "gates": {"coverage": {"passed": False}}}
 

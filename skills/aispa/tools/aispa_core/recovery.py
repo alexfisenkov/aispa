@@ -9,7 +9,7 @@ import os
 import re
 import time
 
-from . import cleanroom, discovery, executions, participants, process_runner
+from . import cleanroom, discovery, executions, participants, process_runner, resources
 from .contracts import artifact_valid, nonempty
 from .portable import relative_name
 from .store import Invalid, confined, digest, file_hash, timestamp
@@ -89,7 +89,8 @@ def verify(store, state, command, timeout=600):
     environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     raw, rc, timed_out, truncated, redacted = process_runner.run(
         command, store.root, environment, timeout, max_output=MAX_OUTPUT,
-        secret_pattern=cleanroom.SECRET, secrets=secrets)
+        secret_pattern=cleanroom.SECRET, secrets=secrets,
+        resource_context=resources.context(store, state, allow_paused=True))
     output = raw.decode("utf-8", "replace")
     redacted = redacted or bool(cleanroom.SECRET.search(output) or any(v in output for v in secrets))
     if redacted:

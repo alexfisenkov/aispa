@@ -15,12 +15,19 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
+
+from . import resources
 
 
 _CHUNK = 65536
 _POLL = 0.02
 _DRAIN_TIMEOUT = 1.0
 _START_FAILED = b"AISpa: command could not start.\n"
+
+
+class _LaunchUncertain(OSError):
+    """The bootstrap failed without confirmed cleanup of its exact child."""
 
 # -I excludes cwd/PYTHONPATH/user site; -S also disables system sitecustomize
 # and .pth code. The original argv is passed as arguments, never interpolated
@@ -191,22 +198,25 @@ def _start(command, cwd, env):
         return proc, job
     except BaseException:
         try:
-            job.close()
-        finally:
-            if proc is not None:
-                # Also handles assignment failure: the blocked supervisor was
-                # never in the job, but no requested command could have started.
-                try:
-                    if proc.poll() is None:
-                        proc.kill()
-                    proc.wait(timeout=5)
-                finally:
-                    proc.stdin.close()
-                    proc.stdout.close()
+            try:
+                job.close()
+            finally:
+                if proc is not None:
+                    # Also handles assignment failure: the blocked supervisor was
+                    # never in the job, but no requested command could have started.
+                    try:
+                        if proc.poll() is None:
+                            proc.kill()
+                        proc.wait(timeout=5)
+                    finally:
+                        proc.stdin.close()
+                        proc.stdout.close()
+        except BaseException as cleanup_error:
+            raise _LaunchUncertain("Windows bootstrap cleanup was not confirmed") from cleanup_error
         raise
 
 
-def run(command, cwd, env, timeout, *, max_output, secret_pattern, secrets):
+def run(command, cwd, env, timeout, *, max_output, secret_pattern, secrets, resource_context=None):
     """Return (output, exit_code, timed_out, truncated, redacted).
 
 The caller validates argv, timeout, environment and output limit. Output is
@@ -218,20 +228,63 @@ POSIX cleanup covers the process group, not deliberate setsid()/external service
 escapes. Windows covers descendants created normally via CreateProcess; jobs
 are lifetime management, not a security boundary against external services.
 """
+    lease = resources.reserve(resource_context, "testProcesses") if resource_context is not None else None
+    bound, handle = False, None
+    cleanup = {"confirmed": False, "uncertain": False}
     try:
-        proc, owner = _start(command, cwd, env)
-    except OSError:
-        return _START_FAILED, 127, False, False, False
+        try:
+            proc, owner = _start(command, cwd, env)
+        except BaseException as error:
+            if lease is not None:
+                resources.finish(resource_context, lease["id"], outcome="launch_failed",
+                                 confirmed=isinstance(error, OSError) and not isinstance(error, _LaunchUncertain))
+            if isinstance(error, OSError) and not isinstance(error, _LaunchUncertain):
+                return _START_FAILED, 127, False, False, False
+            raise
+        # This identity names the retained Popen object in this controller and
+        # this launch. It must never be reconstructed as permission to kill PID.
+        handle = {"runtime": "local-process", "nativeId": f"popen:{os.getpid()}:{id(proc)}",
+                  "launchId": uuid.uuid4().hex, "pid": proc.pid,
+                  "containment": "windows-job" if os.name == "nt" else "posix-process-group"}
+        try:
+            if lease is not None:
+                resources.bind(resource_context, lease["id"], handle)
+                bound = True
+        except BaseException:
+            try:
+                owner.close()
+                proc.wait(timeout=5)
+                cleanup["confirmed"] = True
+            finally:
+                proc.stdout.close()
+            raise
+        return _capture(proc, owner, timeout, max_output=max_output,
+                        secret_pattern=secret_pattern, secrets=secrets, cleanup=cleanup,
+                        heartbeat=(lambda: resources.heartbeat(resource_context, lease["id"], handle=handle))
+                        if lease is not None else None)
+    finally:
+        if lease is not None and handle is not None:
+            resources.finish(resource_context, lease["id"], handle=handle if bound else None,
+                             outcome="completed" if bound else "launch_failed",
+                             confirmed=cleanup["confirmed"] and not cleanup["uncertain"])
+
+
+def _capture(proc, owner, timeout, *, max_output, secret_pattern, secrets, cleanup, heartbeat=None):
+    """Capture while retaining both the exact process and containment owner."""
     stopped, reader = False, None
     try:
         captured, tail = bytearray(), b""
         tail_size = max([4096] + [len(s.encode("utf-8")) for s in secrets])
         truncated = timed_out = redacted = eof = False
         deadline = time.monotonic() + timeout
+        heartbeat_at = time.monotonic() + 30
         drain_deadline = None
         reader = _PipeReader(proc.stdout)
         while not eof or proc.poll() is None:
             now, rc = time.monotonic(), proc.poll()
+            if heartbeat is not None and now >= heartbeat_at:
+                heartbeat()
+                heartbeat_at = now + 30
             if not stopped and (rc is not None or now >= deadline):
                 timed_out = rc is None
                 owner.close()
@@ -239,6 +292,7 @@ are lifetime management, not a security boundary against external services.
             if drain_deadline is not None and time.monotonic() >= drain_deadline:
                 # Unread bytes must never turn into a successful verification.
                 truncated, redacted = True, True
+                cleanup["uncertain"] = True
                 break
             if eof:
                 time.sleep(_POLL)
@@ -263,11 +317,15 @@ are lifetime management, not a security boundary against external services.
         if truncated:
             captured.extend(("\nAISpa: output truncated at %d bytes.\n" % max_output).encode())
         return bytes(captured), rc, timed_out, truncated, redacted
+    except BaseException:
+        cleanup["uncertain"] = True
+        raise
     finally:
         try:
             if not stopped:
                 owner.close()
             proc.wait(timeout=5)
+            cleanup["confirmed"] = not cleanup["uncertain"]
         finally:
             if reader is not None:
                 reader.close()

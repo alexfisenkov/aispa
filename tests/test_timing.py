@@ -8,6 +8,25 @@ from aispa_core.progress import display_stage, estimate
 
 
 class TimingTests(unittest.TestCase):
+    def test_wait_categories_do_not_turn_into_active_time_on_save(self):
+        from aispa_core import work_progress
+        begin_wait = getattr(timing, "begin_wait", None)
+        end_wait = getattr(timing, "end_wait", None)
+        self.assertTrue(callable(begin_wait) and callable(end_wait), "Resource/owner/blocked waiting needs explicit separate intervals")
+        state = {"status": "running", "tasks": [], "policy": {"managedExecution": True}}
+        timing.start(state, "2026-10-26T00:00:00+00:00")
+        work_progress.begin(state, "spec", "2026-10-26T00:00:00+00:00")
+        begin_wait(state, "resource_wait", "2026-10-26T00:01:00+00:00")
+        work_progress.sync(state, "agent-decision-recorded", "2026-10-26T00:02:00+00:00")
+        self.assertNotIn("activeSince", state["workProgress"])
+        self.assertEqual(timing.elapsed(state, "2026-10-26T00:03:00+00:00"), 60)
+        end_wait(state, "2026-10-26T00:04:00+00:00")
+        self.assertEqual(state["waitTiming"]["resource_wait"]["elapsedSeconds"], 180)
+        timing.stop(state, "2026-10-26T00:05:00+00:00")
+        work_progress.sync(state, "agent-decision-recorded", "2026-10-26T00:05:00+00:00")
+        self.assertEqual(state["elapsedSeconds"], 120)
+        self.assertEqual(work_progress.view(state, "2026-10-26T00:05:00+00:00")["elapsedSeconds"], 120)
+
     def test_running_interval_is_measured_from_recorded_start(self):
         task = {}
         timing.start(task, "2026-10-19T10:00:00+00:00")

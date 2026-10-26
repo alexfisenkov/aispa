@@ -34,6 +34,7 @@ def _execution_source(sources, source_id, kind, origin_run):
 def disposition(row, sources=None):
     """Owner disposition is separate from the unchanged pending/failed outcome."""
     from .execution_obligations import instant
+    from .carryover import payload_identity
     history = row.get("dispositions", [])
     require(isinstance(history, list), "Carryover: повреждена история решений об исполнении")
     current, prior, source_hashes = "outstanding", {}, set()
@@ -61,11 +62,11 @@ def disposition(row, sources=None):
                         and source["origin"].get("run") == event["run"] and event["quote"] in source["text"],
                         "Carryover: потеряна цитата решения владельца об исполнении")
                 original = sources.get(row["source"]["source"])
-                require(original and source["origin"]["sha256"] != original["origin"]["sha256"],
+                require(original and payload_identity(source) != payload_identity(original),
                         "Carryover: исходный бриф не разрешает снять остаток исполнения")
-                require(source["origin"]["sha256"] not in source_hashes,
+                require(payload_identity(source) not in source_hashes,
                         "Carryover: повторные байты брифа не являются новым решением владельца")
-                source_hashes.add(source["origin"]["sha256"])
+                source_hashes.add(payload_identity(source))
         current = {"drop": "dropped", "defer": "deferred", "keep": current}[event["action"]]
     return current
 
@@ -185,7 +186,7 @@ def capture(store, state, inherited, sources, briefs):
     require(isinstance(history, list), "Carryover: повреждена история finish")
     last, last_source = None, None
     for ref in history:
-        receipt = _load(store, ref)
+        receipt = _load(store, ref, state=state)
         require(receipt.get("run") == state["run"] and receipt.get("event") == "engine-finish",
                 "Carryover: чужое событие finish")
         expected = execution_obligations.evaluate(store, state, receipt.get("at"))
@@ -199,7 +200,7 @@ def capture(store, state, inherited, sources, briefs):
         _merge_sources(sources, [value])
         return value["id"]
     if rows and state.get("executionSeal"):
-        seal = _load(store, state["executionSeal"])
+        seal = _load(store, state["executionSeal"], state=state)
         for key, ref in seal["sourceReports"].items():
             source(ref, "execution_source_" + key)
     for obligation in rows:

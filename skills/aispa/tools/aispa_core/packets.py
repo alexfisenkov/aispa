@@ -53,6 +53,10 @@ def _context_artifact(store, value):
 
 MODEL_RULE = ("Дешёвая модель по умолчанию; сильная — только для задач в зоне безопасности, ключей, доступа, "
               "платежей и личных данных. Уровень мышления выбирает среда.")
+MANAGED_MODEL_RULE = ("Выбирай модель по сложности работы и реальным возможностям среды: сильную для сложной, "
+    "обычную для содержательной, экономную для механической. Чувствительная работа требует подтверждённого "
+    "сильного маршрута; неизвестная возможность блокирует её. Совет не доказывает выбранную или actual модель. "
+    "Класс проверки и режим проверок задаются отдельно.")
 
 
 def _lean_strong(task, attempt):
@@ -73,17 +77,29 @@ def routing(state, task, role, attempt=None, store=None):
               or bool((attempt or {}).get("repairPlan")))
     subject = attempt if attempt is not None else task
     lean = state.get("policy", {}).get("leanControl") is True
+    managed = state.get("policy", {}).get("managedExecution") is True
     extra = {}
+    selection_rule = "Use only models exposed by the host and permitted by project rules; otherwise keep the current model"
     if lean:
         strong = _lean_strong(task, attempt)
+        if state.get("policy", {}).get("managedExecution"):
+            strong = task_tiers.sensitive_task(state, task)
         extra = {"modelRule": MODEL_RULE}
+    if managed:
+        from .participants import model_advice
+        need = task_tiers.model_need(state, task, attempt)
+        strong = need == "complex"
+        extra = {"modelRule": MANAGED_MODEL_RULE, "modelNeed": need,
+                 "hostModelPolicy": model_advice(state.get("runtime"), need)}
+        selection_rule = ("Preferences are advisory: verify the actual host selector/catalogue. Sensitive work requires "
+                          "a source-bound approved strong route; unavailable required capability blocks the work.")
     if task_tiers.worker_only(subject):
         light = task_tiers.is_light(subject)
         fast = task_tiers.is_fast(subject)
         require(role == "worker", "У light, standard и fast нет роли критика или приёмщика")
-        return {**extra, "tier": "strong" if strong and (lean or not light) else "standard", "advisory": True,
+        return {**extra, "tier": "strong" if strong and (lean or managed or not light) else "standard", "advisory": True,
                 "taskTier": subject["tier"], "tierReason": subject.get("tierReason"),
-                "selection": "Use only host-exposed models permitted by project rules",
+                "selection": selection_rule,
                 "reason": ("Owner's fast mode: the task gets no per-task review; tests, the clean-copy check and the final blind acceptance remain" if fast else
                            "Explicit bounded low-risk change; semantic safety still requires final review" if light else
                            "Ordinary non-foundation code; the whole-version review replaces a per-task critic"),
@@ -97,10 +113,15 @@ def routing(state, task, role, attempt=None, store=None):
     slots = {review_policy.LEAN: {"minimum": 2, "maximum": 3}, review_policy.ADAPTIVE: {"minimum": 3, "maximum": 4}}
     rules = {review_policy.LEAN: "First PASS completes the task: the critic also checks closure criteria, constraints and the trace to the owner's words. WARN/BLOCK/FAIL requires repair and one fresh critic2 whose PASS completes the task. No third round, no separate task acceptor.",
              review_policy.ADAPTIVE: "First PASS goes to a separate acceptor; WARN/BLOCK/FAIL requires repair and one fresh critic2. No third round."}
+    reason = (("Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation") if not lean else
+              ("Sensitive zone: security, keys, access, payments or personal data" if strong else "Cheap model by default"))
+    if managed:
+        reason = {"complex": "Complex, shared, high-risk or sensitive work; strong model preference",
+                  "ordinary": "Ordinary substantive work; provider-specific ordinary model preference",
+                  "mechanical": "Bounded mechanical work; economical model preference"}[need]
     return {**extra, "tier": "strong" if strong else "standard", "advisory": True,
-            "reason": ("Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation") if not lean else
-                      ("Sensitive zone: security, keys, access, payments or personal data" if strong else "Cheap model by default"),
-            "selection": "Use only models exposed by the host and permitted by project rules; otherwise keep the current model",
+            "reason": reason,
+            "selection": selection_rule,
             "report": "Save the full structured report to a file; return its path and at most 25 lines of conclusions",
             "reviewPolicy": policy,
             "criticRounds": None if conditional else 2,
@@ -298,6 +319,15 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                       blindReview=state.get("blindReview"), handoff=state.get("handoff"),
                       projectIntegrationReview=state.get("projectIntegrationReview"))
+        if state.get("policy", {}).get("managedExecution"):
+            packet["finalReportTemplate"] = {"basis": packet["basis"], "reviewer": "", "independent": True,
+                "unmapped": [], "checks": [{"requirement": r["id"], "criterion": text, "status": "", "note": "", "artifact": ""}
+                    for r in reqs for text in r.get("acceptance", [])],
+                "cleanrun": state.get("cleanrun"), "blindReview": state.get("blindReview")}
+            packet["evidenceGuide"] = {"pathBase": "run-relative", "example": {"file": "evidence/capture.jpg", "sha256": "<actual SHA-256>"},
+                "types": {"procedure": "string", "observed": "string", "source": "{file,sha256}", "attachments": "array<{file,sha256}>"},
+                "emptyOutput": "Confirm empty stdout/stderr with nonempty command metadata; never pad an empty attachment",
+                "conclusions": "Keep statuses and conclusions blank until independently observed"}
         if state.get('policy', {}).get('criticalProductFlows') is True:
             from . import product_flows
             contract, checks, observations = product_flows.templates(store, state, packet['basis'])

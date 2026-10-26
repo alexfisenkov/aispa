@@ -19,7 +19,7 @@ import uuid
 
 from .store import Invalid, confined, digest, file_hash, timestamp
 from .portable import is_link, relative_name
-from . import git_snapshot, process_runner
+from . import git_snapshot, process_runner, resources
 from .verified_reads import current_scope
 
 
@@ -335,9 +335,9 @@ def current(store, state):
         return False
 
 
-def _run(command, cwd, env, timeout, secrets):
+def _run(command, cwd, env, timeout, secrets, *, resource_context=None):
     return process_runner.run(command, cwd, env, timeout, max_output=MAX_OUTPUT,
-                              secret_pattern=SECRET, secrets=secrets)
+                              secret_pattern=SECRET, secrets=secrets, resource_context=resource_context)
 
 
 def _path_argument(value):
@@ -499,7 +499,8 @@ def execute(store, state, command, timeout=600):
     if execution_command is None:
         raw, rc, timed_out, truncated, redacted = b"AISpa: command could not start.\n", 127, False, False, False
     else:
-        raw, rc, timed_out, truncated, redacted = _run(execution_command, repo, environment, timeout, secrets)
+        raw, rc, timed_out, truncated, redacted = _run(execution_command, repo, environment, timeout, secrets,
+                                                    resource_context=resources.context(store, state))
     output = raw.decode("utf-8", "replace")
     redacted = redacted or bool(SECRET.search(output) or any(v in output for v in secrets))
     if redacted:

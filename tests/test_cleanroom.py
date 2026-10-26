@@ -14,12 +14,42 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import cleanroom
 from aispa_core.store import Invalid, Journal
+from test_preflight import optional_module
 
 
 VENV_PYTHON = Path(".venv") / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
 class CleanroomTests(unittest.TestCase):
+    def test_managed_cleanrun_keeps_original_resource_context_with_clone_and_clean_env(self):
+        clone = self.prepare()
+        resources = optional_module("resources")
+        self.assertIsNotNone(resources, "Clean-run must share the source project's test-process budget")
+        self.state.update(policy={"managedExecution": True}, hostSession="clean-session")
+        resources.configure(self.store, self.state, {"schema": 1, "scope": "project", "limits":
+            {"agents": 1, "browsers": 1, "testProcesses": 1, "services": 1}})
+        ctx = resources.context(self.store, self.state)
+        lease = resources.reserve(ctx, "testProcesses")
+        with patch.object(cleanroom.process_runner, "_start") as start, self.assertRaises(Invalid):
+            self.execute()
+        start.assert_not_called()
+        self.assertNotIn("cleanrun", self.state)
+        resources.finish(ctx, lease["id"], outcome="launch_failed", confirmed=True)
+        original = cleanroom.process_runner.run
+        seen = []
+
+        def capture(*args, **kwargs):
+            seen.append((args, kwargs))
+            return original(*args, **kwargs)
+
+        with patch.object(cleanroom.process_runner, "run", side_effect=capture):
+            self.assertEqual(self.execute()["exitCode"], 0)
+        args, kwargs = seen[0]
+        self.assertEqual(Path(args[1]), clone)
+        self.assertEqual(Path(kwargs["resource_context"]["root"]), self.root)
+        self.assertEqual(kwargs["resource_context"]["run"], self.state["run"])
+        self.assertFalse(any("SECRET" in key.upper() for key in args[2]))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa клон space-🙂-")
         self.root = Path(self.temp.name).resolve()

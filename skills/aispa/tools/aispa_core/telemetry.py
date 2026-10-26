@@ -53,7 +53,29 @@ def _normalize(value):
         if key in value:
             require(isinstance(value[key], str) and value[key].strip(), "Usage: неверное поле " + key)
             row[key] = value[key]
+    if "attribution" in value:
+        row["attribution"] = value["attribution"]
     return row
+
+
+def _attribution(store, state, row, actor):
+    value = row.get("attribution")
+    if value is None:
+        return "unknown"
+    require(isinstance(value, dict) and isinstance(value.get("source"), dict)
+            and artifact_valid(store, value["source"]), "Usage: phase attribution source изменён")
+    binding = {k: v for k, v in value.items() if k != "source"}
+    require(store.json(value["source"]) == binding and actor
+            and value.get("actor") == row["actor"] and value.get("callId") == row["callId"]
+            and value.get("run") == state["run"] and value.get("session") == actor["session"],
+            "Usage: phase attribution принадлежит другому вызову/run/session")
+    from . import work_progress, timing
+    allowed = set(work_progress.PHASES) | set(timing.TASK_PHASES)
+    require(value.get("phase") in allowed, "Usage: unknown phase")
+    if value.get("task") is not None or value.get("attempt") is not None:
+        history = state.get("taskHistory", {}).get(value.get("task"), [])
+        require(any(a.get("id") == value.get("attempt") for a in history), "Usage: чужая task/attempt attribution")
+    return value["phase"]
 
 
 def _validate_saved(store, rows):
@@ -85,6 +107,7 @@ def record(store, state, value):
             "Usage требует известного участника")
     require(actor is None or "runtime" not in row or row["runtime"] == actor["runtime"],
             "Usage runtime отличается от участника")
+    _attribution(store, state, row, actor)
     prior = state.setdefault("usage", [])
     _validate_saved(store, prior)
     require((row["actor"], row["callId"]) not in {(r["actor"], r["callId"]) for r in prior},
@@ -147,12 +170,15 @@ def summary(store, state):
                             if isinstance(p, dict) and isinstance(p.get("id"), str))
     invalid_ids = sorted(aid for aid in declared_ids - set(known) if isinstance(aid, str))
     measured_ids = {row["actor"] for row in rows}
-    groups = {"byRole": {}, "byParticipant": {}, "byModel": {}}
+    groups = {"byRole": {}, "byParticipant": {}, "byModel": {}, "byPhase": {}}
+    unattributed_calls = 0
     for row in rows:
         actor = known.get(row["actor"])
         role = actor.get("role") if actor else "unverified"
-        model = row.get("model") or (actor.get("model") if actor else None) or "unknown"
-        for group, key in (("byRole", role), ("byParticipant", row["actor"]), ("byModel", model)):
+        model = row.get("model") or "unknown"
+        phase = _attribution(store, state, row, actor)
+        unattributed_calls += phase == "unknown"
+        for group, key in (("byRole", role), ("byParticipant", row["actor"]), ("byModel", model), ("byPhase", phase)):
             groups[group].setdefault(key, []).append(row)
     grouped = {group: {key: {"measuredCalls": len(items), **_sum(items)}
                        for key, items in sorted(values.items())}
@@ -189,6 +215,8 @@ def summary(store, state):
                     and set(known) <= checkpoint_participants
                     and all(row["actor"] in known and (row["actor"], row["callId"]) in checkpoint_calls
                             for row in rows))
+    if state.get("policy", {}).get("managedExecution") and unattributed_calls:
+        complete = False
     totals = _sum(rows) if rows else {key: None for key in COUNTERS}
     return {"measuredCalls": len(rows), "complete": complete, "unit": "tokens",
             **totals, **grouped,
@@ -196,6 +224,7 @@ def summary(store, state):
                          "missingParticipants": missing_participants, "missingRoles": missing_roles,
                          "missingPhases": phases["missingPhases"], "unattributedPhases": unattributed_phases,
                          "phaseAuthors": phases["authors"],
+                         "unattributedCalls": unattributed_calls,
                          "invalidParticipantRecords": invalid_ids,
                          "unverifiedActors": sorted(measured_ids - set(known)),
                          "unmappedCalls": sum(i["unmappedCalls"] for i in imports),
@@ -205,7 +234,8 @@ def summary(store, state):
                          "sourceCheckpoints": len(imports), "finalSources": final_sources,
                          "finalCoordinatorReplyIncluded": final_coordinator,
                          "activeRun": state.get("status") == "running"},
-            "note": "Only recorded native measurements; absent calls and savings are not inferred"}
+            "costStatus": "unknown",
+            "note": "Only recorded native measurements; absent calls, phase attribution and savings are not inferred"}
 
 
 def _native_counters(usage, kind):

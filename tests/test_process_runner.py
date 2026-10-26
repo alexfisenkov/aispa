@@ -10,9 +10,64 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import process_runner
+from test_preflight import optional_module
+from aispa_core.store import Invalid, Journal
 
 
 PATTERN = re.compile(r"ghp_[A-Za-z0-9]{20,}")
+
+
+class ManagedProcessRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="aispa managed runner 🙂 ")
+        self.root = Path(self.temp.name)
+        self.resources = optional_module("resources")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def context(self):
+        self.assertIsNotNone(self.resources, "Runner must reserve before creating a process")
+        store = Journal(self.root)
+        state = store.create("runner", "Managed runner")
+        state.update(policy={"managedExecution": True}, hostSession="fixture-session")
+        self.resources.configure(store, state, {"schema": 1, "scope": "project", "limits":
+            {"agents": 1, "browsers": 1, "testProcesses": 1, "services": 1}})
+        return self.resources.context(store, state)
+
+    def call(self, ctx, command=None):
+        return process_runner.run(command or [sys.executable, "-c", "print('managed')"],
+            self.root, os.environ.copy(), 3, max_output=1000, secret_pattern=PATTERN,
+            secrets=(), resource_context=ctx)
+
+    def test_budget_refusal_happens_before_start_and_success_releases(self):
+        ctx = self.context()
+        held = self.resources.reserve(ctx, "testProcesses")
+        with patch.object(process_runner, "_start") as start, self.assertRaises(Invalid):
+            self.call(ctx)
+        start.assert_not_called()
+        self.resources.finish(ctx, held["id"], outcome="launch_failed", confirmed=True)
+        self.assertEqual(self.call(ctx)[1], 0)
+        self.assertTrue(self.resources.reserve(ctx, "testProcesses")["id"])
+
+    def test_missing_executable_releases_its_reservation(self):
+        ctx = self.context()
+        self.assertEqual(self.call(ctx, [str(self.root / "missing")])[1], 127)
+        self.assertTrue(self.resources.reserve(ctx, "testProcesses")["id"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX cleanup uncertainty fixture")
+    def test_cleanup_uncertainty_keeps_an_orphaned_reservation(self):
+        ctx = self.context()
+        original = process_runner._PosixGroup.close
+
+        def uncertain(owner):
+            original(owner)
+            raise OSError("Synthetic missing termination acknowledgement")
+
+        with patch.object(process_runner._PosixGroup, "close", uncertain), self.assertRaises(OSError):
+            self.call(ctx)
+        with self.assertRaises(Invalid):
+            self.resources.reserve(ctx, "testProcesses")
 
 
 class ProcessRunnerTests(unittest.TestCase):

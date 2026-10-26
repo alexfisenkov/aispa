@@ -12,10 +12,58 @@ import time
 import unittest
 import urllib.request
 import urllib.error
+from contextlib import redirect_stderr
 
 PACKAGE = Path(__file__).resolve().parents[1] / "skills/aispa"
 CLI = PACKAGE / "tools/aispa.py"
 sys.path.insert(0, str(PACKAGE / "tools"))
+
+
+class InterviewSettingCliTests(unittest.TestCase):
+    def test_new_init_persists_interview_without_changing_auto_or_max(self):
+        from aispa_core.store import Journal
+        with tempfile.TemporaryDirectory(prefix="aispa interview axes 🙂 ") as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            result = subprocess.run([sys.executable, "-B", str(CLI), "--root", str(root), "init",
+                "--slug", "axes", "--title", "Independent interview axes", "--mode", "auto",
+                "--runtime", "codex", "--check", "max", "--depth", "strict",
+                "--interview-scope", "deep", "--interview-minutes", "25"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            state = Journal(root).load()
+            self.assertEqual(state["interview"], {"scope": "deep", "durationMinutes": 25})
+            self.assertEqual((state["mode"], state["checkMode"], state["depth"]), ("auto", "max", "strict"))
+            self.assertTrue(state["policy"]["managedExecution"])
+            self.assertFalse(json.loads(result.stdout)["autonomy"]["mayAsk"])
+
+    def test_interview_axes_parse_independently_of_autonomy_check_and_depth(self):
+        import aispa
+        for mode in ("auto", "important", "interview"):
+            for check in ("fast", "balanced", "max"):
+                for scope in ("compact", "standard", "deep"):
+                    for depth in ("strict", "balanced", "deep"):
+                        with self.subTest(mode=mode, check=check, scope=scope, depth=depth), redirect_stderr(io.StringIO()):
+                            try:
+                                args = aispa.parser().parse_args(["init", "--slug", "axes", "--title", "Axes",
+                                    "--mode", mode, "--runtime", "codex", "--check", check,
+                                    "--depth", depth, "--interview-scope", scope, "--interview-minutes", "25"])
+                            except SystemExit:
+                                self.fail("Interview scope/duration must be accepted independently of all existing axes")
+                            self.assertEqual((args.mode, args.check, args.depth, args.interview_scope,
+                                              args.interview_minutes), (mode, check, depth, scope, 25))
+
+    def test_invalid_duration_does_not_create_run_or_project_files(self):
+        import aispa
+        from aispa_core.store import Invalid
+        with tempfile.TemporaryDirectory(prefix="aispa-invalid-interview-") as tmp:
+            root = Path(tmp)
+            args = aispa.parser().parse_args(["--root", str(root), "init", "--slug", "axes", "--title", "Axes",
+                "--mode", "auto", "--runtime", "codex", "--check", "max"])
+            args.interview_scope, args.interview_minutes = "standard", -1
+            with self.assertRaises(Invalid):
+                aispa.execute(args)
+            self.assertEqual(list(root.iterdir()), [])
 
 
 class CliTests(unittest.TestCase):
@@ -46,6 +94,21 @@ class CliTests(unittest.TestCase):
 
     def call(self, *args, expected=0, cli=None):
         cli = cli or (CLI if args and args[0] == "init" else getattr(self, "cli", CLI))
+        if args and args[0] in ("seal", "resume"):
+            from aispa_core.store import Journal
+            from test_preflight import synthetic_host_snapshot
+            fixture_store = Journal(self.root)
+            fixture_state = fixture_store.load()
+            if fixture_state.get("policy", {}).get("managedExecution"):
+                host = synthetic_host_snapshot(fixture_store, fixture_state)
+                if host is not None:
+                    host_file = self.root / ".aispa/inbox/synthetic-host.json"
+                    host_file.parent.mkdir(parents=True, exist_ok=True)
+                    host_file.write_text(json.dumps(host), encoding="utf-8")
+                    if args[0] == "resume":
+                        args = (*args, "--host", str(host_file))
+                    else:
+                        self.call("host-context", "--file", str(host_file), cli=cli)
         r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
                            text=True, capture_output=True, timeout=getattr(self, "cli_timeout", 20),
                            encoding="utf-8", env=self.command_env,
@@ -65,6 +128,7 @@ class CliTests(unittest.TestCase):
         self.cli = self.run / "runtime/tools/aispa.py"
         self.inbox = self.root / ".aispa/inbox"
         self.inbox.mkdir()
+        (self.root / "AGENTS.md").write_text((self.root / "AGENTS.md").read_text(encoding="utf-8") + "\nSynthetic fixture permits independent delegation and test processes.\n", encoding="utf-8", newline="\n")
         self.git("add", ".gitignore", "AGENTS.md")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "ignore local records")
 

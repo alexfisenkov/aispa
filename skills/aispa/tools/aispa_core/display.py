@@ -282,6 +282,18 @@ def project(store, state):
     autonomy_view = autonomy.view(state)
     if autonomy_view is not None:
         view["autonomy"] = autonomy_view
+    if state.get("policy", {}).get("managedExecution"):
+        from . import timing, participants
+        view["timing"] = timing.summary(state, observed)
+        view["interview"] = state.get("interview", autonomy.interview_setting())
+        view["hostContext"] = {"sessionKnown": bool(state.get("hostSession")),
+            "adoptedPurpose": (state.get("hostPreflight") or {}).get("purpose"),
+            "authority": "source-bound host report; purpose-scoped adoption is not full capability approval"}
+        view["resourceScope"] = {"scope": "project", "profile": state.get("resourceProfile"),
+            "unmanagedLaunches": "outside guarantee", "hostWideLimit": "unknown"}
+        view["models"] = [{k: row.get(k) for k in ("id", "role", "requestedModel", "requestedReasoning",
+            "actualModel", "actualReasoning", "actualModelStatus", "selection")}
+            for row in participants.list_participants(store, state)]
     from . import product_flows
     flow_view = product_flows.view(store, state)
     if flow_view is not None:

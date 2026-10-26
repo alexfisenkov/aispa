@@ -11,9 +11,21 @@ CLI = Path(__file__).resolve().parents[1] / "skills/aispa/tools/aispa.py"
 sys.path.insert(0, str(CLI.parent))
 from aispa_core import dashboard_host, dashboard_server
 from aispa_core.store import Invalid, Journal
+from test_preflight import synthetic_host_snapshot
 
 
 class DashboardHostTests(unittest.TestCase):
+    def test_first_browser_action_has_targeted_identity_adoption_before_reserve_and_open(self):
+        try:
+            action, = dashboard_host.start_request(managed=True)
+        except TypeError:
+            self.fail("The new init must give a managed browser contract before full project preflight")
+        contract = action["resourceContract"]
+        self.assertEqual(contract["identityPurpose"], "browser")
+        self.assertIn("reserve", contract["steps"])
+        self.assertNotIn("sealed", contract.get("prerequisites", []))
+        self.assertNotIn("browserOpened", action)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-dashboard-host-")
         self.root = Path(self.temp.name) / "проект с пробелами 🙂"
@@ -30,6 +42,17 @@ class DashboardHostTests(unittest.TestCase):
             self.temp.cleanup()
 
     def call(self, *args, compact=False, expected=0):
+        if args and args[0] in ("resume", "dashboard") and (self.store.home / "active.json").exists():
+            state = self.store.load()
+            if state.get("policy", {}).get("managedExecution"):
+                host = synthetic_host_snapshot(self.store, state)
+                if host is not None:
+                    host_file = self.root / ".aispa/synthetic-host.json"
+                    host_file.write_text(json.dumps(host), encoding="utf-8")
+                    if args[0] == "resume":
+                        args = (*args, "--host", str(host_file))
+                    elif len(args) > 1 and args[1] == "start" and not state.get("hostSession"):
+                        self.call("host-context", "--file", str(host_file))
         flags = ["--compact"] if compact else []
         result = subprocess.run([sys.executable, "-B", str(self.cli), "--root", str(self.root), *flags, *args],
                                 cwd=self.root, capture_output=True, text=True, encoding="utf-8", timeout=30)
@@ -44,11 +67,16 @@ class DashboardHostTests(unittest.TestCase):
         return result
 
     def assert_start_request(self, result):
-        self.assertEqual(result["requiredHostActions"], [{
+        action, = result["requiredHostActions"]
+        plain = {k: v for k, v in action.items() if k != "resourceContract"}
+        self.assertEqual(plain, {
             "action": "start-and-open-dashboard", "runner": "pinned-aispa-cli",
             "cliArguments": ["dashboard", "start"], "surface": "embedded",
             "visible": True, "verification": "required",
-        }])
+        })
+        self.assertEqual(action["resourceContract"]["kind"], "browsers")
+        self.assertEqual(action["resourceContract"]["scope"], "project")
+        self.assertIn("reserve", action["resourceContract"]["steps"])
         self.assertNotIn("opened", json.dumps(result))
         self.assertNotIn("browserOpened", result)
         self.assertFalse((self.store.home / "service/dashboard.json").exists())
@@ -76,19 +104,21 @@ class DashboardHostTests(unittest.TestCase):
                 if compact:
                     full = json.loads(Path(resumed["absolutePath"]).read_text(encoding="utf-8"))
                     self.assertEqual(resumed["requiredHostActions"], full["requiredHostActions"])
-        rejected = self.call("resume", expected=2)
-        self.assertEqual(rejected.stdout, "")
-        self.assertIn("Прогон уже выполняется", rejected.stderr)
+        continued = self.call("resume")
+        self.assertEqual(continued["status"], "running")
+        self.assertFalse(continued["autonomy"]["mayAsk"])
 
     def test_dashboard_start_returns_exact_live_url_reuses_service_and_does_not_claim_browser_opened(self):
         self.init()
         first = self.call("dashboard", "start")
         try:
             self.assertTrue(first["running"])
-            self.assertEqual(first["requiredHostActions"], [{
+            action, = first["requiredHostActions"]
+            self.assertEqual({k: v for k, v in action.items() if k != "resourceContract"}, {
                 "action": "open-dashboard", "url": first["url"], "surface": "embedded",
                 "visible": True, "verification": "required",
-            }])
+            })
+            self.assertEqual(action["resourceContract"]["kind"], "browsers")
             self.assertNotIn("opened", json.dumps(first))
             metadata = json.loads((self.store.home / "service/dashboard.json").read_text(encoding="utf-8"))
             self.assertNotIn("token", first)

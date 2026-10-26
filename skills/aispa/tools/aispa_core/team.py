@@ -641,7 +641,7 @@ class TaskPipeline:
             self.host.save("team-specialized")
         return {t["id"]: copy.deepcopy(self._attempt(t["id"])["roles"]) for t in self.s["tasks"]}
 
-    def assign(self, tid, role, runtime, native_id, session, fresh=True, model=None):
+    def assign(self, tid, role, runtime, native_id, session, fresh=True, model=None, reasoning=None, model_evidence=None):
         self.host.build_ready()
         require(role in ROLES, "Неизвестная роль")
         require(all(nonempty(v) for v in (runtime, native_id, session)), "Нужны runtime, native ID и session")
@@ -692,6 +692,10 @@ class TaskPipeline:
         actor = {"id": aid, "runtime": runtime, "nativeId": native_id, "session": session, "fresh": fresh,
                  "task": tid, "attempt": attempt["id"], "role": role,
                  "card": attempt["roles"][role]["sha256"], "model": model, "at": timestamp()}
+        actor.update(participants.model_metadata(self.store, self.s, runtime, native_id, session,
+                     model=model, reasoning=reasoning, evidence=model_evidence))
+        participants.require_model_route(self.store, self.s, actor,
+                                          sensitive=task_tiers.sensitive_task(self.s, self.host.task(tid)))
         self.s["actors"][aid] = _seal(self.store, actor)
         if previous:
             attempt["actorHistory"].append({"role": role, "previous": previous, "replacement": aid, "at": timestamp()})
@@ -731,6 +735,9 @@ class TaskPipeline:
     def _read(self, tid, role, path):
         attempt = self._attempt(tid)
         require(_actor_valid(self.store, self.s, attempt, role), "Нужен назначенный actor с действующей карточкой")
+        participants.require_model_route(self.store, self.s,
+            participants.resolve(self.store, self.s, attempt["actors"][role]),
+            sensitive=task_tiers.sensitive_task(self.s, self.host.task(tid)))
         text = self.host.read_input(path)
         report = _json(text)
         candidate = task_basis(self.store, self.s, tid)

@@ -19,7 +19,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from . import VERSION
+from . import VERSION, resources
 from .display import project
 from .dashboard_reader import DisplayJournal, SnapshotJournal
 from .dashboard_snapshot import SnapshotCoordinator, calculate
@@ -49,6 +49,12 @@ class LoopbackServer(ThreadingHTTPServer):
         TCPServer.server_bind(self)
         self.server_name = HOST
         self.server_port = self.server_address[1]
+
+    def service_actions(self):
+        binding = getattr(self, "resource_lease", None)
+        if binding is not None and time.monotonic() >= self.resource_heartbeat_at:
+            resources.heartbeat(binding["context"], binding["leaseId"], handle=binding["handle"])
+            self.resource_heartbeat_at = time.monotonic() + 30
 
 
 def _root_hash(store):
@@ -103,7 +109,57 @@ def _read_meta(store):
             or type(value.get("pid")) is not int or value["pid"] <= 0
             or type(value.get("port")) is not int or not 0 < value["port"] < 65536):
         raise Invalid("Dashboard metadata не соответствует этому проекту")
+    _lease_binding(store, value)
     return value
+
+
+def _lease_binding(store, meta):
+    """Private persisted ownership, independent of a later native host session."""
+    binding = meta.get("resourceLease")
+    if binding is None:
+        return None
+    if not isinstance(binding, dict) or not isinstance(binding.get("context"), dict) or not isinstance(binding.get("handle"), dict):
+        raise Invalid("Dashboard: повреждена service lease identity")
+    ctx, handle = binding["context"], binding["handle"]
+    if (ctx.get("root") != str(store.root) or ctx.get("sessionKind") != "local-service"
+            or ctx.get("serviceInstance") != meta["instance"] or ctx.get("owner") != "dashboard-service"
+            or ctx.get("session") != "local-service:" + meta["instance"]
+            or not isinstance(binding.get("leaseId"), str) or not binding["leaseId"]
+            or handle.get("runtime") != "local-service" or handle.get("launchId") != meta["instance"]
+            or handle.get("pid") != meta["pid"]):
+        raise Invalid("Dashboard: service lease принадлежит другому экземпляру")
+    return binding
+
+
+def _service_finish(store, meta, *, confirmed):
+    binding = _lease_binding(store, meta)
+    if binding is None:
+        return
+    # A daemon can attest its own closed server before the parent observes exit.
+    # Do not turn that exact terminal result back into an unconfirmed orphan.
+    if not confirmed and _service_completed(store, meta):
+        return
+    resources.finish(binding["context"], binding["leaseId"], handle=binding["handle"], confirmed=confirmed)
+
+
+def _service_completed(store, meta):
+    binding = _lease_binding(store, meta)
+    if binding is None:
+        return False
+    row = resources.view(binding["context"])["leases"].get(binding["leaseId"])
+    return (row is not None and row.get("status") == "completed" and row.get("confirmed") is True
+            and row.get("handle") == binding["handle"]
+            and all(row.get(key) == binding["context"].get(key) for key in ("root", "run", "session", "owner")))
+
+
+def _reuse_service(store, meta):
+    binding = _lease_binding(store, meta)
+    if binding is None:
+        return False
+    # Authenticated current health is an explicit observation of this instance.
+    resources.reconcile(binding["context"], [{"leaseId": binding["leaseId"],
+                        "handle": binding["handle"], "status": "running"}])
+    return True
 
 
 def _last_port(store):
@@ -233,23 +289,40 @@ def _stop_locked(store, meta):
     if meta is None:
         return {"running": False, "stopped": False, "port": _last_port(store)}
     if not _verified(store, meta):
+        child = _CHILDREN.get(meta["instance"])
+        _service_finish(store, meta, confirmed=child is not None and child.poll() is not None)
         cleaned = _remove_matching(store, meta) if _port_closed(meta["port"]) else False
         return {"running": False, "stopped": False, "staleMetadataRemoved": cleaned,
                 "port": meta["port"], "instance": meta["instance"]}
     response, _reason = _private_request(meta, "POST", "_control/shutdown", timeout=2)
     if response is None:
+        _service_finish(store, meta, confirmed=False)
         return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and _verified(store, meta):
         time.sleep(.05)
     if _verified(store, meta):
+        _service_finish(store, meta, confirmed=False)
         return {"running": True, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
-    child = _CHILDREN.pop(meta["instance"], None)
+    child = _CHILDREN.get(meta["instance"])
+    exited = False
     if child is not None:
         try:
             child.wait(timeout=2)
+            exited = True
+            _CHILDREN.pop(meta["instance"], None)
         except subprocess.TimeoutExpired:
             pass
+    # Across separate CLI processes, only the daemon's exact lease completion
+    # attests closure; loss of health or a closed port alone does not prove exit.
+    if _lease_binding(store, meta) is not None and not exited:
+        deadline = time.monotonic() + 2
+        while not _service_completed(store, meta) and time.monotonic() < deadline:
+            time.sleep(.02)
+        if not _service_completed(store, meta):
+            _service_finish(store, meta, confirmed=False)
+            return {"running": False, "stopped": False, "port": meta["port"], "instance": meta["instance"]}
+    _service_finish(store, meta, confirmed=True)
     _remove_matching(store, meta)
     return {"running": False, "stopped": True, "port": meta["port"], "instance": meta["instance"]}
 
@@ -262,14 +335,58 @@ def stop(store):
 
 def _spawn(store, port, expected):
     instance = secrets.token_hex(16)
+    state = (DisplayJournal(store.root) if expected["readerMode"] == "compatible-view" else store).load()
+    ctx = resources.context(store, state, owner="dashboard-service", service_instance=instance)
+    lease = resources.reserve(ctx, "services") if ctx is not None else None
     token = secrets.token_urlsafe(48)
     config = {"root": str(store.root), "port": port, "instance": instance, "token": token,
               "compatibleView": expected["readerMode"] == "compatible-view"}
-    child = subprocess.Popen([sys.executable, "-B", "-m", "aispa_core.dashboard_server"],
+    try:
+        child = subprocess.Popen([sys.executable, "-B", "-m", "aispa_core.dashboard_server"],
                              cwd=str(TOOLS_DIR), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, close_fds=True,
                              start_new_session=os.name != "nt",
                              creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0)
+    except OSError:
+        if lease is not None:
+            resources.finish(ctx, lease["id"], outcome="launch_failed", confirmed=True)
+        raise
+    binding, confirmed, bound = None, False, False
+    if lease is not None:
+        handle = {"runtime": "local-service", "nativeId": f"popen:{os.getpid()}:{id(child)}",
+                  "launchId": instance, "pid": child.pid}
+        binding = {"context": ctx, "leaseId": lease["id"], "handle": handle}
+    try:
+        if binding is not None:
+            resources.bind(ctx, lease["id"], binding["handle"])
+            bound = True
+            config["resourceLease"] = binding
+        return _start_child(store, child, config, expected)
+    finally:
+        try:
+            if child.poll() is None and instance not in _CHILDREN:
+                try:
+                    child.terminate()  # only the retained Popen handle
+                    child.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=2)
+            confirmed = child.poll() is not None
+        finally:
+            if instance not in _CHILDREN:
+                try:
+                    if child.stdin is not None:
+                        child.stdin.close()
+                    if child.stdout is not None:
+                        child.stdout.close()
+                finally:
+                    if lease is not None:
+                        resources.finish(ctx, lease["id"], handle=binding["handle"] if bound else None,
+                                         outcome="completed" if bound else "launch_failed", confirmed=confirmed)
+
+
+def _start_child(store, child, config, expected):
+    instance = config["instance"]
     try:
         child.stdin.write((json.dumps(config, ensure_ascii=False) + "\n").encode("utf-8"))
         child.stdin.close()
@@ -376,13 +493,17 @@ def start(store, port=0, *, refresh_view=False):
             _refresh_asset(store, asset)
         meta = _read_meta(store)
         health = _health(store, meta) if meta is not None else None
-        if _context_matches(health, expected):
+        state = (DisplayJournal(store.root) if refresh_view else store).load()
+        managed = resources.enabled(state)
+        if _context_matches(health, expected) and (not managed or _reuse_service(store, meta)):
             return _public_info(meta, health, expected)
         if health is not None and not _stop_locked(store, meta)["stopped"]:
             raise Invalid("Старый dashboard не подтвердил остановку; новый экземпляр не запущен")
         requested = port or (meta["port"] if meta else _last_port(store)) or 0
         try:
             return _spawn(store, requested, expected)
+        except resources.CapacityRefused:
+            raise
         except Invalid:
             if port != 0 or requested == 0 or _port_closed(requested):
                 raise
@@ -398,7 +519,8 @@ def _asset_bytes(store):
     return selected.read_bytes()
 
 
-def serve(store, *, port=0, instance=None, token=None, managed=False, announce=True, compatible_view=False):
+def serve(store, *, port=0, instance=None, token=None, managed=False, announce=True, compatible_view=False,
+          resource_lease=None):
     """Run the exact-path HTTP server until authenticated shutdown or signal."""
     if type(port) is not int or not 0 <= port < 65536:
         raise Invalid("Порт dashboard должен быть от 0 до 65535")
@@ -475,13 +597,21 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
                 self._send(404)
 
     with LoopbackServer((HOST, port), Handler) as server:
+        server.resource_lease = resource_lease
+        server.resource_heartbeat_at = time.monotonic() + 30
         if managed:
             metadata = {"marker": MARKER, "rootHash": root_hash, "instance": instance,
                         "token": token, "pid": os.getpid(), "port": server.server_port}
+            if resource_lease is not None:
+                metadata["resourceLease"] = resource_lease
+                _lease_binding(store, metadata)
             atomic_json(_path(store, META_NAME, create=True), metadata)
         if announce:
             print(_url(server.server_port), flush=True)
         server.serve_forever(poll_interval=.05)
+    if resource_lease is not None:
+        resources.finish(resource_lease["context"], resource_lease["leaseId"],
+                         handle=resource_lease["handle"], confirmed=True)
     return 0
 
 
@@ -497,7 +627,7 @@ def child_main():
         stage = "serve"
         serve(Journal(config["root"]), port=config["port"], instance=config["instance"],
               token=config["token"], managed=True, announce=False,
-              compatible_view=config.get("compatibleView", False))
+              compatible_view=config.get("compatibleView", False), resource_lease=config.get("resourceLease"))
     except (Invalid, OSError, ValueError, KeyError, TypeError) as exc:
         detail = "os-" + str(exc.errno) if isinstance(exc, OSError) else type(exc).__name__
         print("AISPA_DASHBOARD_START_ERROR:" + stage + "/" + detail, file=sys.stdout)

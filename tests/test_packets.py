@@ -11,6 +11,106 @@ from aispa_core.store import Journal, Invalid
 
 
 class PacketTests(unittest.TestCase):
+    def test_host_claude_complex_work_advises_opus_without_claiming_availability(self):
+        self.state.update(runtime="claude-code", policy={"managedExecution": True, "leanControl": True})
+        task = {"id": "T01", "title": "Replace the shared indexing algorithm", "dependsOn": [],
+                "risk": "high", "zones": ["search/index.py"], "requirements": [], "changeKind": "code"}
+        self.state["tasks"] = [task]
+        attempt = {"tier": "heavy", "reviewPolicy": "lean", "rounds": []}
+        route = packets.routing(self.state, task, "worker", attempt)
+        self.assertEqual(route.get("modelNeed"), "complex")
+        self.assertEqual(route["tier"], "strong")
+        self.assertEqual(route.get("hostModelPolicy"), {"runtime": "claude-code", "provider": "anthropic",
+            "preferredFamilies": ["opus"], "availability": "unknown"})
+        self.assertTrue(route["advisory"])
+        self.assertNotIn("actualModel", route)
+        self.assertEqual(route["reviewPolicy"], "lean")
+        self.assertEqual((route["minimumCriticRounds"], route["maximumCriticRounds"]), (1, 2))
+
+    def test_host_ordinary_model_need_is_independent_of_heavy_review_and_check_mode(self):
+        self.state.update(runtime="claude-code", policy={"managedExecution": True, "leanControl": True})
+        task = {"id": "T01", "title": "Add a search result label", "dependsOn": [], "risk": "normal",
+                "zones": ["search/label.py"], "requirements": [], "changeKind": "code"}
+        self.state["tasks"] = [task]
+        attempt = {"tier": "heavy", "reviewPolicy": "lean", "rounds": []}
+        for mode in ("fast", "balanced", "max"):
+            self.state["checkMode"] = mode
+            before = json.dumps({"state": self.state, "attempt": attempt}, sort_keys=True)
+            route = packets.routing(self.state, task, "worker", attempt)
+            with self.subTest(mode=mode):
+                self.assertEqual(route.get("modelNeed"), "ordinary")
+                self.assertEqual(route["tier"], "standard")
+                self.assertEqual(route.get("hostModelPolicy", {}).get("preferredFamilies"), ["sonnet"])
+                self.assertEqual(route["reviewPolicy"], "lean")
+                self.assertEqual((route["minimumCriticRounds"], route["maximumCriticRounds"]), (1, 2))
+                self.assertEqual(json.dumps({"state": self.state, "attempt": attempt}, sort_keys=True), before)
+
+    def test_host_mechanical_codex_work_uses_luna_advice_and_sensitive_meaning_overrides_it(self):
+        self.state.update(runtime="codex", policy={"managedExecution": True, "leanControl": True})
+        task = {"id": "T01", "title": "Normalize help formatting", "dependsOn": [], "risk": "low",
+                "zones": ["docs/help.md"], "requirements": [], "changeKind": "formatting"}
+        self.state["tasks"] = [task]
+        attempt = {"tier": "heavy", "reviewPolicy": "lean", "rounds": []}
+        route = packets.routing(self.state, task, "worker", attempt)
+        self.assertEqual(route.get("modelNeed"), "mechanical")
+        self.assertEqual(route.get("hostModelPolicy"), {"runtime": "codex", "provider": "openai",
+            "preferredFamilies": ["luna"], "availability": "unknown"})
+        self.assertEqual(route["reviewPolicy"], "lean")
+        task["title"] = "Document payment authorization rules"
+        sensitive = packets.routing(self.state, task, "worker", attempt)
+        self.assertEqual(sensitive.get("modelNeed"), "complex")
+        self.assertEqual(sensitive["tier"], "strong")
+        self.assertEqual(sensitive.get("hostModelPolicy", {}).get("preferredFamilies"), ["sol"])
+
+    def test_host_multi_provider_advice_does_not_infer_provider_or_available_model(self):
+        task = {"id": "T01", "title": "Replace the shared indexing algorithm", "dependsOn": [],
+                "risk": "high", "zones": ["search/index.py"], "requirements": [], "changeKind": "code"}
+        self.state["tasks"] = [task]
+        attempt = {"tier": "heavy", "reviewPolicy": "lean", "rounds": []}
+        for runtime in ("cursor", "openclaw", "antigravity"):
+            self.state.update(runtime=runtime, policy={"managedExecution": True, "leanControl": True})
+            route = packets.routing(self.state, task, "worker", attempt)
+            with self.subTest(runtime=runtime):
+                self.assertEqual(route.get("modelNeed"), "complex")
+                self.assertEqual(route.get("hostModelPolicy"), {"runtime": runtime, "provider": None,
+                    "preferredFamilies": [], "availability": "unknown"})
+                self.assertTrue(route["advisory"])
+                self.assertNotIn("requestedModel", route)
+                self.assertNotIn("actualModel", route)
+
+    def test_final_packet_has_blank_report_shape_and_run_relative_evidence_guide(self):
+        self.state["policy"] = {"managedExecution": True}
+        self.state["requirements"] = [{"id": "R01", "scope": "active", "kind": "requested",
+            "text": "Export", "brief": "B001", "quote": "Export", "core": True,
+            "acceptance": ["CSV result"]}]
+        with patch.object(packets, "document_context", return_value={}):
+            packet = packets.build(self.store, self.state, None, "acceptance")
+        template = packet.get("finalReportTemplate")
+        self.assertIsInstance(template, dict, "Known final report structure belongs in the addressed packet")
+        self.assertEqual(template["basis"], packet["basis"])
+        self.assertEqual(template["checks"][0]["status"], "")
+        self.assertEqual(template["checks"][0]["note"], "")
+        self.assertEqual(packet["evidenceGuide"]["pathBase"], "run-relative")
+        self.assertEqual(packet["evidenceGuide"]["types"]["procedure"], "string")
+        self.assertEqual(packet["evidenceGuide"]["types"]["observed"], "string")
+        self.assertIn("metadata", packet["evidenceGuide"]["emptyOutput"])
+        receipt = packets.write(self.store, packet)
+        restored = json.loads(Path(receipt["absolutePath"]).read_text(encoding="utf-8"))
+        self.assertIn("finalReportTemplate", restored)
+        self.assertIsNone(receipt["tokenCount"])
+
+    def test_compact_failure_retains_full_json_and_never_converts_quota_to_tokens(self):
+        from aispa_core import cli_output
+        output = {"ok": False, "run": self.state["run"], "receipt": {"code": "RESOURCE_CAPACITY"},
+                  "quota": {"weeklyPercent": 30}, "details": ["full diagnostic" * 200]}
+        compact = cli_output.compact(self.store, output)
+        self.assertFalse(compact["ok"])
+        from aispa_core.store import file_hash
+        self.assertEqual(file_hash(Path(compact["absolutePath"])), compact["sha256"])
+        self.assertEqual(json.loads(Path(compact["absolutePath"]).read_text()), output)
+        self.assertNotIn("tokens", compact)
+        self.assertNotIn("cost", compact)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Journal(self.temp.name)

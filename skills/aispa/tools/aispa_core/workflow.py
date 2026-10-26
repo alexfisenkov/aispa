@@ -11,7 +11,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
                         validate_plan, verified, task_basis, task_verified, task_closure)
 from .store import Invalid, timestamp
 from . import timing, phase_receipts, execution_obligations
-from . import autonomy, project_documents
+from . import autonomy, project_documents, preflight
 from .team import TaskPipeline, task_proof_valid
 from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent
 
@@ -46,7 +46,7 @@ class Workflow:
         from . import work_progress
         work_progress.sync(self.s, event, at)
         for task in self.s.get("tasks", []):
-            timing.sync_phase(task, at, self.s.get("status") == "running")
+            timing.sync_phase(task, at, self.s.get("status") == "running" and not timing.waiting(self.s))
         self.store.append(self.s, event)
         if self.s.get("projectContext", {}).get("initialized"):
             try:
@@ -120,6 +120,7 @@ class Workflow:
 
     def seal(self):
         self.running()
+        preflight.require_adopted(self.store, self.s, purpose="seal")
         project_documents.require_fresh_intent(self.store, self.s)
         require(self.s["briefs"] and active(self.s), "Нужны бриф и действующие требования")
         if self.s.get("policy", {}).get("sourceAccounting"):
@@ -341,6 +342,8 @@ class Workflow:
         require(note.strip() and not SECRET.search(note), "Нужно безопасное описание ожидаемого ответа")
         at = timestamp()
         timing.stop(self.s, at)
+        if preflight.enabled(self.s):
+            timing.begin_wait(self.s, "owner_question", at)
         self.s["waiting"] = {"kind": "owner_question", "note": note, "since": at}
         self.save("owner-answer-awaited", at)
         return self.s["waiting"]
@@ -354,8 +357,10 @@ class Workflow:
         artifact["id"] = "B%03d" % (len(self.s["briefs"]) + 1)
         self.s["briefs"].append(artifact)
         self.s["sealed"], self.s["stage"] = False, "brief"
-        self.s["waiting"] = None
         at = timestamp()
+        if preflight.enabled(self.s):
+            timing.end_wait(self.s, at)
+        self.s["waiting"] = None
         timing.start(self.s, at)
         self.save("owner-answer-received", at)
         return {"waiting": None, "brief": artifact}
@@ -394,6 +399,10 @@ class Workflow:
 
     def verify(self, command, timeout, task_id=None):
         self.running()
+        managed = {}
+        if preflight.enabled(self.s):
+            from . import resources
+            managed["resource_context"] = resources.context(self.store, self.s)
         executions.validate_command(command)
         require(command and all(isinstance(x, str) for x in command), "Нужна команда проверки после --")
         require(isinstance(timeout, (int, float)) and not isinstance(timeout, bool)
@@ -418,7 +427,16 @@ class Workflow:
             environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
             raw, rc, timed_out, truncated, redacted = process_runner.run(
                 command, self.store.root, environment, timeout, max_output=1048576,
-                secret_pattern=SECRET, secrets=secrets)
+                secret_pattern=SECRET, secrets=secrets, **managed)
+        except Invalid as error:
+            from . import resources
+            if not isinstance(error, resources.CapacityRefused):
+                raise
+            self.s.pop("activity", None)
+            timing.begin_wait(self.s, "resource_wait", timestamp())
+            self.s["waiting"].update(note=str(error), resourceKind=error.kind)
+            self.save("resource-capacity-awaited")
+            raise
         except OSError:
             self.s.pop("activity", None)
             self.save("verification-could-not-start")
@@ -610,19 +628,44 @@ class Workflow:
         require(status in ("paused", "blocked", "cancelled"), "Неизвестная причина остановки")
         require(bool(note.strip()), "Нужна причина остановки")
         at = timestamp()
+        if preflight.enabled(self.s) and status != "cancelled":
+            timing.begin_wait(self.s, "blocked" if status == "blocked" else "paused", at)
+        elif preflight.enabled(self.s) and timing.waiting(self.s):
+            timing.stop(self.s.get("waitTiming", {}).get(self.s["waiting"]["kind"], {}), at, completed=True)
         timing.stop(self.s, at)
         for task in self.s["tasks"]:
             timing.stop(task, at)
         self.s.pop("activity", None)
-        self.s["status"], self.s["waiting"] = status, note
+        self.s["status"] = status
+        if preflight.enabled(self.s):
+            if status == "cancelled":
+                self.s["waiting"] = {"kind": "cancelled", "note": note, "at": at}
+                timing.stop(self.s, at, completed=True)
+            else:
+                self.s["waiting"]["note"] = note
+        else:
+            self.s["waiting"] = note
         self.save("run-" + status, at)
 
-    def resume(self):
+    def resume(self, host=None, expected_basis=None):
         require(not self.s.get("journalRecovery", {}).get("pending"),
                 "После восстановления сначала journal-verify и journal-reconcile")
-        require(self.s["status"] != "running", "Прогон уже выполняется")
-        self.s["status"], self.s["waiting"] = "running", None
+        if preflight.enabled(self.s):
+            require(self.s["status"] in ("running", "paused", "blocked"), "Preflight: terminal run cannot resume")
+            previous_session = self.s.get("hostSession")
+            report = preflight.adopt(self, host, expected_basis=expected_basis, save=False)
+            if self.s["status"] == "running":
+                self.s.setdefault("continuations", []).append({"previousSession": previous_session,
+                    "session": self.s["hostSession"], "source": host["source"], "basis": report["basis"], "at": timestamp()})
+                self.save("run-continued")
+                return report
+        else:
+            require(self.s["status"] != "running", "Прогон уже выполняется")
+        self.s["status"] = "running"
         at = timestamp()
+        if preflight.enabled(self.s):
+            timing.end_wait(self.s, at)
+        self.s["waiting"] = None
         timing.start(self.s, at)
         for task in self.s["tasks"]:
             if task["status"] == "running":

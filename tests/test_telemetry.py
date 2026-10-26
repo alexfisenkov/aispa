@@ -10,6 +10,37 @@ from aispa_core.store import Journal, Invalid, digest
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_per_call_phase_bindings_preserve_totals_and_unknown_coverage_gaps(self):
+        self.state["policy"] = {"managedExecution": True}
+        actor = self.register()
+        for call, phase in (("phase-call-1", "idea"), ("phase-call-2", "spec"), ("unattributed-call", None)):
+            value = {"actor": actor, "callId": call, "source": "native fixture",
+                     "inputTokens": 10, "outputTokens": 3, "cachedInputTokens": 2}
+            if phase:
+                binding = {"actor": actor, "callId": call, "phase": phase, "run": self.state["run"],
+                           "session": "session-1"}
+                value["attribution"] = {**binding, "source": self.store.artifact("phase-usage",
+                    json.dumps(binding).encode(), ".json")}
+            telemetry.record(self.store, self.state, value)
+        report = telemetry.summary(self.store, self.state)
+        self.assertEqual(set(report.get("byPhase", {})), {"idea", "spec", "unknown"})
+        self.assertEqual(sum(row["inputTokens"] for row in report["byPhase"].values()), report["inputTokens"])
+        self.assertEqual(report["coverage"]["unattributedCalls"], 1)
+        self.assertFalse(report["complete"])
+        self.assertNotIn("cost", report)
+
+    def test_wrong_session_or_source_phase_attribution_fails_before_record(self):
+        self.state["policy"] = {"managedExecution": True}
+        actor = self.register()
+        binding = {"actor": actor, "callId": "phase-call", "phase": "spec", "run": self.state["run"],
+                   "session": "wrong-session"}
+        value = {"actor": actor, "callId": "phase-call", "source": "native fixture",
+                 "inputTokens": 10, "outputTokens": 3, "cachedInputTokens": 2,
+                 "attribution": {**binding, "source": self.store.artifact("phase-usage", json.dumps(binding).encode(), ".json")}}
+        with self.assertRaises(Invalid):
+            telemetry.record(self.store, self.state, value)
+        self.assertEqual(self.state.get("usage", []), [])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = Journal(self.temp.name)

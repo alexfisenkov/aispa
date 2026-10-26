@@ -30,6 +30,7 @@ def parsers(sub):
     p.add_argument("--role", required=True, choices=sorted(participants.ROLES - participants.TASK_ROLES - {"knowledge-writer"}))
     p.add_argument("--runtime", required=True, choices=RUNTIMES)
     p.add_argument("--native-id", required=True); p.add_argument("--session", required=True); p.add_argument("--model")
+    p.add_argument("--reasoning"); p.add_argument("--model-evidence")
     u = sub.add_parser("usage-import")
     u.add_argument("--file", required=True); u.add_argument("--format", required=True, choices=("claude", "codex"))
     u.add_argument("--participant")
@@ -99,7 +100,8 @@ def execute(store, state, flow, args):
         if args.role != "recovery-reviewer":
             flow.running()
         value = {"actor": participants.register(store, state, args.role, args.runtime, args.native_id,
-                                                args.session, model=args.model)}
+                                                args.session, model=args.model, reasoning=args.reasoning,
+                                                model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)}
         flow.save("participant-assigned:" + args.role)
         return value
     if action == "usage-import":

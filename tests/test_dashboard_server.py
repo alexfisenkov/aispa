@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools
 from aispa_core import dashboard_server as dashboard
 from aispa_core.dashboard_reader import DisplayJournal, SUPPORTED_VERSIONS
 from aispa_core.store import Invalid, Journal, atomic_json
+from test_preflight import optional_module
 
 
 @contextmanager
@@ -48,6 +49,49 @@ def ready_status(url, *, timeout=10):
 
 
 class DashboardServerTests(unittest.TestCase):
+    def test_managed_first_dashboard_service_bootstraps_before_native_session_without_claiming_browser(self):
+        resources = optional_module("resources")
+        self.assertIsNotNone(resources)
+        self.state["policy"] = {"managedExecution": True}
+        self.store.append(self.state, "new-init-service-fixture")
+        first, second = dashboard.start(self.store), dashboard.start(self.store)
+        self.assertEqual(first["instance"], second["instance"])
+        loaded = self.store.load()
+        self.assertNotIn("hostSession", loaded)
+        self.assertNotIn("browserOpened", first)
+        self.assertTrue(dashboard.stop(self.store)["stopped"])
+
+    def test_managed_service_budget_precedes_spawn_and_reuse_has_one_lease(self):
+        resources = optional_module("resources")
+        self.assertIsNotNone(resources, "The dashboard daemon must have a separate managed service lease")
+        self.state.update(policy={"managedExecution": True}, hostSession="dashboard-session")
+        resources.configure(self.store, self.state, {"schema": 1, "scope": "project", "limits":
+            {"agents": 1, "browsers": 1, "testProcesses": 1, "services": 1}})
+        self.store.append(self.state, "managed-service-fixture")
+        ctx = resources.context(self.store, self.state)
+        held = resources.reserve(ctx, "services")
+        with patch.object(dashboard.subprocess, "Popen") as spawn, self.assertRaises(Invalid):
+            dashboard.start(self.store)
+        spawn.assert_not_called()
+        resources.finish(ctx, held["id"], outcome="launch_failed", confirmed=True)
+        first, second = dashboard.start(self.store), dashboard.start(self.store)
+        self.assertEqual(first["instance"], second["instance"])
+        with self.assertRaises(Invalid):
+            resources.reserve(ctx, "services")
+        self.assertTrue(dashboard.stop(self.store)["stopped"])
+        self.assertTrue(resources.reserve(ctx, "services")["id"])
+        self.assertTrue(resources.reserve(ctx, "browsers")["id"], "Service is not a browser reservation")
+
+    def test_managed_service_launch_failure_releases_reservation(self):
+        resources = optional_module("resources")
+        self.assertIsNotNone(resources)
+        self.state.update(policy={"managedExecution": True}, hostSession="dashboard-session")
+        self.store.append(self.state, "managed-service-fixture")
+        ctx = resources.context(self.store, self.state)
+        with patch.object(dashboard.subprocess, "Popen", side_effect=OSError("Synthetic launch failure")), self.assertRaises(OSError):
+            dashboard.start(self.store)
+        self.assertTrue(resources.reserve(ctx, "services")["id"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa dashboard 🧪 ")
         self.store = Journal(self.temp.name)

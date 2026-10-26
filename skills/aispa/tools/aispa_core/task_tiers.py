@@ -117,6 +117,39 @@ def strong_model_path(name):
                 or STRONG_FILE.search(name) or STRONG_DATA.search(name))
 
 
+SENSITIVE_MEANING = re.compile(r"financial|finance|payment|invoice|billing|account permissions|"
+    r"authentication|authorization|access control|credentials|secrets|personal data|PII|"
+    r"финанс|платеж|платёж|оплат|авторизац|аутентификац|права доступа|персональн|секрет", re.I)
+
+
+def sensitive_task(state, task=None):
+    """Use task/requirement meaning and known zones, never incidental source quotes."""
+    if task is not None and any(strong_model_path(path) for path in task.get("zones", [])):
+        return True
+    selected = set(task.get("requirements", [])) if task is not None else None
+    reqs = [r for r in state.get("requirements", []) if r.get("scope", "active") == "active"
+            and (selected is None or r.get("id") in selected)]
+    texts = ([task.get("title", "")] if task else [])
+    for req in reqs:
+        texts.extend([req.get("text", ""), *req.get("acceptance", [])])
+        if req.get("sensitive") is True or req.get("sensitiveAreas"):
+            return True
+    return any(SENSITIVE_MEANING.search(text) for text in texts if isinstance(text, str))
+
+
+def model_need(state, task, attempt=None):
+    """Model advice follows the work; review tiers and check modes stay separate."""
+    shared = any(task["id"] in other.get("dependsOn", []) for other in state.get("tasks", []))
+    if (sensitive_task(state, task) or task.get("risk") == "high" or shared
+            or (attempt or {}).get("authorization") or (attempt or {}).get("repairPlan")):
+        return "complex"
+    kind, zones = task.get("changeKind"), task.get("zones", [])
+    if (task.get("risk") == "low" and kind in KINDS and zones
+            and all(safe_zone(zone, kind) for zone in zones)):
+        return "mechanical"
+    return "ordinary"
+
+
 def standard_zone(zone):
     name = canonical_zone(zone)
     return name not in ("", ".") and not any(c in name for c in "*?[]") and not sensitive_path(name)

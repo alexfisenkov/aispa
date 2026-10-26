@@ -56,7 +56,7 @@ def _record(state):
 
 
 def _waiting(state):
-    return isinstance(state.get("waiting"), dict) and state["waiting"].get("kind") == "owner_question"
+    return timing.waiting(state)
 
 
 def begin(state, phase, at):

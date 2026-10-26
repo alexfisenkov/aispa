@@ -9,9 +9,29 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import recovery
 from aispa_core.store import Invalid, Journal, digest, timestamp
+from test_preflight import optional_module
 
 
 class RecoveryWorkflowTests(unittest.TestCase):
+    def test_managed_paused_verification_is_budgeted_without_clearing_recovery(self):
+        resources = optional_module("resources")
+        self.assertIsNotNone(resources, "Paused recovery is still a managed test-process caller")
+        self.state.update(policy={"managedExecution": True}, hostSession="recovery-session")
+        resources.configure(self.store, self.state, {"schema": 1, "scope": "project", "limits":
+            {"agents": 1, "browsers": 1, "testProcesses": 1, "services": 1}})
+        self.store.append(self.state, 'managed-recovery-fixture')
+        ctx = resources.context(self.store, self.state, allow_paused=True)
+        lease = resources.reserve(ctx, "testProcesses")
+        with patch.object(recovery.process_runner, "_start") as start, self.assertRaises(Invalid):
+            self.check()
+        start.assert_not_called()
+        self.assertTrue(self.state["journalRecovery"]["pending"])
+        self.assertEqual(self.state["status"], "paused")
+        resources.finish(ctx, lease["id"], outcome="launch_failed", confirmed=True)
+        self.assertEqual(self.check()["exitCode"], 0)
+        self.assertTrue(self.state["journalRecovery"]["pending"])
+        self.assertEqual(self.state["status"], "paused")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-recovery-flow-🙂-")
         self.root = Path(self.temp.name).resolve()
