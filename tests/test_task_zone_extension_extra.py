@@ -1,6 +1,7 @@
 """Extra maintenance attempt: isolated fixtures, synthetic roles, real commands."""
 import copy
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -318,8 +319,12 @@ class ExtraAttemptTests(unittest.TestCase):
             self.assertTrue(test_intent.history_valid(f.store, f.state, "T01"))
 
     def test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly(self):
-        for name, exists in [("Makefile", True), ("Dockerfile", False), ("LICENSE", True),
-                             ("routes/[slug].tsx", True), ("routes/[future].tsx", False)]:
+        # Zone identity normalizes Windows case; the actual file spelling and
+        # bytes below must remain unchanged on every host.
+        for name, exists, windows_name in [("Makefile", True, "makefile"),
+                ("Dockerfile", False, "dockerfile"), ("LICENSE", True, "license"),
+                ("routes/[slug].tsx", True, "routes/[slug].tsx"),
+                ("routes/[future].tsx", False, "routes/[future].tsx")]:
             with self.subTest(path=name, exists=exists):
                 f = self.fixture()
                 path = f.root / name
@@ -332,8 +337,9 @@ class ExtraAttemptTests(unittest.TestCase):
                           for p in f.root.rglob("*") if p.is_file()}
                 state = copy.deepcopy(f.state)
                 prepared = task_zone_extension.prepare(f.host, "T01", f.proposal([name]), actor=f.planner)
-                self.assertEqual(prepared["files"], [name])
-                self.assertEqual(prepared["plan"][0]["zones"], [*f.host.task("T01")["zones"], name])
+                expected_zone = windows_name if os.name == "nt" else name
+                self.assertEqual(prepared["files"], [expected_zone])
+                self.assertEqual(prepared["plan"][0]["zones"], [*f.host.task("T01")["zones"], expected_zone])
                 self.assertEqual(before, {p.relative_to(f.root).as_posix(): p.read_bytes()
                                          for p in f.root.rglob("*") if p.is_file()})
                 self.assertEqual(state, f.state)

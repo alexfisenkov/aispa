@@ -6,7 +6,7 @@ on:
         description: Verification scope (full suite, Windows full, runtime adapters or targeted regressions)
         type: choice
         default: full
-        options: [full, windows-full, runtimes, dashboard, snapshot, portability, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
+        options: [full, windows-full, runtimes, dashboard, snapshot, portability, zone-portability, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
 permissions:
   contents: read
 jobs:
@@ -103,6 +103,14 @@ jobs:
         env:
           PYTHONPATH: tests
         run: python -B -m unittest test_label_release_compat -v
+      - name: Portable literal zone identity and refusal boundaries
+        if: inputs.scope == 'zone-portability'
+        env:
+          PYTHONPATH: tests
+        run: >-
+          python -B -m unittest -v
+          test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly
+          test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_literal_paths_keep_secret_confined_wildcard_and_directory_guards
       - name: Release discovery, installation and portable guards
         if: inputs.scope == 'updates'
         env:
@@ -154,5 +162,5 @@ jobs:
         working-directory: examples/study-plan
         run: python -B -m unittest discover -s tests -v
       - name: Dashboard behavior tests
-        if: matrix.shard == 0 && inputs.scope != 'runtimes' && inputs.scope != 'updates' && matrix.python == '3.13'
+        if: matrix.shard == 0 && inputs.scope != 'runtimes' && inputs.scope != 'updates' && inputs.scope != 'zone-portability' && matrix.python == '3.13'
         run: node --test tests/dashboard.test.cjs
