@@ -19,12 +19,12 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from . import VERSION, resources
+from . import VERSION, resources, timing
 from .display import project
 from .dashboard_reader import DisplayJournal, SnapshotJournal
 from .dashboard_snapshot import SnapshotCoordinator, calculate
 from .portable import is_link
-from .store import Invalid, Journal, atomic_json, digest, file_hash
+from .store import Invalid, Journal, atomic_json, digest, file_hash, timestamp
 
 
 MARKER = "AISpa-dashboard-service-v1"
@@ -333,11 +333,19 @@ def stop(store):
         return _stop_locked(store, _read_meta(store))
 
 
-def _spawn(store, port, expected):
+def _spawn(store, port, expected, *, on_admitted=None):
     instance = secrets.token_hex(16)
     state = (DisplayJournal(store.root) if expected["readerMode"] == "compatible-view" else store).load()
     ctx = resources.context(store, state, owner="dashboard-service", service_instance=instance)
     lease = resources.reserve(ctx, "services") if ctx is not None else None
+    if lease is not None and on_admitted is not None:
+        try:
+            on_admitted("services")
+        except BaseException:
+            # Only our newly reserved, unbound service lease exists. An
+            # admission refusal must not start or stop any daemon.
+            resources.finish(ctx, lease["id"], outcome="launch_failed", confirmed=True)
+            raise
     token = secrets.token_urlsafe(48)
     config = {"root": str(store.root), "port": port, "instance": instance, "token": token,
               "compatibleView": expected["readerMode"] == "compatible-view"}
@@ -477,7 +485,7 @@ def _refresh_asset(store, asset):
         temp.unlink(missing_ok=True)
 
 
-def start(store, port=0, *, refresh_view=False):
+def start(store, port=0, *, refresh_view=False, on_admitted=None):
     """Start at most one managed dashboard for this project and reuse its port."""
     if type(port) is not int or not 0 <= port < 65536:
         raise Invalid("Порт dashboard должен быть от 0 до 65535")
@@ -488,6 +496,30 @@ def start(store, port=0, *, refresh_view=False):
     if refresh_view:
         reader = DisplayJournal(store.root)
         project(reader, reader.load())  # Validate projection before any asset/service mutation.
+    admission_failed = False
+
+    def admitted(kind):
+        nonlocal admission_failed
+        try:
+            if on_admitted is not None:
+                on_admitted(kind)
+            else:
+                # Unlike the verification callers, direct dashboard starts do
+                # not hold the journal lock. Keep this short and release it
+                # before Popen or any long-lived service operation.
+                with store.lock():
+                    current = store.load()
+                    if current["run"] != expected["run"]:
+                        raise Invalid("Dashboard: прогон изменился до admission")
+                    if timing.resource_admitted(current, kind, timestamp()):
+                        store.append(current, "resource-admitted:" + kind)
+        except BaseException:
+            admission_failed = True
+            raise
+
+    # Compatible viewing can mutate its own service files, never the journal
+    # or caller's waiting state, even if a journaling hook was supplied.
+    admission_hook = None if refresh_view else admitted
     with _lifecycle_lock(store):
         if refresh_view:
             _refresh_asset(store, asset)
@@ -496,19 +528,21 @@ def start(store, port=0, *, refresh_view=False):
         state = (DisplayJournal(store.root) if refresh_view else store).load()
         managed = resources.enabled(state)
         if _context_matches(health, expected) and (not managed or _reuse_service(store, meta)):
+            if managed and admission_hook is not None:
+                admission_hook("services")
             return _public_info(meta, health, expected)
         if health is not None and not _stop_locked(store, meta)["stopped"]:
             raise Invalid("Старый dashboard не подтвердил остановку; новый экземпляр не запущен")
         requested = port or (meta["port"] if meta else _last_port(store)) or 0
         try:
-            return _spawn(store, requested, expected)
+            return _spawn(store, requested, expected, on_admitted=admission_hook)
         except resources.CapacityRefused:
             raise
         except Invalid:
-            if port != 0 or requested == 0 or _port_closed(requested):
+            if admission_failed or port != 0 or requested == 0 or _port_closed(requested):
                 raise
             # The previous port may now be owned by an unrelated service.
-            return _spawn(store, 0, expected)
+            return _spawn(store, 0, expected, on_admitted=admission_hook)
 
 
 def _asset_bytes(store):

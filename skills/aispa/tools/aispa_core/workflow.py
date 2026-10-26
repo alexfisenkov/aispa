@@ -62,6 +62,14 @@ class Workflow:
             self.save("work-progress-began:" + phase, at)
         return work_progress.view(self.s, at)
 
+    def resource_admitted(self, kind, at=None):
+        """Caller holds the journal lock; persist admission before native work."""
+        at = at or timestamp()
+        if not timing.resource_admitted(self.s, kind, at):
+            return False
+        self.save("resource-admitted:" + kind, at)
+        return True
+
     def progress_end(self):
         from . import work_progress
         require(not self.s.get("journalRecovery", {}).get("pending"),
@@ -422,7 +430,15 @@ class Workflow:
         else:
             self.s["verification"] = None
         self.s["activity"] = {"kind": "verification", "task": task_id, "startedAt": timestamp()}
-        self.save("verification-started")
+        start_event = "verification-started"
+        self.save(start_event)
+        if managed:
+            def admitted_verification(kind):
+                if self.resource_admitted(kind):
+                    # Keep the strict start/completion event pair after the
+                    # admission event, including this activity's task payload.
+                    self.save(start_event)
+            managed["on_admitted"] = admitted_verification
         try:
             environment = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
             raw, rc, timed_out, truncated, redacted = process_runner.run(

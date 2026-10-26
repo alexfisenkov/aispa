@@ -44,6 +44,16 @@ def end_wait(state, at):
             start(state["workProgress"], at)
 
 
+def resource_admitted(state, kind, at):
+    """A slot release is not admission; close only this explicitly bound demand."""
+    pending = state.get("waiting")
+    if (not isinstance(pending, dict) or pending.get("kind") != "resource_wait"
+            or pending.get("resourceKind") != kind or kind is None):
+        return False
+    end_wait(state, at)
+    return True
+
+
 def summary(state, at):
     endpoint = state.get("finishedAt") or at
     return {"wallSeconds": difference(endpoint, state["startedAt"]) if state.get("startedAt") else None,

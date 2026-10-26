@@ -216,7 +216,8 @@ def _start(command, cwd, env):
         raise
 
 
-def run(command, cwd, env, timeout, *, max_output, secret_pattern, secrets, resource_context=None):
+def run(command, cwd, env, timeout, *, max_output, secret_pattern, secrets, resource_context=None,
+        on_admitted=None):
     """Return (output, exit_code, timed_out, truncated, redacted).
 
 The caller validates argv, timeout, environment and output limit. Output is
@@ -229,6 +230,14 @@ escapes. Windows covers descendants created normally via CreateProcess; jobs
 are lifetime management, not a security boundary against external services.
 """
     lease = resources.reserve(resource_context, "testProcesses") if resource_context is not None else None
+    if lease is not None and on_admitted is not None:
+        try:
+            on_admitted("testProcesses")
+        except BaseException:
+            # No process exists yet. In particular, a persistence OSError is
+            # not an executable-start failure and must reach the caller.
+            resources.finish(resource_context, lease["id"], outcome="launch_failed", confirmed=True)
+            raise
     bound, handle = False, None
     cleanup = {"confirmed": False, "uncertain": False}
     try:

@@ -72,9 +72,33 @@ def _attribution(store, state, row, actor):
     from . import work_progress, timing
     allowed = set(work_progress.PHASES) | set(timing.TASK_PHASES)
     require(value.get("phase") in allowed, "Usage: unknown phase")
-    if value.get("task") is not None or value.get("attempt") is not None:
-        history = state.get("taskHistory", {}).get(value.get("task"), [])
-        require(any(a.get("id") == value.get("attempt") for a in history), "Usage: чужая task/attempt attribution")
+    task_author = row["actor"] in state.get("actors", {})
+    if task_author:
+        # A self-consistent supplied source cannot move a sealed task author to
+        # another existing task/attempt. Historical authors keep their original
+        # tuple even after a replacement, replan or a newer authorized attempt.
+        require(isinstance(actor.get("task"), str) and actor["task"]
+                and isinstance(actor.get("attempt"), str) and actor["attempt"]
+                and value.get("task") == actor["task"] and value.get("attempt") == actor["attempt"],
+                "Usage: task/attempt attribution не принадлежит автору")
+    if task_author or value.get("task") is not None or value.get("attempt") is not None:
+        require(isinstance(value.get("task"), str) and value["task"]
+                and isinstance(value.get("attempt"), str) and value["attempt"],
+                "Usage: нужны task и attempt вместе")
+        history = state.get("taskHistory", {}).get(value["task"], [])
+        attempt = next((a for a in history if a.get("id") == value["attempt"]), None)
+        require(attempt is not None, "Usage: чужая task/attempt attribution")
+        if task_author:
+            from . import review_policy, task_tiers
+            role = actor.get("role")
+            phases = {"worker": {"implementation", "repair"}, "critic1": {"critic_1"},
+                      "critic2": {"critic_2"}, "acceptor": {"task_acceptance"}}.get(role, set())
+            # Completion authority belongs to this frozen attempt, not to the
+            # latest run policy or to a role label considered in isolation.
+            if (role == "worker" and task_tiers.worker_only(attempt)
+                    or role in ("critic1", "critic2") and review_policy.lean(attempt)):
+                phases.add("task_acceptance")
+            require(value["phase"] in phases, "Usage: phase не разрешена исторической ролью/попыткой автора")
     return value["phase"]
 
 

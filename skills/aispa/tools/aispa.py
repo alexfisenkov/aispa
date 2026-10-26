@@ -298,6 +298,13 @@ def resources_command(store, state, flow, args):
         try:
             if args.operation == "reserve":
                 receipt = resources.reserve(ctx, args.kind)
+                try:
+                    flow.resource_admitted(args.kind)
+                except BaseException:
+                    # No native launch is authorized until its admission event
+                    # is saved. Release only this still-unbound reservation.
+                    resources.finish(ctx, receipt["id"], outcome="launch_failed", confirmed=True)
+                    raise
                 if launch is not None:
                     receipt = {"lease": receipt, "launchPlan": launch}
             elif args.operation == "view":
@@ -365,7 +372,21 @@ def execute(args):
         return 0
     if args.action == "dashboard" and args.operation != "archive":
         if args.operation in ("start", "refresh-view"):
-            value = dashboard_server.start(store, port=args.port, refresh_view=args.operation == "refresh-view")
+            managed = {}
+            if args.operation == "start":
+                expected_run = store.load()["run"]
+
+                def admitted_service(kind):
+                    # Dashboard dispatch precedes the normal CLI journal lock.
+                    # Verification/clean/recovery callbacks already hold theirs.
+                    with store.lock():
+                        current = store.load()
+                        if current["run"] != expected_run:
+                            raise Invalid("Dashboard admission: active run изменился")
+                        return Workflow(store, current).resource_admitted(kind)
+
+                managed["on_admitted"] = admitted_service
+            value = dashboard_server.start(store, port=args.port, refresh_view=args.operation == "refresh-view", **managed)
             dashboard_state = store.load()
             value = {**value, "requiredHostActions": dashboard_host.open_request(value, managed=preflight.enabled(dashboard_state))}
         elif args.operation == "stop":
@@ -635,9 +656,16 @@ def execute(args):
             executions.validate_command(command)
             state.pop("cleanrun", None)
             state["activity"] = {"kind": "clean-verification", "startedAt": timestamp()}
-            flow.save("clean-verification-started")
+            start_event = "clean-verification-started"
+            flow.save(start_event)
+
+            def admitted_cleanrun(kind):
+                if flow.resource_admitted(kind):
+                    flow.save(start_event)
+
             try:
-                state["cleanrun"] = cleanroom.execute(store, state, command, args.timeout)
+                state["cleanrun"] = cleanroom.execute(store, state, command, args.timeout,
+                                                     on_admitted=admitted_cleanrun)
                 receipt = state["cleanrun"]
             finally:
                 state.pop("activity", None)

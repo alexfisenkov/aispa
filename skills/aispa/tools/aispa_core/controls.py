@@ -117,7 +117,7 @@ def execute(store, state, flow, args):
             return recovery.context(store, state)
         if action == "journal-verify":
             command = args.command[1:] if args.command[:1] == ["--"] else args.command
-            receipt = recovery.verify(store, state, command, args.timeout)
+            receipt = recovery.verify(store, state, command, args.timeout, on_admitted=flow.resource_admitted)
             state["journalRecovery"]["verification"] = receipt
             flow.save("recovery-verification-executed")
             return receipt

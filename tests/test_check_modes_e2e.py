@@ -545,5 +545,618 @@ class StartOrderTests(test_check_modes.ModeCase):
         self.assertEqual(order, ["proof", "guard"])
 
 
+ADMISSION_T0 = "2026-10-26T01:00:00+00:00"
+ADMISSION_T1 = "2026-10-26T01:01:00+00:00"
+ADMISSION_T2 = "2026-10-26T01:02:00+00:00"
+ADMISSION_T3 = "2026-10-26T01:02:30+00:00"
+
+
+def managed_admission_fixture(case, *, session="admission-session"):
+    """A real disposable journal/registry; no native model or browser fixture."""
+    import shutil
+    import aispa
+    from aispa_core import preflight
+    from aispa_core import resources
+    runtime = case.store.run / "runtime"
+    shutil.copytree(aispa.PACKAGE, runtime, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    case.state["runtimeDigest"] = aispa.runtime_digest()
+    case.assertEqual(preflight._package_digest(runtime), case.state["runtimeDigest"])
+    case.state.update(policy={"managedExecution": True}, runtime="codex",
+                      startedAt=ADMISSION_T0, elapsedSeconds=0.0)
+    if case.state["status"] == "running":
+        case.state["activeSince"] = ADMISSION_T0
+    else:
+        case.state.pop("activeSince", None)
+    if session is None:
+        case.state.pop("hostSession", None)
+    else:
+        case.state["hostSession"] = session
+    resources.configure(case.store, case.state, {"schema": 1, "scope": "project", "limits":
+        {"agents": 1, "browsers": 1, "testProcesses": 1, "services": 1}})
+    case.flow = workflow.Workflow(case.store, case.state)
+    case.flow.save("managed-admission-fixture", ADMISSION_T0)
+
+
+def recorded_resource_wait(case, kind="testProcesses", *, wait_kind="resource_wait"):
+    from aispa_core import timing
+    timing.begin_wait(case.state, wait_kind, ADMISSION_T1)
+    if kind is not None:
+        case.state["waiting"]["resourceKind"] = kind
+    case.flow.save("resource-wait-fixture", ADMISSION_T1)
+
+
+def admission_cli(case, *arguments, expected=0):
+    """The real CLI parser/controller/lock path, with output captured in-process."""
+    from contextlib import redirect_stdout
+    import io
+    import aispa
+    output = io.StringIO()
+    args = aispa.parser().parse_args(["--root", str(case.store.root), *arguments])
+    with redirect_stdout(output):
+        code = aispa.execute(args)
+    case.assertEqual(code, expected, output.getvalue())
+    return json.loads(output.getvalue())
+
+
+class ResourceAdmissionRepairTests(unittest.TestCase):
+    import test_workflow as _fixture
+    setUp = _fixture.WorkflowTests.setUp
+    tearDown = _fixture.WorkflowTests.tearDown
+    git = _fixture.WorkflowTests.git
+    commit = _fixture.WorkflowTests.commit
+
+    def test_verify_capacity_retry_resumes_saved_clock_before_child_start(self):
+        from aispa_core import process_runner, resources, timing
+        managed_admission_fixture(self)
+        ctx = resources.context(self.store, self.state)
+        held = resources.reserve(ctx, "testProcesses")
+        with mock.patch.object(workflow, "timestamp", return_value=ADMISSION_T1), \
+                mock.patch.object(process_runner, "_start") as blocked_start, \
+                self.assertRaises(resources.CapacityRefused):
+            self.flow.verify([sys.executable, "-c", "print('blocked')"], 5)
+        blocked_start.assert_not_called()
+        self.assertEqual(self.state["waiting"]["resourceKind"], "testProcesses")
+        resources.finish(ctx, held["id"], outcome="launch_failed", confirmed=True)
+        self.assertEqual(self.store.load()["waiting"]["since"], ADMISSION_T1,
+                         "Freeing a slot is not an admission and must not close the wait")
+        clock, starts = [ADMISSION_T2], []
+        original = process_runner._start
+
+        def starting(*args, **kwargs):
+            saved = self.store.load()
+            self.assertIsNone(saved.get("waiting"), "Successful admission must be saved BEFORE the child starts")
+            self.assertEqual(saved.get("activeSince"), ADMISSION_T2)
+            self.assertIsNone(saved["waitTiming"]["resource_wait"].get("activeSince"))
+            starts.append(True)
+            child = original(*args, **kwargs)
+            clock[0] = ADMISSION_T3
+            return child
+
+        with mock.patch.object(workflow, "timestamp", side_effect=lambda: clock[0]), \
+                mock.patch.object(process_runner, "_start", side_effect=starting):
+            self.assertTrue(self.flow.verify([sys.executable, "-c", "print('admitted')"], 5))
+        self.assertEqual(starts, [True])
+        measured = timing.summary(self.state, ADMISSION_T3)
+        self.assertEqual(measured["waitSeconds"]["resource_wait"], 60.0)
+        self.assertEqual(measured["activeSeconds"], 90.0,
+                         "The child execution interval belongs to active time, not resource_wait")
+
+    def test_successful_test_admission_preserves_unrelated_and_unscoped_waits(self):
+        from aispa_core import process_runner
+        managed_admission_fixture(self)
+        original = process_runner._start
+        for kind, wait_kind in (("browsers", "resource_wait"), (None, "resource_wait"),
+                                (None, "owner_wait")):
+            with self.subTest(resource=kind, wait=wait_kind):
+                recorded_resource_wait(self, kind, wait_kind=wait_kind)
+                waiting = copy.deepcopy(self.state["waiting"])
+
+                def starting(*args, **kwargs):
+                    self.assertEqual(self.state["waiting"], waiting)
+                    return original(*args, **kwargs)
+
+                with mock.patch.object(workflow, "timestamp", return_value=ADMISSION_T2), \
+                        mock.patch.object(process_runner, "_start", side_effect=starting):
+                    self.assertTrue(self.flow.verify([sys.executable, "-c", "print('other demand')"], 5))
+                self.assertEqual(self.store.load()["waiting"], waiting)
+
+    def test_cli_reserve_retry_ends_matching_wait_at_admission_only(self):
+        import aispa
+        from aispa_core import resources
+        managed_admission_fixture(self)
+        ctx = resources.context(self.store, self.state)
+        held = resources.reserve(ctx, "testProcesses")
+        with mock.patch.object(aispa, "timestamp", return_value=ADMISSION_T1), \
+                mock.patch.object(workflow, "timestamp", return_value=ADMISSION_T1):
+            refused = admission_cli(self, "resources", "reserve", "--kind", "testProcesses", expected=2)
+        self.assertEqual(refused["receipt"]["code"], "RESOURCE_CAPACITY")
+        resources.finish(ctx, held["id"], outcome="launch_failed", confirmed=True)
+        self.assertEqual(self.store.load()["waiting"]["kind"], "resource_wait")
+        with mock.patch.object(aispa, "timestamp", return_value=ADMISSION_T2), \
+                mock.patch.object(workflow, "timestamp", return_value=ADMISSION_T2):
+            admitted = admission_cli(self, "resources", "reserve", "--kind", "testProcesses")
+        saved = self.store.load()
+        self.assertIsNone(saved.get("waiting"), "CLI reserve success is the admission boundary")
+        self.assertEqual(saved.get("activeSince"), ADMISSION_T2)
+        resources.finish(ctx, admitted["receipt"]["id"], outcome="launch_failed", confirmed=True)
+
+    def test_admission_journal_failure_does_not_start_child_or_leak_lease(self):
+        from aispa_core import process_runner, resources
+        managed_admission_fixture(self)
+        recorded_resource_wait(self)
+        ctx = resources.context(self.store, self.state)
+        original_save, original_start = self.flow.save, process_runner._start
+
+        def fail_admission(event, at=None):
+            if event.startswith("resource-admitted:"):
+                raise RuntimeError("admission-save-failed")
+            return original_save(event, at)
+
+        with mock.patch.object(self.flow, "save", side_effect=fail_admission), \
+                mock.patch.object(process_runner, "_start", wraps=original_start) as start, \
+                self.assertRaisesRegex(RuntimeError, "admission-save-failed"):
+            self.flow.verify([sys.executable, "-c", "print('must not start')"], 5)
+        start.assert_not_called()
+        self.assertEqual(self.store.load()["waiting"]["kind"], "resource_wait")
+        reusable = resources.reserve(ctx, "testProcesses")
+        resources.finish(ctx, reusable["id"], outcome="launch_failed", confirmed=True)
+
+    def test_runner_admission_oserror_propagates_and_releases_only_new_lease(self):
+        import re
+        from aispa_core import process_runner, resources
+        managed_admission_fixture(self)
+        ctx = resources.context(self.store, self.state)
+        other = resources.reserve(ctx, "services")
+        calls = []
+
+        def refused(kind):
+            calls.append(kind)
+            raise OSError("admission-persistence-failed")
+
+        with mock.patch.object(process_runner, "_start") as start, \
+                self.assertRaisesRegex(OSError, "admission-persistence-failed"):
+            process_runner.run([sys.executable, "-c", "print('must not start')"], self.root,
+                os.environ.copy(), 5, max_output=1000, secret_pattern=re.compile(r"never-match-fixture"),
+                secrets=(), resource_context=ctx, on_admitted=refused)
+        start.assert_not_called()
+        self.assertEqual(calls, ["testProcesses"])
+        leases = resources.view(ctx)["leases"]
+        self.assertEqual(leases[other["id"]]["status"], "reserved")
+        reusable = resources.reserve(ctx, "testProcesses")
+        resources.finish(ctx, reusable["id"], outcome="launch_failed", confirmed=True)
+        resources.finish(ctx, other["id"], outcome="launch_failed", confirmed=True)
+
+
+class CleanAdmissionRepairTests(unittest.TestCase):
+    import test_cleanroom as _fixture
+    setUp = _fixture.CleanroomTests.setUp
+    tearDown = _fixture.CleanroomTests.tearDown
+    git = _fixture.CleanroomTests.git
+    commit = _fixture.CleanroomTests.commit
+    prepare = _fixture.CleanroomTests.prepare
+    execute = _fixture.CleanroomTests.execute
+
+    def test_cleanrun_ends_matching_wait_before_real_clone_child(self):
+        from aispa_core import cleanroom, process_runner
+        clone = self.prepare()
+        managed_admission_fixture(self)
+        recorded_resource_wait(self)
+        original, started = process_runner._start, []
+
+        def starting(*args, **kwargs):
+            self.assertIsNone(self.state.get("waiting"), "Clean-run must leave resource_wait before clone execution")
+            self.assertEqual(self.state.get("activeSince"), ADMISSION_T2)
+            self.assertEqual(Path(args[1]), clone)
+            started.append(True)
+            return original(*args, **kwargs)
+
+        with mock.patch.object(cleanroom, "timestamp", return_value=ADMISSION_T2), \
+                mock.patch.object(process_runner, "_start", side_effect=starting):
+            self.assertEqual(self.execute()["exitCode"], 0)
+        self.assertEqual(started, [True])
+        self.store.append(self.state, "clean-verification-recorded")
+        self.assertIsNone(self.store.load()["waiting"])
+
+
+class RecoveryAdmissionRepairTests(unittest.TestCase):
+    import test_recovery_workflow as _fixture
+    setUp = _fixture.RecoveryWorkflowTests.setUp
+    tearDown = _fixture.RecoveryWorkflowTests.tearDown
+
+    def test_recovery_cli_admission_keeps_paused_anchor_and_closes_wait_before_child(self):
+        from aispa_core import process_runner, recovery
+        managed_admission_fixture(self)
+        recorded_resource_wait(self)
+        core = {k: self.state["journalRecovery"][k] for k in recovery.CORE_FIELDS}
+        original, before_child = process_runner._start, []
+
+        def starting(*args, **kwargs):
+            saved = self.store.load()
+            self.assertIsNone(saved.get("waiting"), "Recovery admission is recorded before executing the child")
+            self.assertEqual(saved["status"], "paused")
+            self.assertTrue(saved["journalRecovery"]["pending"])
+            self.assertIsNone(saved.get("activeSince"), "Admission must not resume a paused recovery")
+            before_child.append(self.store.read_journal()["last"]["hash"])
+            return original(*args, **kwargs)
+
+        with mock.patch.object(workflow, "timestamp", return_value=ADMISSION_T2), \
+                mock.patch.object(recovery, "timestamp", return_value=ADMISSION_T2), \
+                mock.patch.object(process_runner, "_start", side_effect=starting):
+            admission_cli(self, "journal-verify", "--timeout", "5", "--", sys.executable, "-c", "print('recovery')")
+        saved = self.store.load()
+        self.assertEqual(saved["status"], "paused")
+        self.assertTrue(saved["journalRecovery"]["pending"])
+        self.assertEqual({k: saved["journalRecovery"][k] for k in recovery.CORE_FIELDS}, core)
+        receipt = saved["journalRecovery"]["verification"]
+        self.assertEqual(before_child, [receipt["journalAtStart"]])
+        self.assertEqual(receipt["exitCode"], 0)
+        self.assertTrue(recovery.context(self.store, saved)["verification"], "The immediate-predecessor anchor must remain valid")
+
+
+class ServiceAdmissionRepairTests(unittest.TestCase):
+    import test_dashboard_server as _fixture
+    setUp = _fixture.DashboardServerTests.setUp
+    tearDown = _fixture.DashboardServerTests.tearDown
+
+    def test_owned_service_admission_and_reuse_end_wait_without_native_session(self):
+        from aispa_core import dashboard_server as dashboard
+        managed_admission_fixture(self, session=None)
+        recorded_resource_wait(self, "services")
+        original, starts = subprocess.Popen, []
+
+        def spawning(*args, **kwargs):
+            if "aispa_core.dashboard_server" in args[0]:
+                saved = self.store.load()
+                self.assertIsNone(saved.get("waiting"), "Service admission precedes daemon Popen")
+                self.assertEqual(saved.get("activeSince"), ADMISSION_T2)
+                self.assertNotIn("hostSession", saved)
+                starts.append(True)
+            return original(*args, **kwargs)
+
+        with mock.patch.object(dashboard, "timestamp", return_value=ADMISSION_T2, create=True), \
+                mock.patch.object(workflow, "timestamp", return_value=ADMISSION_T2), \
+                mock.patch.object(dashboard.subprocess, "Popen", side_effect=spawning):
+            first = dashboard.start(self.store)
+            self.state = self.store.load()
+            self.flow = workflow.Workflow(self.store, self.state)
+            recorded_resource_wait(self, "services")
+            second = dashboard.start(self.store)
+        self.assertEqual(first["instance"], second["instance"])
+        self.assertEqual(starts, [True], "Owned live service reuse must not reserve or spawn another daemon")
+        self.assertIsNone(self.store.load().get("waiting"))
+
+    def test_refresh_view_does_not_modify_wait_or_canonical_journal(self):
+        from aispa_core import dashboard_server as dashboard
+        managed_admission_fixture(self, session=None)
+        dashboard.start(self.store)
+        self.state = self.store.load()
+        self.flow = workflow.Workflow(self.store, self.state)
+        recorded_resource_wait(self, "services")
+        path = self.store.run / "events.jsonl"
+        before, waiting = path.read_bytes(), copy.deepcopy(self.state["waiting"])
+        journaling_hook = mock.Mock(side_effect=AssertionError("Refresh-view must not invoke a journaling hook"))
+        dashboard.start(self.store, refresh_view=True, on_admitted=journaling_hook)
+        journaling_hook.assert_not_called()
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.store.load()["waiting"], waiting)
+
+    def test_service_admission_invalid_is_not_retried_as_a_port_fallback(self):
+        from aispa_core import dashboard_server as dashboard, resources
+        from aispa_core.store import Invalid
+        managed_admission_fixture(self, session=None)
+        calls = []
+
+        def refused(kind):
+            calls.append(kind)
+            raise Invalid("admission-refused")
+
+        original = subprocess.Popen
+        starts = []
+
+        def spawning(*args, **kwargs):
+            if "aispa_core.dashboard_server" in args[0]:
+                starts.append(True)
+            return original(*args, **kwargs)
+
+        with mock.patch.object(dashboard, "_last_port", return_value=12345), \
+                mock.patch.object(dashboard, "_port_closed", return_value=False), \
+                mock.patch.object(dashboard.subprocess, "Popen", side_effect=spawning), \
+                self.assertRaisesRegex(Invalid, "admission-refused"):
+            dashboard.start(self.store, on_admitted=refused)
+        self.assertEqual(calls, ["services"], "Callback refusal must bypass the legacy Invalid port-retry handler")
+        self.assertEqual(starts, [])
+        ctx = resources.context(self.store, self.state, owner="dashboard-service", service_instance="probe-after-refusal")
+        reusable = resources.reserve(ctx, "services")
+        resources.finish(ctx, reusable["id"], outcome="launch_failed", confirmed=True)
+
+    def test_reuse_callback_failure_preserves_the_owned_running_service_and_lease(self):
+        from aispa_core import dashboard_server as dashboard, resources
+        from aispa_core.store import Invalid
+        managed_admission_fixture(self, session=None)
+        first = dashboard.start(self.store)
+        before = self.store.load()
+        ctx = resources.context(self.store, before, owner="dashboard-service", service_instance=first["instance"])
+        leases = resources.view(ctx)["leases"]
+        running = {key for key, lease in leases.items() if lease["status"] == "running"}
+        self.assertEqual(len(running), 1)
+        refused = mock.Mock(side_effect=Invalid("reuse-admission-refused"))
+        with self.assertRaisesRegex(Invalid, "reuse-admission-refused"):
+            dashboard.start(self.store, on_admitted=refused)
+        refused.assert_called_once_with("services")
+        observed = dashboard.inspect(self.store)
+        self.assertTrue(observed["running"])
+        self.assertEqual(observed["instance"], first["instance"])
+        after = resources.view(ctx)["leases"]
+        self.assertTrue(all(after[key]["status"] == "running" for key in running))
+
+
+class UsageAttributionRepairTests(unittest.TestCase):
+    import test_team as _fixture
+    setUp = _fixture.TeamTests.setUp
+    tearDown = _fixture.TeamTests.tearDown
+    task = _fixture.TeamTests.task
+    attempt = _fixture.TeamTests.attempt
+
+    def author(self):
+        self.state["policy"] = {"managedExecution": True}
+        return self.team.assign("T01", "worker", "codex", "usage-task-worker", "usage-task-session")
+
+    def later_attempt(self):
+        quote = "Synthetic fixture owner authorizes one later T01 attempt."
+        source = self.store.artifact("briefs", (quote + "\n").encode(), ".md")
+        self.state["briefs"].append({**source, "id": "B002"})
+        self.team.new_attempt("T01", "B002", quote)
+        self.team.prepare()
+        return self.attempt("T01")["id"]
+
+    def value(self, actor, call, phase, *, task=None, attempt=None):
+        from aispa_core import participants
+        author = participants.resolve(self.store, self.state, actor)
+        binding = {"actor": actor, "callId": call, "phase": phase, "run": self.state["run"],
+                   "session": author["session"]}
+        if task is not None:
+            binding["task"] = task
+        if attempt is not None:
+            binding["attempt"] = attempt
+        return {"actor": actor, "callId": call, "source": "explicit measured protocol fixture",
+                "inputTokens": 10, "outputTokens": 2, "cachedInputTokens": 0,
+                "attribution": {**binding, "source": self.store.artifact("phase-usage",
+                    json.dumps(binding).encode(), ".json")}}
+
+    def test_task_author_rejects_foreign_task_attempt_and_missing_scope_before_append(self):
+        from aispa_core import telemetry
+        from aispa_core.store import Invalid
+        actor = self.author()
+        own = self.attempt("T01")["id"]
+        foreign = self.attempt("T02")["id"]
+        later = self.later_attempt()
+        for call, task, attempt in (("foreign-task", "T02", foreign), ("foreign-attempt", "T01", later),
+                                    ("missing-scope", None, None)):
+            with self.subTest(call=call):
+                before = copy.deepcopy(self.state.get("usage", []))
+                # Same phase as the author's role: rejecting a role label alone cannot fix these cases.
+                value = self.value(actor, call, "implementation", task=task, attempt=attempt)
+                with self.assertRaises(Invalid):
+                    telemetry.record(self.store, self.state, value)
+                self.assertEqual(self.state.get("usage", []), before)
+        self.assertNotEqual(own, later)
+
+    def test_historical_author_general_and_knowledge_sources_keep_valid_phase_totals(self):
+        from aispa_core import knowledge, participants, telemetry
+        actor = self.author()
+        own = self.attempt("T01")["id"]
+        original = copy.deepcopy(self.state["actors"][actor])
+        self.later_attempt()
+        current = self.team.assign("T01", "worker", "codex", "usage-new-worker", "usage-new-session")
+        coordinator = participants.register(self.store, self.state, "coordinator", "codex", "usage-general", "usage-general-session")
+        author = knowledge.assign(self.store, self.state, "codex", "usage-knowledge", "usage-knowledge-session")
+        values = [self.value(actor, "historical", "repair", task="T01", attempt=own),
+                  self.value(current, "current", "implementation", task="T01", attempt=self.attempt("T01")["id"]),
+                  self.value(coordinator, "general", "idea"),
+                  self.value(coordinator, "general-scoped", "spec", task="T02", attempt=self.attempt("T02")["id"]),
+                  self.value(author["id"], "knowledge", "knowledge")]
+        for value in values:
+            telemetry.record(self.store, self.state, value)
+        report = telemetry.summary(self.store, self.state)
+        self.assertEqual(report["inputTokens"], 50)
+        self.assertEqual(sum(group["inputTokens"] for group in report["byPhase"].values()), 50)
+        self.assertEqual(set(report["byPhase"]), {"repair", "implementation", "idea", "spec", "knowledge"})
+        self.assertEqual(self.state["actors"][actor], original)
+        self.assertFalse(report["complete"])
+
+
+class TaskPhaseAttributionRepairTests(unittest.TestCase):
+    """Task phase authority comes from the exact historical attempt's contract."""
+    setUp = UsageAttributionRepairTests.setUp
+    tearDown = UsageAttributionRepairTests.tearDown
+    task = UsageAttributionRepairTests.task
+    attempt = UsageAttributionRepairTests.attempt
+    value = UsageAttributionRepairTests.value
+
+    def next_attempt(self, policy, *, worker_only=False):
+        self.state["policy"] = {"managedExecution": True, **policy}
+        task = self.state["tasks"][0]
+        if worker_only:
+            task.update(tier="standard", tierReason="Ordinary fixture module", changeKind="feature", risk="normal")
+        else:
+            for key in ("tier", "tierReason", "changeKind"):
+                task.pop(key, None)
+        number = len(self.state["briefs"]) + 1
+        bid = "B%03d" % number
+        quote = "Synthetic fixture owner authorizes historical phase attempt %d." % number
+        source = self.store.artifact("briefs", (quote + "\n").encode(), ".md")
+        self.state["briefs"].append({**source, "id": bid})
+        self.team.new_attempt("T01", bid, quote)
+        self.team.prepare()
+        return self.attempt("T01")["id"]
+
+    def test_own_worker_and_critics_cannot_attribute_another_role_or_round(self):
+        from aispa_core import telemetry
+        from aispa_core.store import Invalid
+        self.state["policy"] = {"managedExecution": True}
+        attempt = self.attempt()["id"]
+        for role, wrong_phase in (("worker", "critic_1"), ("critic1", "critic_2"), ("critic2", "critic_1")):
+            actor = self.team.assign("T01", role, "codex", "phase-" + role, "session-" + role)
+            with self.subTest(role=role, phase=wrong_phase):
+                before = copy.deepcopy(self.state.get("usage", []))
+                row = self.value(actor, "wrong-" + role, wrong_phase, task="T01", attempt=attempt)
+                with self.assertRaises(Invalid):
+                    telemetry.record(self.store, self.state, row)
+                self.assertEqual(self.state.get("usage", []), before)
+
+    def test_adaptive_worker_and_critic_need_the_separate_task_acceptor(self):
+        from aispa_core import telemetry
+        from aispa_core.store import Invalid
+        attempt = self.next_attempt({"adaptiveCritique": True})
+        for role in ("worker", "critic1"):
+            actor = self.team.assign("T01", role, "codex", "adaptive-" + role, "session-" + role)
+            with self.subTest(role=role):
+                before = copy.deepcopy(self.state.get("usage", []))
+                row = self.value(actor, "acceptance-" + role, "task_acceptance", task="T01", attempt=attempt)
+                with self.assertRaises(Invalid):
+                    telemetry.record(self.store, self.state, row)
+                self.assertEqual(self.state.get("usage", []), before)
+        acceptor = self.team.assign("T01", "acceptor", "codex", "adaptive-acceptor", "acceptor-session")
+        telemetry.record(self.store, self.state,
+                         self.value(acceptor, "separate-acceptance", "task_acceptance", task="T01", attempt=attempt))
+        self.assertEqual(telemetry.summary(self.store, self.state)["byPhase"]["task_acceptance"]["inputTokens"], 10)
+
+    def test_worker_only_acceptance_uses_historical_tier_instead_of_current_attempt(self):
+        from aispa_core import telemetry
+        from aispa_core.store import Invalid
+        old = self.next_attempt({"taskTiers": True, "adaptiveCritique": True, "leanControl": True}, worker_only=True)
+        worker = self.team.assign("T01", "worker", "codex", "standard-worker", "standard-session")
+        later = self.team.promote("T01", "Synthetic fixture promotes the later attempt to heavy")
+        self.assertEqual(self.attempt("T01")["id"], later)
+        self.assertEqual(self.attempt("T01")["tier"], "heavy")
+        current = self.team.assign("T01", "worker", "codex", "heavy-worker", "heavy-session")
+        telemetry.record(self.store, self.state,
+                         self.value(worker, "old-worker-acceptance", "task_acceptance", task="T01", attempt=old))
+        before = copy.deepcopy(self.state["usage"])
+        with self.assertRaises(Invalid):
+            telemetry.record(self.store, self.state,
+                             self.value(current, "heavy-worker-acceptance", "task_acceptance", task="T01", attempt=later))
+        self.assertEqual(self.state["usage"], before)
+
+    def test_task_actor_without_attribution_keeps_unknown_phase_and_totals(self):
+        from aispa_core import telemetry
+        self.state["policy"] = {"managedExecution": True}
+        actor = self.team.assign("T01", "worker", "codex", "unattributed-worker", "unattributed-session")
+        telemetry.record(self.store, self.state, {"actor": actor, "callId": "unknown-phase", "source": "native fixture",
+            "inputTokens": 10, "outputTokens": 2, "cachedInputTokens": 0})
+        report = telemetry.summary(self.store, self.state)
+        self.assertEqual(report["inputTokens"], 10)
+        self.assertEqual(set(report["byPhase"]), {"unknown"})
+        self.assertEqual(report["byPhase"]["unknown"]["inputTokens"], 10)
+        self.assertEqual(report["coverage"]["unattributedCalls"], 1)
+
+
+class LeanCombinedPhaseRepairTests(unittest.TestCase):
+    from test_lean_control import LeanReviewTests as _fixture
+    setUp = _fixture.setUp
+    tearDown = _fixture.tearDown
+    task = _fixture.task
+    attempt = _fixture.attempt
+    start = _fixture.start
+    verify = _fixture.verify
+    report = _fixture.report
+    input = _fixture.input
+    finding = _fixture.finding
+    first = _fixture.first
+    lean_fields = _fixture.lean_fields
+    repair = _fixture.repair
+    second_actor = _fixture.second_actor
+    value = UsageAttributionRepairTests.value
+    next_attempt = TaskPhaseAttributionRepairTests.next_attempt
+
+    def test_both_lean_critics_keep_combined_acceptance_in_their_historical_attempt(self):
+        from aispa_core import participants, telemetry
+        from aispa_core.store import Invalid
+        self.state["policy"]["managedExecution"] = True
+        self.team.prepare()
+        self.start()
+        old = self.attempt()["id"]
+        critic1 = self.attempt()["actors"]["critic1"]
+        self.assertFalse(self.first("WARN"))
+        self.repair()
+        self.second_actor()
+        critic2 = self.attempt()["actors"]["critic2"]
+        later = self.next_attempt({"adaptiveCritique": True})
+        adaptive = self.team.assign("T01", "critic1", "codex", "later-adaptive-critic", "later-session")
+        for actor in (critic1, critic2):
+            for phase in ("critic_1" if actor == critic1 else "critic_2", "task_acceptance"):
+                telemetry.record(self.store, self.state,
+                    self.value(actor, actor + "-" + phase, phase, task="T01", attempt=old))
+        coordinator = participants.register(self.store, self.state, "coordinator", "codex", "phase-general", "general-session")
+        telemetry.record(self.store, self.state, self.value(coordinator, "general-task-phase", "task_acceptance"))
+        report = telemetry.summary(self.store, self.state)
+        self.assertEqual(report["inputTokens"], 50)
+        self.assertEqual(report["byPhase"]["task_acceptance"]["inputTokens"], 30)
+        before = copy.deepcopy(self.state["usage"])
+        with self.assertRaises(Invalid):
+            telemetry.record(self.store, self.state,
+                self.value(adaptive, "adaptive-not-combined", "task_acceptance", task="T01", attempt=later))
+        self.assertEqual(self.state["usage"], before)
+
+
+class CliExecutionRegistrationRepairTests(unittest.TestCase):
+    """Admission events must preserve strict T03 execution-start provenance."""
+    setUp = CleanAdmissionRepairTests.setUp
+    tearDown = CleanAdmissionRepairTests.tearDown
+    git = CleanAdmissionRepairTests.git
+    commit = CleanAdmissionRepairTests.commit
+    prepare = CleanAdmissionRepairTests.prepare
+
+    def cli(self, *arguments, expected=0):
+        cli = self.store.run / "runtime/tools/aispa.py"
+        result = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.store.root), *arguments],
+                                capture_output=True, text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(result.returncode, expected, result.stderr + result.stdout)
+        return json.loads(result.stdout) if expected == 0 else result
+
+    def registered_execution(self, response, kind):
+        from aispa_core import executions
+        state = self.store.load()
+        ref = response["receipt"]["execution"] if kind == "cleanrun" else response["receipt"]
+        record = executions.resolve(self.store, state, ref)
+        self.assertEqual(record["kind"], kind)
+        self.assertTrue(record["successful"])
+        completed, started = self.store.event_pair(record["journal"]["sequence"])
+        expected = "clean-verification-started" if kind == "cleanrun" else "verification-started"
+        self.assertEqual(started["event"], expected)
+        self.assertEqual(started["sequence"] + 1, completed["sequence"])
+        self.assertIsNone(started["state"].get("waiting"))
+        self.assertTrue(started["state"].get("activeSince"))
+        history = self.store.read_journal(include_events=True)["events"]
+        admission = history[started["sequence"] - 2]
+        self.assertEqual(admission["event"], "resource-admitted:testProcesses")
+        self.assertGreaterEqual(sum(row["event"] == expected for row in history), 2,
+                                "The earlier intent/start remains in history; the adjacent start snapshot is refreshed")
+        return record
+
+    def test_cli_verify_retry_registers_execution_after_saved_admission(self):
+        from aispa_core import resources
+        managed_admission_fixture(self)
+        ctx = resources.context(self.store, self.state)
+        held = resources.reserve(ctx, "testProcesses")
+        refused = self.cli("verify", "--timeout", "5", "--", sys.executable, "-c", "print('blocked')", expected=2)
+        self.assertIn("RESOURCE_CAPACITY", refused.stderr)
+        resources.finish(ctx, held["id"], outcome="launch_failed", confirmed=True)
+        self.assertEqual(self.store.load()["waiting"]["resourceKind"], "testProcesses")
+        response = self.cli("verify", "--timeout", "5", "--", sys.executable, "-c", "print('CLI retry checked')")
+        self.assertTrue(response["ok"])
+        record = self.registered_execution(response, "project")
+        self.assertEqual(record["exitCode"], 0)
+
+    def test_cli_cleanrun_registration_keeps_adjacent_start_after_admission(self):
+        self.prepare()
+        managed_admission_fixture(self)
+        recorded_resource_wait(self)
+        response = self.cli("clean-verify", "--timeout", "5", "--", sys.executable, "-c", "print('CLI clean checked')")
+        self.assertTrue(response["ok"])
+        record = self.registered_execution(response, "cleanrun")
+        self.assertEqual(record["exitCode"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
