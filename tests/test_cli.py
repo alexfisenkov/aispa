@@ -375,6 +375,7 @@ class CliTests(unittest.TestCase):
                     trace=[{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
                             "note": "Сопоставлено с брифом", "artifact": ctx["verification"]["output"]["file"]} for r in ctx["traceRequirements"]])
             if kind == "acceptance":
+                report['productFlowReview'] = fixtures.final_flows(ctx, self.run, report['checks'])
                 report["cleanrun"] = (ctx.get("cleanrun") or {}).get("artifact", {}).get("sha256")
                 report["blindReport"] = ctx["blindReview"]["report"]["sha256"]
                 report["blindMapping"] = [{"observation": 0, "requirement": "R01"}]

@@ -6,7 +6,7 @@ Public rows contain labels and identifiers, not private evidence paths.
 import json
 
 from . import check_modes
-from .contracts import active, artifact_valid, basis, gate_valid, plan_basis, task_basis
+from .contracts import active, artifact_valid, basis, gate_current, plan_basis, task_basis
 from .store import Invalid
 from .team import _record_valid, proof_provenance
 
@@ -70,9 +70,8 @@ def aggregate(values):
 def gates(store, state, proven, current):
     """Separate a missing report, a failed current report, and stale evidence.
 
-    gate_valid normally exits early for non-PASS. A detached probe with only
-    that outcome bit set checks its existing freshness guards without changing
-    the journal or treating the actual outcome as successful.
+    gate_current checks report integrity and freshness while preserving its
+    negative outcome. It never authorizes a workflow transition.
     """
     details, reports = {}, {}
     requirements = active(state)
@@ -84,12 +83,20 @@ def gates(store, state, proven, current):
         if gate:
             try:
                 valid_basis = gate.get("basis") == basis(store, state, name)
-                probe = dict(state, gates={**state["gates"], name: {**gate, "passed": True}})
-                fresh = bool(valid_basis and (proven[name] or gate_valid(store, probe, name)))
+                fresh = bool(valid_basis and (proven[name] or gate_current(store, state, name)))
                 if name == "acceptance" and not all(current.values()):
                     fresh = False
                 report = _read_report(store, gate.get("report", {})) if fresh else None
                 fresh = fresh and report is not None
+                if fresh and name == 'acceptance' and state.get('policy', {}).get('criticalProductFlows') is True:
+                    from . import product_flows
+                    # This detached presentation reflects the domain outcome;
+                    # the immutable reviewer's original claim stays untouched.
+                    vetoes = {(f.get('requirement'), f.get('criterion')): f['status']
+                              for f in product_flows.saved_check(store, state)}
+                    report['checks'] = [dict(row, status=vetoes.get(
+                        (row.get('requirement'), row.get('criterion')), row.get('status')))
+                        for row in report.get('checks', [])]
             except (Invalid, OSError, ValueError, KeyError, TypeError):
                 fresh = False
             status = ("passed" if gate.get("passed") else "failed") if fresh else "stale"

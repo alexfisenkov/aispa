@@ -1,12 +1,15 @@
 """Bounded, candidate-bound observations. Hashes prove binding, not truth."""
 import copy
 import json
+import os
+import stat
 from urllib.parse import urlsplit
 
 from .contracts import artifact_valid, evidence_rows, require, task_basis, task_contract
 from .portable import relative_name
 from .store import Invalid, confined, file_hash
-from . import test_intent
+from .verified_reads import ResourceLimit
+from . import scale, test_intent
 
 MAX_OBSERVATION_BYTES = 256 * 1024
 MAX_ATTACHMENTS = 32
@@ -45,27 +48,132 @@ def _evidence_file(store, name):
     return path
 
 
-def _text(value):
-    require(isinstance(value, str) and bool(value.strip()) and len(value) <= 16000,
+def _text(value, *, scalable=False):
+    require(isinstance(value, str) and bool(value.strip()) and (scalable or len(value) <= 16000),
             'Mixed evidence: нужен ограниченный непустой текст наблюдения')
 
 
-def _observation(store, name, contract, intent_ref, basis, kind, criterion):
+def scalable_provenance(store, run):
+    """Use the verified pinned journal, never an installed policy or JSON flag."""
+    # The cursor is a detached, already authenticated journal snapshot. Read
+    # only its policy bit rather than copying the full state for every sealed
+    # role record in one projection. Snapshot completion checks live bytes.
+    cursor = store._verified if store._verified is not None else store._journal_cursor()
+    saved = cursor['last']['state']
+    require(saved.get('run') == run, 'Mixed evidence: чужой прогон наблюдения')
+    return scale.enabled(saved)
+
+
+def read_observation(store, name, *, scalable=False):
+    """Read complete confined JSON transport; the reference binds its outer bytes."""
     from .verified_reads import current_scope
     path = _evidence_file(store, name)
-    require(path.stat().st_size <= MAX_OBSERVATION_BYTES, 'Mixed evidence: слишком большой JSON')
+    if not scalable:
+        require(path.stat().st_size <= MAX_OBSERVATION_BYTES, 'Mixed evidence: слишком большой JSON')
     scope = current_scope()
     try:
-        if scope is not None:
-            raw = scope.artifact(path, None, literal=True, maximum=MAX_OBSERVATION_BYTES)
-            body = scope.json(raw)
-            _evidence_file(store, name)
-        else:
-            raw = path.read_bytes()
+        raw = (scope.artifact(path, None, allow_manifest=scalable,
+                             maximum=None if scalable else MAX_OBSERVATION_BYTES) if scope is not None else
+               scale.read_file(path, allow_manifest=scalable))
+        if not scalable:
             require(len(raw) <= MAX_OBSERVATION_BYTES, 'Mixed evidence: слишком большой JSON')
-            body = json.loads(raw.decode('utf-8'))
-    except (ValueError, UnicodeError) as exc:
+        body = scope.json(raw) if scope is not None else json.loads(raw.decode('utf-8'))
+        _evidence_file(store, name)
+    except Invalid:
+        # Invalid (including ResourceLimit) also subclasses ValueError. Keep
+        # transport/resource diagnostics distinct from JSON syntax failures.
+        raise
+    except (ValueError, UnicodeError, RecursionError) as exc:
         raise Invalid('Mixed evidence: нужен JSON наблюдения') from exc
+    return body, {'file': name, 'sha256': scope.sha256(path, raw) if scope is not None else file_hash(path)}
+
+
+def source_valid(source, kind, *, scalable=False):
+    fields = {'url', 'viewport'} if kind == 'browser' else {'reference', 'scope'}
+    require(isinstance(source, dict) and set(source) == fields, 'Mixed evidence: неверный источник наблюдения')
+    for value in source.values():
+        _text(value, scalable=scalable)
+    if kind == 'browser':
+        url = urlsplit(source['url'])
+        require(url.scheme in ('http', 'https') and bool(url.netloc), 'Mixed evidence: нужен URL браузера')
+
+
+def _transport_candidate(path, budget):
+    """Sniff JSON-object content without materializing opaque binary evidence.
+
+    The reserved marker is interpreted by scale.read_file, not by a filename
+    suffix. A JSON-looking file receives the complete budgeted reader, which
+    distinguishes ordinary literal JSON from an actual transport envelope.
+    """
+    from .verified_reads import current_scope
+    scope = current_scope()
+    cache = None
+    if scope is not None:
+        cache = getattr(scope, '_mixed_attachment_transport', None)
+        if cache is None:
+            cache = scope._mixed_attachment_transport = {}
+        if path in cache:
+            return cache[path]
+    before = path.stat()
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        require(stat.S_ISREG(opened.st_mode) and (opened.st_dev, opened.st_ino) ==
+                (before.st_dev, before.st_ino), 'Mixed evidence: приложение изменилось при открытии')
+        amount = min(65536, budget.chunk_bytes, max(1, budget.memory_bytes // 4))
+        offset, candidate = 0, False
+        while True:
+            budget.check_memory(amount * 4, path=str(path), progress=offset)
+            part = stream.read(amount)
+            if not part:
+                break
+            offset += len(part)
+            significant = part.lstrip()
+            if significant:
+                candidate = significant.startswith(b'{')
+                break
+    after = path.stat()
+    require(not path.is_symlink() and
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) ==
+            (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns),
+            'Mixed evidence: приложение изменилось во время чтения')
+    if cache is not None:
+        cache[path] = candidate
+    return candidate
+
+
+def attachment_refs(store, attachments, observation_ref, *, scalable=False):
+    require(isinstance(attachments, list) and (scalable or len(attachments) <= MAX_ATTACHMENTS),
+            'Mixed evidence: неверный список приложений')
+    budget = scale.Budget() if scalable else None
+    refs, seen = [observation_ref], {observation_ref['file']}
+    for ref in attachments:
+        require(isinstance(ref, dict) and set(ref) == {'file', 'sha256'}
+                and isinstance(ref['sha256'], str) and test_intent.SHA.fullmatch(ref['sha256'])
+                and isinstance(ref['file'], str) and ref['file'] not in seen,
+                'Mixed evidence: неверное или повторное приложение')
+        attachment = _evidence_file(store, ref['file'])
+        if budget is not None:
+            budget.check(attachment.stat().st_size, path=ref['file'], progress=len(refs))
+        from .verified_reads import current_scope
+        scope = current_scope()
+        require(scope.hash_valid(attachment, ref['sha256']) if scope is not None else store.artifact_hash_valid(ref),
+                'Mixed evidence: приложение изменено')
+        # Historical attachments stay opaque/hash-only, even if literal text
+        # contains the marker. New-policy transport is content-based across
+        # all suffixes; ordinary binary evidence keeps streaming SHA behavior.
+        if scalable and _transport_candidate(attachment, budget):
+            if scope is not None:
+                scope.artifact(attachment, ref['sha256'], allow_manifest=scalable)
+            else:
+                scale.read_file(attachment, expected_sha256=ref['sha256'], allow_manifest=scalable)
+        refs.append(copy.deepcopy(ref)); seen.add(ref['file'])
+    return refs
+
+
+def _observation(store, name, contract, intent_ref, basis, kind, criterion, *, scalable=False):
+    body, observation_ref = read_observation(store, name, scalable=scalable)
     require(isinstance(body, dict) and set(body) == {'schema', 'run', 'task', 'attempt', 'candidate',
             'intentSha256', 'kind', 'criteria', 'procedure', 'observed', 'source', 'attachments'}
             and type(body['schema']) is int and body['schema'] == 1,
@@ -79,36 +187,17 @@ def _observation(store, name, contract, intent_ref, basis, kind, criterion):
     require(isinstance(criteria, list) and criteria and all(isinstance(c, str) for c in criteria)
             and len(criteria) == len(set(criteria)) and criterion in criteria and set(criteria) <= declared,
             'Mixed evidence: неизвестные или повторные критерии наблюдения')
-    _text(body['procedure'])
-    _text(body['observed'])
-    source = body['source']
-    fields = {'url', 'viewport'} if kind == 'browser' else {'reference', 'scope'}
-    require(isinstance(source, dict) and set(source) == fields, 'Mixed evidence: неверный источник наблюдения')
-    for value in source.values():
-        _text(value)
-    if kind == 'browser':
-        url = urlsplit(source['url'])
-        require(url.scheme in ('http', 'https') and bool(url.netloc), 'Mixed evidence: нужен URL браузера')
-    attachments = body['attachments']
-    require(isinstance(attachments, list) and len(attachments) <= MAX_ATTACHMENTS,
-            'Mixed evidence: неверный список приложений')
-    refs, seen = [{'file': name, 'sha256': scope.sha256(path, raw) if scope is not None else file_hash(path)}], {name}
-    for ref in attachments:
-        require(isinstance(ref, dict) and set(ref) == {'file', 'sha256'}
-                and isinstance(ref['sha256'], str) and test_intent.SHA.fullmatch(ref['sha256'])
-                and isinstance(ref['file'], str) and ref['file'] not in seen,
-                'Mixed evidence: неверное или повторное приложение')
-        attachment = _evidence_file(store, ref['file'])
-        require(store.artifact_hash_valid(ref), 'Mixed evidence: приложение изменено')
-        refs.append(copy.deepcopy(ref))
-        seen.add(ref['file'])
-    return refs
+    _text(body['procedure'], scalable=scalable)
+    _text(body['observed'], scalable=scalable)
+    source_valid(body['source'], kind, scalable=scalable)
+    return attachment_refs(store, body['attachments'], observation_ref, scalable=scalable)
 
 
 def check_contract(store, contract, intent_ref, report):
     """Validate live or sealed reports using their exact immutable intent and basis."""
     if contract.get('mode') != 'mixed':
         return [], []
+    scalable = scalable_provenance(store, contract['run'])
     test_intent._routes(contract['report'], set(contract['report']['criteria']))
     require(artifact_valid(store, intent_ref), 'Mixed evidence: повреждён контракт')
     routes = {(r['criterion'], r['kind']) for r in contract['report']['routes']}
@@ -122,7 +211,7 @@ def check_contract(store, contract, intent_ref, report):
         pair = row['criterion'], row['kind']
         require(pair in routes and pair not in seen and isinstance(row['status'], str) and row['status'] in STATUSES,
                 'Mixed evidence: неизвестная, повторная пара или статус')
-        _text(row['note'])
+        _text(row['note'], scalable=scalable)
         seen.add(pair)
         if row['status'] == 'passed':
             if row['kind'] == 'automated':
@@ -130,7 +219,8 @@ def check_contract(store, contract, intent_ref, report):
                     'criterion': row['criterion'], 'status': 'passed', 'note': row['note'],
                     'artifact': row['artifact']}]}, {(contract['task'], row['criterion'])})
             else:
-                found = _observation(store, row['artifact'], contract, intent_ref, report['basis'], row['kind'], row['criterion'])
+                found = _observation(store, row['artifact'], contract, intent_ref, report['basis'], row['kind'], row['criterion'],
+                                     scalable=scalable)
             artifacts.extend(found)
         else:
             failures.append({'requirement': contract['task'], 'criterion': row['criterion'],
@@ -170,5 +260,7 @@ def record_valid(store, record):
         artifacts, failures = check_contract(store, contract, ref, report)
         return (all(a in record.get('artifacts', []) for a in artifacts)
                 and (not record.get('passed') or not failures))
+    except ResourceLimit:
+        raise
     except (Invalid, OSError, ValueError, TypeError, KeyError, UnicodeError):
         return False

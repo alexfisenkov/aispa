@@ -1,6 +1,8 @@
 import copy
 import json
+import os
 import unittest
+from unittest.mock import patch
 
 import test_test_intent as fixture
 from aispa_core import test_intent
@@ -477,3 +479,152 @@ class MixedEvidenceTests(unittest.TestCase):
         body['observed'] = 'Replaced observation claims another outcome'
         (self.fx.store.run / ref['file']).write_text(json.dumps(body), encoding='utf-8')
         self.assertFalse(module.record_valid(self.fx.store, record))
+
+
+class AttachmentReplayRegressions(unittest.TestCase):
+    """Supplemental T03 repair cases; fixtures are synthetic engine checks."""
+
+    def mixed_fixture(self):
+        fx = MixedEvidenceTests(); fx.setUp()
+        self.addCleanup(fx.doCleanups)
+        module, report, observations = fx.observations()
+        return fx.fx, module, report, observations
+
+    def flow_fixture(self):
+        # Lazy import: test_product_flows imports this module for mixed fixtures.
+        from test_product_flows import FlowFixture
+        fx = FlowFixture(); fx.setUp()
+        self.addCleanup(fx.tearDown)
+        fx.prepare_flows()
+        fx.state['policy']['scalableInputs'] = True
+        fx.store.append(fx.state, 'supplemental-scalable-flow-fixture')
+        return fx
+
+    def test_legacy_literal_attachment_preserves_sealed_replay(self):
+        from aispa_core.dashboard_reader import SnapshotJournal
+        fx, module, report, observations = self.mixed_fixture()
+        body, ref, _ = observations['browser']
+        for suffix in ('.txt', '.md', '.json'):
+            with self.subTest(suffix=suffix):
+                literal = fx.store.artifact('evidence', b'{"aispaManifest":1,"ordinaryLegacyEvidence":true}', suffix)
+                body['attachments'] = [literal]
+                (fx.store.run / ref['file']).write_text(json.dumps(body), encoding='utf-8')
+                # Seal the literal/hash-only legacy interpretation without
+                # importing historical code or rewriting a canonical report.
+                refs = [{'file': p.relative_to(fx.store.run).as_posix(), 'sha256': file_hash(p)}
+                        for p in (fx.store.run / 'evidence').rglob('*') if p.is_file()]
+                record = {'testIntent': fx.state['taskHistory']['T01'][-1]['testIntent'],
+                          'report': fx.store.artifact('reviews', json.dumps(report).encode(), '.json'),
+                          'artifacts': refs, 'passed': True}
+                self.assertTrue(module.record_valid(fx.store, record),
+                                'Legacy opaque attachment marker must not invalidate an admitted sealed proof')
+                self.assertFalse(module.check(fx.store, fx.state, 'T01', report)[1])
+                snapshot = SnapshotJournal(fx.root); snapshot.load()
+                with snapshot._reads.scope():
+                    self.assertTrue(module.record_valid(snapshot, record))
+                    snapshot.finish_snapshot()
+
+    def test_scalable_log_chunk_loss_revokes_fresh_scoped_gate_and_finish(self):
+        from aispa_core import product_flows, scale
+        from aispa_core.contracts import gate_valid
+        from aispa_core.dashboard_reader import SnapshotJournal
+        from aispa_core.display import project
+        for suffix in ('.log', '.txt'):
+            with self.subTest(suffix=suffix):
+                fx = self.flow_fixture(); report = fx.final()
+                body, ref = fx.observations['R02']
+                target = fx.store.run / ('evidence/actual-process-evidence' + suffix)
+                manifest = scale.write_manifest(target, b'Actual disposable process output for this flow\n',
+                    kind='text', basis=report['basis'], chunk_bytes=16)
+                body['attachments'] = [{'file': target.relative_to(fx.store.run).as_posix(),
+                                        'sha256': file_hash(target)}]
+                (fx.store.run / ref['file']).write_text(json.dumps(body), encoding='utf-8')
+                self.assertTrue(fx.flow.acceptance(fx.file(report)))
+                self.assertTrue(gate_valid(fx.store, fx.state, 'acceptance'))
+                self.assertTrue(project(fx.store, fx.state)['productFlows']['ready'])
+                chunk = target.parent / manifest['chunks'][0]['file']; original = chunk.read_bytes()
+                journal = file_hash(fx.store.run / 'events.jsonl')
+                snapshot = SnapshotJournal(fx.root); state = snapshot.load()
+                with snapshot._reads.scope():
+                    self.assertTrue(gate_valid(snapshot, state, 'acceptance'))
+                    chunk.unlink()
+                    with self.assertRaises(Invalid, msg='Consumed attachment chunks belong to the snapshot integrity set'):
+                        snapshot.finish_snapshot()
+                self.assertFalse(gate_valid(fx.store, fx.state, 'acceptance'),
+                                 'Missing scalable .log payload must revoke the final gate')
+                self.assertFalse(gate_valid(fx.store, fx.state, 'acceptance', settled=True))
+                self.assertFalse(product_flows.valid(fx.store, fx.state))
+                self.assertFalse(project(fx.store, fx.state)['productFlows']['ready'])
+                fresh = SnapshotJournal(fx.root); fresh_state = fresh.load()
+                with fresh._reads.scope():
+                    self.assertFalse(gate_valid(fresh, fresh_state, 'acceptance'))
+                    self.assertFalse(project(fresh, fresh_state)['productFlows']['ready'])
+                with self.assertRaises(Invalid):
+                    fx.flow.finish()
+                self.assertEqual(file_hash(fx.store.run / 'events.jsonl'), journal)
+                self.assertEqual(fx.state['status'], 'running')
+                chunk.write_bytes(original)
+                self.assertTrue(gate_valid(fx.store, fx.state, 'acceptance'))
+                restored = SnapshotJournal(fx.root); restored_state = restored.load()
+                with restored._reads.scope():
+                    self.assertTrue(gate_valid(restored, restored_state, 'acceptance'))
+                    restored.finish_snapshot()
+
+    def test_observation_specific_budget_preserves_resource_refusal_through_readiness(self):
+        from aispa_core import product_flows
+        from aispa_core.contracts import gate_current, gate_valid
+        from aispa_core.dashboard_reader import SnapshotJournal
+        from aispa_core.display import project
+        from aispa_core.verified_reads import ResourceLimit
+        fx, module, task_report, observations = self.mixed_fixture()
+        fx.state['policy']['scalableInputs'] = True
+        fx.store.append(fx.state, 'supplemental-observation-budget-fixture')
+        body, ref, _ = observations['browser']
+        body['observed'] = 'Actual intact observation, beyond the operation budget. ' * 2200
+        path = fx.store.run / ref['file']; path.write_text(json.dumps(body), encoding='utf-8')
+        intent = fx.state['taskHistory']['T01'][-1]['testIntent']
+        self.assertLess((fx.store.run / intent['file']).stat().st_size, 50000)
+        self.assertLess(len(json.dumps(task_report).encode()), 50000)
+        self.assertGreater(path.stat().st_size, 50000)
+        artifacts, failures = module.check(fx.store, fx.state, 'T01', task_report)
+        self.assertFalse(failures)
+        record = {'testIntent': intent, 'report': fx.store.artifact('reviews', json.dumps(task_report).encode(), '.json'),
+                  'artifacts': artifacts, 'passed': True}
+        with patch.dict(os.environ, AISPA_MAX_INPUT_BYTES='50000'):
+            for operation in (lambda: module.read_observation(fx.store, ref['file'], scalable=True),
+                              lambda: module.check(fx.store, fx.state, 'T01', task_report),
+                              lambda: module.record_valid(fx.store, record)):
+                with self.subTest(scope='task', operation=operation):
+                    with self.assertRaises(ResourceLimit) as caught:
+                        operation()
+                    for text in ('RESOURCE_LIMIT', 'maxInputBytes', str(path), 'continuation:'):
+                        self.assertIn(text, str(caught.exception))
+        final = self.flow_fixture(); report = final.final()
+        body, ref = final.observations['R02']
+        body['observed'] = 'Actual intact final observation, beyond the operation budget. ' * 2200
+        path = final.store.run / ref['file']; path.write_text(json.dumps(body), encoding='utf-8')
+        self.assertLess(len(json.dumps(report).encode()), 50000)
+        self.assertLess((final.store.run / final.state['featureScenarios']['file']).stat().st_size, 50000)
+        self.assertTrue(final.flow.acceptance(final.file(report)))
+        original = path.read_bytes(); journal = file_hash(final.store.run / 'events.jsonl')
+        with patch.dict(os.environ, AISPA_MAX_INPUT_BYTES='50000'):
+            for operation in (lambda: product_flows.saved_check(final.store, final.state),
+                              lambda: product_flows.valid(final.store, final.state),
+                              lambda: gate_valid(final.store, final.state, 'acceptance'),
+                              lambda: gate_current(final.store, final.state, 'acceptance'),
+                              lambda: product_flows.view(final.store, final.state),
+                              lambda: project(final.store, final.state),
+                              final.flow.finish):
+                with self.subTest(scope='final', operation=operation):
+                    with self.assertRaises(ResourceLimit) as caught:
+                        operation()
+                    for text in ('RESOURCE_LIMIT', 'maxInputBytes', str(path), 'continuation:'):
+                        self.assertIn(text, str(caught.exception))
+            snapshot = SnapshotJournal(final.root); state = snapshot.load()
+            with snapshot._reads.scope():
+                with self.assertRaises(ResourceLimit):
+                    project(snapshot, state)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(file_hash(final.store.run / 'events.jsonl'), journal)
+        self.assertEqual(final.state['status'], 'running')
+        self.assertTrue(gate_valid(final.store, final.state, 'acceptance'))

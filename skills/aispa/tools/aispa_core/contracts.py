@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from .store import Invalid, confined, digest, file_hash, COMMON_INPUTS, common_input, canonical_zone
+from .verified_reads import ResourceLimit
 
 
 def require(condition, message):
@@ -119,11 +120,26 @@ def artifact_valid(store, artifact):
             store.artifact_bytes(artifact)
             return True
         return store.artifact_hash_valid(artifact)
-    except (Invalid, KeyError, OSError):
+    except Invalid as error:
+        from .verified_reads import ResourceLimit
+        if isinstance(error, ResourceLimit):
+            raise
+        return False
+    except (KeyError, OSError):
         return False
 
 
 def gate_valid(store, state, name, settled=False):
+    """Readiness predicate: mandatory product-flow failures always veto it."""
+    return _gate_check(store, state, name, settled=settled)
+
+
+def gate_current(store, state, name):
+    """Report freshness only, including a current negative result; never readiness."""
+    return _gate_check(store, state, name, outcome=False)
+
+
+def _gate_check(store, state, name, settled=False, *, outcome=True):
     """settled: the owner's fast mode accepts a recorded, current acceptance even when it found failures;
     max does so only when every failure belongs to a deferred core task (deferredSettled)."""
     gate = state["gates"].get(name)
@@ -132,18 +148,22 @@ def gate_valid(store, state, name, settled=False):
         settled = check_modes.is_fast(state) or (check_modes.is_max(state) and bool(gate.get("deferredSettled")))
     else:
         settled = False
-    if not gate or not (gate.get("passed") or settled):
+    if not gate or outcome and not (gate.get("passed") or settled):
         return False
     if state.get("policy", {}).get("projectDocuments"):
         from . import project_documents
         try:
             project_documents.require_fresh_intent(store, state)
+        except ResourceLimit:
+            raise
         except (Invalid, OSError, ValueError, TypeError, KeyError):
             return False
     from . import phase_receipts, execution_obligations
     if execution_obligations.enabled(state):
         try:
             execution_obligations.obligations(store, state, sealed=True)
+        except ResourceLimit:
+            raise
         except (Invalid, OSError, ValueError, TypeError, KeyError):
             return False
     if not phase_receipts.valid(store, state, {"plan": "planner"}.get(name, name)):
@@ -176,7 +196,17 @@ def gate_valid(store, state, name, settled=False):
         from . import blind
         if not blind.derived_waves_valid(store, state):
             return False
-    return bool(gate and (gate["passed"] or settled) and gate["basis"] == basis(store, state, name)
+    if name == 'acceptance' and state.get('policy', {}).get('criticalProductFlows') is True:
+        from . import product_flows
+        try:
+            flow_failures = product_flows.saved_check(store, state)
+        except ResourceLimit:
+            raise
+        except (Invalid, OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+            return False
+        if outcome and flow_failures:
+            return False
+    return bool(gate and (not outcome or gate["passed"] or settled) and gate["basis"] == basis(store, state, name)
                 and artifact_valid(store, gate["report"])
                 and all(artifact_valid(store, a) for a in gate.get("artifacts", [])))
 

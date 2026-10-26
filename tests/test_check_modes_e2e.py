@@ -344,11 +344,12 @@ class Scenario(unittest.TestCase):
                   "cleanrun": (ctx.get("cleanrun") or {}).get("artifact", {}).get("sha256"),
                   "blindReport": ctx["blindReview"]["report"]["sha256"],
                   "blindMapping": [{"observation": i, "requirement": r} for i, r in enumerate(self.requirements)]}
+        report['productFlowReview'] = fixtures.final_flows(ctx, self.run, checks)
         return self.verdict("acceptance", "--file", self.input(report, "acceptance.json"), ok=accepted)
 
 
 class FastModeE2E(Scenario):
-    def test_fast_run_delivers_with_remaining_and_skipped_checks(self):
+    def test_fast_run_cannot_deliver_an_unchecked_requested_primary_flow(self):
         self.prepare("fast")
         self.plan([self.task("T01", "R01"), self.task("T02", "R02", ["T01"])])
         self.assertEqual(self.status()["checkMode"], "fast")
@@ -372,15 +373,12 @@ class FastModeE2E(Scenario):
         self.call("acceptance", "--file", self.input({}), expected=2)
         self.finish_delivery({"R02": "not_tested"}, {"R02": "not_tested"}, accepted=False)
         self.assertEqual(self.status()["checkMode"], "fast")
-        self.record_knowledge()
-        self.assertEqual(self.call("finish")["status"], "delivered_with_remaining")
+        self.call('finish', expected=2)
         state = Journal(self.root).load()
-        remaining = state["remaining"]
-        # The criterion row and its blind observation both name the one failed requirement.
-        self.assertEqual({row["requirement"] for row in remaining["checks"]}, {"R02"})
-        for name in ("Проверка задач критиками", "Тестовый контракт RED", "Сверка волн с полным брифом"):
-            self.assertIn(name, remaining["skippedChecks"])
-        self.assertEqual(self.status()["status"], "delivered_with_remaining")
+        self.assertFalse(self.status()['gates']['acceptance'])
+        self.assertTrue(any(row.get('kind') == 'product-flow' and row['requirement'] == 'R02'
+                            for row in state['gates']['acceptance']['failures']))
+        self.assertNotIn('remaining', state)
 
 
 class MaxModeE2E(Scenario):
@@ -411,7 +409,7 @@ class MaxModeE2E(Scenario):
         view = self.task_view(tid)
         self.assertEqual((view["status"], view["completionKind"]), ("completed", "critic_acceptance"))
 
-    def test_deferred_core_task_does_not_stop_its_dependants_and_is_delivered_as_remainder(self):
+    def test_deferred_primary_flow_blocks_finish_without_stopping_dependants(self):
         self.prepare("max", ("R01", "R02", "R03"))
         self.plan([self.task("T01", "R01"), self.task("T02", "R02", ["T01"]), self.task("T03", "R03", ["T02"])])
         self.assertEqual(self.status()["checkMode"], "max")
@@ -439,12 +437,12 @@ class MaxModeE2E(Scenario):
         self.commit("tasks")
         self.finish_delivery({"R01": "not_tested"}, {"R01": "not_tested"}, accepted=False,
                              last_wave=(3, {"R01": "not_tested"}))
-        self.record_knowledge()
-        self.assertEqual(self.call("finish")["status"], "delivered_with_remaining")
-        remaining = Journal(self.root).load()["remaining"]
-        self.assertEqual(remaining["deferredTasks"], ["T01"])
-        self.assertEqual(remaining["blockedTasks"], ["T01"])
-        self.assertEqual({row["requirement"] for row in remaining["checks"]}, {"R01"})
+        self.call('finish', expected=2)
+        state = Journal(self.root).load()
+        self.assertEqual(state['tasks'][0]['status'], 'blocked')
+        self.assertFalse(state['gates']['acceptance'].get('deferredSettled', False))
+        self.assertTrue(any(f.get('kind') == 'product-flow' and f['requirement'] == 'R01'
+                            for f in state['gates']['acceptance']['failures']))
 
 
 class SwitchModeE2E(Scenario):

@@ -114,8 +114,12 @@ def _features(store, state, report, mode=None):
         _need("noFeatureReason" not in report, "объяснение отсутствия функций противоречит списку")
     seen = set()
     for row in rows:
+        from . import product_flows
+        fields = {"requirement", "changeKind", "sourceQuote", "specQuote", "dimensions"}
+        if product_flows.enabled(state):
+            fields.add("productFlows")
         _need(isinstance(row, dict) and set(row) ==
-              {"requirement", "changeKind", "sourceQuote", "specQuote", "dimensions"},
+              fields,
               "карточке функции нужны источник, спецификация и сценарии по глубине")
         rid = row["requirement"]
         _need(isinstance(rid, str) and rid in expected and rid not in seen,
@@ -159,6 +163,9 @@ def _features(store, state, report, mode=None):
                 _text(cell["counterexample"], name + ": контрпример для deep", state=state)
         _need(required <= checked, "сценарии функции неполны")
     _need(seen == set(expected), "не все действующие функции получили сценарии")
+    if state.get('policy', {}).get('criticalProductFlows') is True:
+        from . import product_flows
+        product_flows.validate_features(store, state, rows, reqs, sources)
     _size(report, state)
 
 

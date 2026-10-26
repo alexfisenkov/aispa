@@ -967,3 +967,126 @@ Browser/process artifact — JSON `schema: 1`, привязанный к тек�
 `id,boundary,scenario,expected,criterion` и `test:{path,sha256}` для automated
 либо `source:{path,sha256}` для browser/process; пять отказных границ сохраняются. Сквозной trace к брифу,
 clean clone и независимая итоговая приёмка проекта остаются обязательными.
+
+## Обязательные пользовательские потоки (`criticalProductFlows`)
+
+Политика включается только новым `init` из кандидата. Прежние policy,
+featureScenarios, task observations schema 1, native IDs и история не
+мигрируют. В существующей карточке каждой requested/addition функции
+`featureScenarios.features` появляется `productFlows`:
+
+```json
+{
+  "applicability": "applicable",
+  "reason": "Основное заказанное действие владельца на экране экспорта.",
+  "flows": [{
+    "id": "export-main",
+    "criterion": "ТОЧНЫЙ КРИТЕРИЙ ЭТОГО ТРЕБОВАНИЯ",
+    "role": "owner",
+    "interface": "web-ui",
+    "controls": ["Export"],
+    "action": "Нажать Export",
+    "result": "Получен CSV владельца",
+    "forbidden": [{"role": "guest", "action": "Экспортировать чужой CSV"}],
+    "accessReason": "Гостю запрещён доступ к данным владельца.",
+    "ownerDecision": null
+  }]
+}
+```
+
+Это форма, не наблюдение. Источник и требование наследуются от карточки
+функции (`requirement`, полная `sourceQuote`), criterion должен принадлежать
+ему. Все восемь прежних dimensions сохраняются по действующему режиму.
+Flow ID уникален во всём контракте. У каждого потока обязательны роль,
+запрошенный интерфейс `web-ui|native-ui|cli`, controls, action, result,
+forbidden, accessReason и ownerDecision. UI требует непустой список controls;
+CLI допускает пустой. Если запрещённых ролей нет, конкретно объясни это в
+accessReason. `not_applicable` требует проверяемую причину и `flows: []`.
+Основной заказанный пользовательский путь нельзя скрыть этой декларацией.
+Применимость и смысловую полноту независимо проверяет итоговый приёмщик.
+Валидатор не извлекает все намерения из текста регулярными выражениями.
+
+Все объявленные потоки обязательны: поля `critical: false` нет; noncore,
+процент выполненных задач, fast и max deferredSettled не снимают запрет.
+Для разрешённой владельцем замены сохраняй исходные interface/controls и
+заполняй `ownerDecision:{brief,quote,interface,controls}`. Brief должен
+указывать на сохранённый текущий источник, quote — на отдельную точную
+цитату решения, отличную от исходной sourceQuote. Интерфейс и controls
+решения задают подтверждаемый новый вариант. Точное совпадение цитаты
+доказывает происхождение; её достаточность для замены оценивает приёмщик.
+Без такого решения process CLI не заменяет web/native UI.
+
+Blind-пакет не содержит подготовленный исполнителем список потоков.
+Приёмщик сначала читает исходные слова и исполняет независимые проверки,
+сохраняет `blind`, затем получает acceptance-контекст с `productFlows`,
+`productFlowCheckTemplates`, `productFlowObservationTemplates` и
+`productFlowReviewTemplate`. Контракт здесь производный, его источник —
+сохранённые featureScenarios; отдельного изменяемого реестра потоков нет.
+
+Итоговый отчёт дополнительно содержит `productFlowReview:{status,note}` —
+явную независимую сверку полноты исходного запроса, применимости каждой
+функции, причин not_applicable и разрешённых замен. Статусы прежние:
+passed/failed/not_tested/blocked. Незаполненная сверка не даёт готовности.
+В существующей строке `checks` для requirement/criterion добавь `flowChecks`:
+
+```json
+{"flow":"export-main","status":"not_tested","note":"Сценарий ещё не исполнен","artifact":""}
+```
+
+Каждый принадлежащий паре flow ID нужен ровно один раз. Пропущенный поток
+сохраняется как not_tested; failed/blocked/not_tested остаются диагностируемым
+отрицательным отчётом. Чужие/повторные ID и повреждённые наблюдения отвергаются.
+Для passed `artifact` — JSON в evidence/ со строго отдельной схемой:
+
+```json
+{
+  "schema": 2,
+  "scope": "final-product-flow",
+  "run": "ТОЧНЫЙ RUN",
+  "candidate": "BASIS ФИНАЛЬНОЙ ACCEPTANCE",
+  "contractSha256": "SHA ИЗ productFlows.sha256",
+  "requirement": "R01",
+  "criterion": "ТОЧНЫЙ КРИТЕРИЙ",
+  "flow": "export-main",
+  "kind": "browser",
+  "interface": "web-ui",
+  "procedure": null,
+  "observed": null,
+  "source": {"url": null, "viewport": null},
+  "chain": {
+    "role": "owner",
+    "controls": [{"name":"Export","visible":null,"status":"not_tested"}],
+    "action": {"name":"Нажать Export","executed":null,"status":"not_tested"},
+    "result": {"expected":"Получен CSV владельца","observed":null,"status":"not_tested"},
+    "forbidden": [{"role":"guest","action":"Экспортировать чужой CSV","attempted":null,"denied":null,"status":"not_tested"}]
+  },
+  "attachments": []
+}
+```
+
+Это намеренно незаполненный шаблон. Реальный passed требует конкретные
+procedure/observed, точный URL/viewport для browser, visible:true каждого
+элемента, executed:true действия, наблюдённый результат и attempted:true /
+denied:true каждого запрета, все статусы passed. У native-ui и cli kind равен
+process; source содержит reference/scope реальной поверхности. Объявить
+поверхность в JSON недостаточно: истинность проверяет независимая роль.
+Поля task/attempt/intentSha256 schema 1 здесь не принимаются.
+
+Финальный candidate и digest контракта не зависят от самого отчёта потоков.
+Изменение кода/спецификации/сценариев, исходный relevant blind non-PASS,
+неполное наблюдение или подмена приложений снимают готовность. Acceptance,
+проверка сохранённого gate, finish и проекция используют один flow checker.
+Сохранённый boolean, 100% задач, общий smoke и поздний положительный отчёт
+не отменяют обязательный veto. Панель различает текущий отрицательный отчёт
+и устаревшее свидетельство; `productFlows` в её снимке содержит ready/failures.
+
+При scalableInputs observation JSON обеих схем читается общим manifest reader
+целиком с confined chunks/digests и настраиваемым операционным бюджетом.
+Scalable provenance sealed task replay берётся из проверенного журнала его
+прогона; флаг внутри JSON или установленная версия не дают этого права.
+Лимит 32 attachments и 256 KiB observation сохраняются для прежней policy,
+новая использует bytes/time/memory budget. Текстовые/JSON приложения
+перечитывают транспорт и chunks; бинарные снимки проверяются потоковым SHA
+без декодирования как JSON. Новый расчёт перечитывает изменившиеся байты,
+кеш допустим только внутри одного проверенного расчёта. SHA и схема доказывают
+binding/целостность, не реальное действие, модель, доступ или продуктовый PASS.

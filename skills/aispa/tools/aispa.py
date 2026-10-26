@@ -320,7 +320,8 @@ def execute(args):
                                    "executionObligations": True, "finalWaveReuse": True,
                                    "errorBoundaryChecks": True, "taskTiers": True,
                                    "leanControl": True, "projectDocuments": True,
-                                   "firstBriefingClosure": True, "scalableInputs": True}
+                                   "firstBriefingClosure": True, "scalableInputs": True,
+                                   "criticalProductFlows": True}
                 store.scale_enabled = True
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth

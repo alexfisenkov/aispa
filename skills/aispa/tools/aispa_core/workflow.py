@@ -490,8 +490,13 @@ class Workflow:
             require(report.get("cleanrun") == self.s["cleanrun"]["artifact"]["sha256"], "Приёмщик должен сослаться на точную проверку чистого клона")
         expected = {(r["id"], c) for r in active(self.s) for c in r["acceptance"]}
         artifacts, failures = evidence_rows(self.store, report, expected)
+        criterion_artifacts = list(artifacts)
         if self.s.get("policy", {}).get("cleanClone"):
             failures.extend(blind.mapping(self.store, self.s, report))
+        from . import product_flows
+        flow_artifacts, flow_failures = product_flows.check(self.store, self.s, report, failures)
+        artifacts.extend(flow_artifacts)
+        failures.extend(flow_failures)
         execution_findings = [f for f in failures if f.get("kind") == "execution"]
         failures = [f for f in failures if f.get("kind") != "execution"]
         missing = {f["requirement"] for f in failures}
@@ -499,9 +504,10 @@ class Workflow:
         passed = not report["unmapped"] and None not in missing and not core & missing
         core_tasks = [t for t in self.s["tasks"] if set(t["requirements"]) & core]
         passed = passed and all(t["status"] == "completed" for t in core_tasks)
+        passed = passed and not flow_failures
         # Max: a core task the owner's rules deferred goes to the remainder, not to a dead end; any other failure still stops the delivery.
         deferred_settled = False
-        if not passed and check_modes.is_max(self.s) and not report["unmapped"] and None not in missing:
+        if not passed and not flow_failures and check_modes.is_max(self.s) and not report["unmapped"] and None not in missing:
             deferred = check_modes.deferred_ids(self.s, self.store)
             owned = {r for t in self.s["tasks"] if t["id"] in deferred for r in t["requirements"]}
             deferred_settled = bool(deferred and all(t["status"] == "completed" or t["id"] in deferred for t in core_tasks)
@@ -540,7 +546,7 @@ class Workflow:
             ref = self.store.artifact("derived-wave-checkpoints", (json.dumps(derived, sort_keys=True) + "\n").encode(), ".json")
             self.s.setdefault("waves", {})[str(last_wave)] = {
                 "passed": True, "plan": plan_basis(self.s), "basis": wave_basis,
-                "report": ref, "artifacts": artifacts, "derivedFrom": report_artifact["sha256"],
+                "report": ref, "artifacts": criterion_artifacts, "derivedFrom": report_artifact["sha256"],
                 "blindReport": self.s["blindReview"]["report"]["sha256"]}
         self.s["gates"]["acceptance"] = {
             "passed": passed, "basis": report["basis"], "failures": failures,

@@ -282,6 +282,10 @@ def project(store, state):
     autonomy_view = autonomy.view(state)
     if autonomy_view is not None:
         view["autonomy"] = autonomy_view
+    from . import product_flows
+    flow_view = product_flows.view(store, state)
+    if flow_view is not None:
+        view['productFlows'] = flow_view
     return view
 
 

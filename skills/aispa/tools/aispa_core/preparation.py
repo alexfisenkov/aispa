@@ -86,6 +86,8 @@ def template(store, state, kind, *, actor=None):
                 "depthReason": "", "features": [
                     {"requirement": r["id"], "changeKind": r["kind"],
                      "sourceQuote": (indexed[r["parent"]] if r["kind"] == "addition" else r).get("quote", ""),
+                     **({"productFlows": {"applicability": None, "reason": "", "flows": []}}
+                        if state.get('policy', {}).get('criticalProductFlows') is True else {}),
                      "specQuote": "", "dimensions": [
                          {"name": name, "status": "not_tested", "scenario": "", "verification": "", "counterexample": ""}
                          for name in design_contract.required_dimensions(state)]}

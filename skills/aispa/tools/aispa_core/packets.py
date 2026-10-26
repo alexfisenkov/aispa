@@ -176,6 +176,9 @@ def document_context(store, state, kind, selected, source_paths=None):
 
 
 def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths=None):
+    if kind == 'acceptance' and state.get('policy', {}).get('criticalProductFlows') is True:
+        from . import blind
+        require(blind.valid(store, state), 'Product flows: сначала сохраните независимые source-first blind-наблюдения')
     if kind == "blind":
         require(source_paths is None, "Blind-пакет не принимает каталог или список источников проекта")
         # Deliberately omit spec, plan, registry, reviews, discovery and memory.
@@ -295,6 +298,12 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                       blindReview=state.get("blindReview"), handoff=state.get("handoff"),
                       projectIntegrationReview=state.get("projectIntegrationReview"))
+        if state.get('policy', {}).get('criticalProductFlows') is True:
+            from . import product_flows
+            contract, checks, observations = product_flows.templates(store, state, packet['basis'])
+            packet.update(productFlows=contract, productFlowCheckTemplates=checks,
+                          productFlowObservationTemplates=observations,
+                          productFlowReviewTemplate={'status': 'not_tested', 'note': ''})
         if state.get("policy", {}).get("executionObligations"):
             from . import execution_obligations
             packet["executionObligations"] = execution_obligations.view(store, state)
