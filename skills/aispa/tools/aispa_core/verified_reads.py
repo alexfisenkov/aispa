@@ -9,11 +9,10 @@ import copy
 import hashlib
 import json
 import math
-import os
+import os  # Existing isolated fixtures patch os.fdopen through this module.
 from pathlib import Path
-import stat
 
-from .store import Invalid, confined, digest, file_hash
+from .store import Invalid, confined, digest, file_hash, regular_file
 
 
 _CURRENT = ContextVar("aispa_verified_reads", default=None)
@@ -94,29 +93,24 @@ def bounded_read(stream, maximum, *, budget=None, path=""):
     return bytes(data)
 
 
-def physical_read(path, budget, limit=None):
+def physical_read(path, budget, limit=None, *, metadata=None):
     """Keep nofollow, fstat and opened/final file identity guards together."""
     path = Path(path)
-    if path.is_symlink() or not path.is_file():
-        raise Invalid("AISpa read: missing or symlink input")
-    before = path.stat()
-    maximum = budget.max_bytes if limit is None else limit
-    if limit is None:
-        budget.check(before.st_size, path=str(path))
-    elif before.st_size > maximum:
-        raise resource_limit("RESOURCE_LIMIT chunkBytes: " + str(path)
-                             + "; continuation: increase operation budget and retry complete input")
-    budget.check_memory(before.st_size * 4, path=str(path))
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
-    with os.fdopen(fd, "rb") as stream:
-        opened = os.fstat(stream.fileno())
-        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise Invalid("AISpa read: source identity changed")
-        raw = bounded_read(stream, maximum, budget=budget, path=path)
-    after = path.stat()
-    if path.is_symlink() or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != (
-            opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns):
-        raise Invalid("AISpa read: source changed while reading")
+    try:
+        with regular_file(path, nofollow=True, budget=budget) as (stream, before, opened):
+            maximum = budget.max_bytes if limit is None else limit
+            if limit is None:
+                budget.check(before.st_size, path=str(path))
+            elif before.st_size > maximum:
+                raise resource_limit("RESOURCE_LIMIT chunkBytes: " + str(path)
+                                     + "; continuation: increase operation budget and retry complete input")
+            budget.check_memory(before.st_size * 4, path=str(path))
+            raw = bounded_read(stream, maximum, budget=budget, path=path)
+    except OSError as error:
+        raise Invalid("AISpa read: missing or unreadable input") from error
+    if metadata is not None:
+        metadata.update(generation=(opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns))
+    budget.check(0, path=str(path))
     return raw
 
 
@@ -132,17 +126,24 @@ class VerifiedReads:
         self.retained = 0
         self._confinements = {}
         self._confinement_bytes = 0
+        self._hash_budget = None
 
     @contextmanager
     def scope(self):
         previous = _CURRENT.get()
+        budget = None
+        if previous is not self:
+            from . import scale
+            budget = scale.Budget()
         token = _CURRENT.set(self)
         verdict_token = None
         if previous is not self:
+            self._hash_budget = budget
             verdict_token = _VERDICTS.set({"scope": self, "owner": None, "identity": None,
                                            "values": set(), "retained": 0})
         try:
             yield self
+            self.deadline_check("read calculation exit")
         finally:
             if verdict_token is not None:
                 _VERDICTS.reset(verdict_token)
@@ -162,12 +163,11 @@ class VerifiedReads:
         return context
 
     def _check_retained(self, extra=0):
-        from . import scale
         context = _VERDICTS.get()
         verdict_bytes = context["retained"] if context is not None and context["scope"] is self else 0
         try:
-            scale.Budget().check_memory(self.retained + self._confinement_bytes + verdict_bytes + extra,
-                                        path="read validation memo")
+            self._stream_budget().check_memory(self.retained + self._confinement_bytes + verdict_bytes + extra,
+                                               path="read validation memo")
         except ResourceLimit as error:
             self.failure = error
             raise
@@ -178,23 +178,29 @@ class VerifiedReads:
         Content is keyed in full, never by a mutable object identity. Unsupported
         JSON key values fall back to the original predicate and its semantics.
         """
+        self.deadline_check()
         context = self._verdict_context(store)
         if context is None:
-            return compute()
+            result = compute()
+            self.deadline_check()
+            return result
         self.check()
         self._check_retained()
         try:
             if not _json_native(value):
                 raise TypeError("Not exact JSON-native predicate content")
             key = (namespace, digest(value))
+        except Invalid:
+            raise
         except (TypeError, ValueError, RecursionError, OverflowError):
             result = compute()
-            self.check()
+            self.deadline_check()
             return result
         if key in context["values"]:
+            self.deadline_check()
             return True
         result = compute()
-        self.check()
+        self.deadline_check()
         if result is True:
             # Conservative accounting of the small retained tuple/string/set
             # entry; no payload or caller-owned dictionary is retained here.
@@ -202,6 +208,7 @@ class VerifiedReads:
             self._check_retained(accounted)
             context["values"].add(key)
             context["retained"] += accounted
+        self.deadline_check()
         return result
 
     def _remember_confinement(self, base, name, resolved):
@@ -236,6 +243,7 @@ class VerifiedReads:
 
     def read(self, path, budget, limit=None):
         path = Path(path)
+        self.deadline_check(str(path))
         if path not in self.raw:
             # Retained entries share the operation's memory allowance.
             previous = budget.base_memory
@@ -253,30 +261,43 @@ class VerifiedReads:
         if limit is not None and len(raw) > limit:
             raise resource_limit("RESOURCE_LIMIT chunkBytes: " + str(path))
         budget.check_memory(self.retained, path=str(path))
+        self.deadline_check(str(path))
         return raw
 
     def parse(self, raw):
+        self.deadline_check("JSON parse")
         if raw not in self.parsed:
             self.parsed[raw] = json.loads(raw)
+        self.deadline_check("JSON parse")
         return self.parsed[raw]
 
     def sha256(self, path, raw):
-        return self.hashes.get(Path(path)) or self.value_hash(raw)
+        self.deadline_check("SHA cache")
+        value = self.hashes.get(Path(path)) or self.value_hash(raw)
+        self.deadline_check("SHA cache")
+        return value
 
     def value_hash(self, raw):
+        self.deadline_check("SHA value")
         if raw not in self.digests:
             self.digests[raw] = hashlib.sha256(raw).hexdigest()
+        self.deadline_check("SHA value")
         return self.digests[raw]
 
-    def artifact(self, path, expected_sha256, *, allow_manifest=True, literal=False, maximum=None):
-        from . import scale
+    def artifact(self, path, expected_sha256, *, allow_manifest=True, literal=False, maximum=None,
+                 budget=None):
+        self.deadline_check("artifact")
         path = Path(path)
         old = self.expected.get(path)
         if old is not None and expected_sha256 is not None and old != expected_sha256:
             raise Invalid("AISpa read: conflicting expected artifact SHA")
         if expected_sha256 is not None:
             self.expected[path] = expected_sha256
-        budget = scale.Budget()
+        from . import scale
+        # The calculation owns the deadline; a fresh input profile still sees
+        # a stricter memory/byte setting applied during this calculation.
+        budget = budget or scale.Budget()
+        budget.deadline = min(budget.deadline, self._stream_budget().deadline)
         maximum = budget.max_bytes if maximum is None else min(maximum, budget.max_bytes)
         key = (path, expected_sha256, bool(allow_manifest), bool(literal), maximum)
         if key not in self.payloads:
@@ -302,24 +323,53 @@ class VerifiedReads:
         self.check()
         budget.check(len(self.payloads[key]), path=str(path))
         budget.check_memory(self.retained, path=str(path))
+        self.deadline_check(str(path))
         return self.payloads[key]
 
     def json(self, raw):
+        self.deadline_check("JSON decode")
+        budget = self._stream_budget()
+        budget.check_memory(self.retained + len(raw) * 4, path="JSON decode")
         raw.decode("utf-8")  # Never broaden a text reader to UTF-16 JSON autodetection.
-        return copy.deepcopy(self.parse(raw))
+        self.deadline_check("JSON copy")
+        value = copy.deepcopy(self.parse(raw))
+        self.deadline_check("JSON copy")
+        return value
+
+    def _stream_budget(self):
+        if self._hash_budget is None:
+            from . import scale
+            self._hash_budget = scale.Budget()
+        return self._hash_budget
+
+    def deadline_check(self, path="read calculation"):
+        self.check()
+        self._stream_budget().check(0, path=path)
 
     def hash_valid(self, path, expected_sha256):
         path = Path(path)
+        budget = self._stream_budget()
+        budget.check(0, path=str(path))
         if path not in self.hashes:
-            self.hashes[path] = file_hash(path)  # binary/code remains streaming
+            try:
+                self.hashes[path] = file_hash(path, budget=budget, nofollow=True)  # binary/code remains streaming
+            except OSError as error:
+                raise Invalid("AISpa read: missing or unreadable input") from error
             self._remember_confinement(path.parent, path.name, path)
         return self.hashes[path] == expected_sha256
 
     def revalidate(self):
         self.check()
+        budget = self._stream_budget()
+        budget.check(0, path="read revalidation")
         for (base, name), expected in self._confinements.items():
+            budget.check(0, path=str(base / name))
             if confined(base, name) != expected:
                 raise Invalid("AISpa read: confinement generation changed")
         for path, sha in self.hashes.items():
-            if path.is_symlink() or not path.is_file() or file_hash(path) != sha:
-                raise Invalid("AISpa read: source generation changed")
+            try:
+                if path.is_symlink() or not path.is_file() or file_hash(path, budget=budget, nofollow=True) != sha:
+                    raise Invalid("AISpa read: source generation changed")
+            except OSError as error:
+                raise Invalid("AISpa read: source generation changed") from error
+        budget.check(0, path="read revalidation")

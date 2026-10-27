@@ -6,10 +6,11 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 import aispa
-from aispa_core import autonomy, participants
+from aispa_core import autonomy, participants, scale
 from aispa_core.store import Invalid, digest, file_hash
 import test_workflow as helpers
 
@@ -92,6 +93,34 @@ class ManagedFixture(unittest.TestCase):
 
 
 class PreflightTests(ManagedFixture):
+    def test_sources_checks_deadline_after_direct_result_materialization(self):
+        self.managed()
+        budget = scale.Budget()
+
+        class ExpiringTasks(list):
+            def __iter__(self):
+                yield from super().__iter__()
+                budget.deadline = -1.0
+
+        state = dict(self.state, tasks=ExpiringTasks(self.state.get("tasks", [])))
+        with self.assertRaisesRegex(Invalid, "operationSeconds"):
+            self.api()._sources(self.store, state, budget=budget)
+
+    def test_one_budget_covers_identity_sources_package_host_and_rules(self):
+        self.managed()
+        host = self.host()
+        original = scale.Budget
+        created = []
+
+        def budget():
+            instance = original()
+            created.append(instance)
+            return instance
+
+        with patch.object(scale, "Budget", side_effect=budget):
+            self.api().check(self.store, self.state, host, purpose="identity")
+        self.assertEqual(len(created), 1)
+
     def test_browser_identity_adoption_does_not_require_unrelated_capabilities_or_grant_seal(self):
         self.managed()
         host = self.host(capabilities={"browser": {"status": "allowed", "source": "native-browser-api"},

@@ -295,7 +295,8 @@ class VerdictReadScopeTests(unittest.TestCase):
     def test_resource_failure_is_sticky_even_after_a_positive_record_verdict(self):
         record, reader = self.record(), self.reader()
         large = self.store.artifact("evidence", b"x" * 20000, ".txt")
-        with reader._reads.scope():
+        inner_checked = False
+        with self.assertRaises(ResourceLimit) as exit_refusal, reader._reads.scope():
             self.assertTrue(team._record_valid(reader, record))
             with patch.dict(os.environ, {"AISPA_MAX_MEMORY_BYTES": "4096"}):
                 with self.assertRaises(ResourceLimit):
@@ -304,6 +305,9 @@ class VerdictReadScopeTests(unittest.TestCase):
                 team._record_valid(reader, record)
             with self.assertRaises(ResourceLimit):
                 reader.finish_snapshot()
+            inner_checked = True
+        self.assertTrue(inner_checked)
+        self.assertIn("maxMemoryBytes", str(exit_refusal.exception))
 
     def test_failed_final_confinement_cannot_publish_a_partial_status(self):
         ref = self.store.artifact("reports", b'{"value":"same"}', ".json")

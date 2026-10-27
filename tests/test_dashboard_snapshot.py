@@ -14,6 +14,7 @@ import test_dashboard_server as server_tests
 from aispa_core import dashboard_server as dashboard
 from aispa_core.store import Invalid, atomic_json
 from aispa_core.contracts import artifact_valid
+from aispa_core.dashboard_reader import SnapshotJournal
 
 
 def response(url):
@@ -202,6 +203,31 @@ class DashboardSnapshotTests(unittest.TestCase):
             self.assertEqual(failed["error"]["code"], "snapshot_resource_limit")
             self.assertEqual(failed["lastSnapshot"]["capturedAt"], ready["snapshot"]["capturedAt"])
             self.assertEqual(failed["lastSnapshot"]["freshness"], "historical")
+
+    def test_expiry_after_finish_before_context_check_never_publishes_ready(self):
+        original = SnapshotJournal.finish_snapshot
+        expire = threading.Event()
+
+        def finish(reader):
+            basis = original(reader)
+            if expire.is_set():
+                reader._reads._stream_budget().deadline = -1.0
+            return basis
+
+        with patch.object(SnapshotJournal, "finish_snapshot", finish), self.inline_server(dashboard.project) as url:
+            expire.set()
+            code, failed = response(url)
+            if code == 202:
+                code, failed = self.await_ready(url, failed)
+            self.assertEqual(code, 409)
+            self.assertEqual(failed["error"]["code"], "snapshot_resource_limit")
+            self.assertIsNone(failed.get("lastSnapshot"))
+            expire.clear()
+            code, ready = response(url)
+            if code == 202:
+                code, ready = self.await_ready(url, ready)
+            self.assertEqual(code, 200)
+            self.assertEqual(ready["snapshot"]["freshness"], "current")
 
     def test_superseded_or_expired_ready_generation_cannot_advertise_current_pass(self):
         original = dashboard.project

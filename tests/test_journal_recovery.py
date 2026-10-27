@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core.store import Invalid, Journal, timestamp, digest
+from aispa_core.verified_reads import ResourceLimit
 
 
 class RecoveryTests(unittest.TestCase):
@@ -66,6 +67,56 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn("acceptance", recovered["gates"])
         self.assertEqual(recovered["taskHistory"]["T01"][0]["criticBudget"], 2)
         self.assertEqual(self.store.verified_events()[-1]["event"], "journal-recovered")
+
+    def test_recovery_copies_checked_source_generation(self):
+        original = self.torn()
+        candidate = self.store.inspect_recovery()
+        path_open = Path.open
+
+        def guarded(path, *args, **kwargs):
+            if path == self.path and args and args[0] == "rb":
+                raise AssertionError("raw recovery source Path.open")
+            return path_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", guarded):
+            self.store.apply_recovery(candidate["journalSha256"], confirmed=True)
+        self.assertEqual((self.store.run / candidate["backupFile"]).read_bytes(), original)
+
+    def test_recovery_keeps_full_journal_above_per_input_cap(self):
+        original = self.torn()
+        self.assertGreater(len(original), 128)
+        with patch.dict(os.environ, {"AISPA_MAX_INPUT_BYTES": "128"}):
+            candidate = self.store.inspect_recovery()
+            self.store.apply_recovery(candidate["journalSha256"], confirmed=True)
+        self.assertEqual((self.store.run / candidate["backupFile"]).read_bytes(), original)
+
+    def test_recovery_pointer_keeps_resource_limit_class(self):
+        with patch.object(self.store, "_active_pointer",
+                          side_effect=ResourceLimit("RESOURCE_LIMIT operationSeconds: fixture")):
+            with self.assertRaises(ResourceLimit):
+                self.store._active_run_for_recovery()
+
+    def test_existing_backup_hash_obeys_recovery_budget(self):
+        original = self.torn()
+        candidate = self.store.inspect_recovery()
+        backup = self.store.run / candidate["backupFile"]
+        backup.parent.mkdir(parents=True)
+        backup.write_bytes(original)
+        os.chmod(backup, 0o600)
+        from aispa_core import store as store_module
+        original_hash = store_module.file_hash
+
+        def expire_backup(path, *args, **kwargs):
+            if Path(path) == backup:
+                budget = kwargs.get("budget")
+                self.assertIsNotNone(budget)
+                budget.deadline = -1.0
+            return original_hash(path, *args, **kwargs)
+
+        with patch.object(store_module, "file_hash", side_effect=expire_backup):
+            with self.assertRaises(ResourceLimit):
+                self.store.apply_recovery(candidate["journalSha256"], confirmed=True)
+        self.assertEqual(self.path.read_bytes(), original)
 
     def test_corrupt_middle_remains_blocked_even_with_torn_tail(self):
         self.store.append(self.state, "second")
@@ -136,13 +187,13 @@ class RecoveryTests(unittest.TestCase):
         original_hash = Journal._hash_file
         calls = 0
 
-        def interleave(path):
+        def interleave(path, **kwargs):
             nonlocal calls
             calls += 1
             if calls == 3:
                 with self.path.open("ab") as stream:
                     stream.write(b" ")
-            return original_hash(path)
+            return original_hash(path, **kwargs)
 
         with patch.object(Journal, "_hash_file", staticmethod(interleave)):
             with self.assertRaises(Invalid):

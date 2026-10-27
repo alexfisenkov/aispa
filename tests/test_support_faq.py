@@ -18,6 +18,7 @@ PACKAGE = ROOT / "skills/aispa"
 sys.path.insert(0, str(PACKAGE / "tools"))
 from aispa_core import VERSION, updates
 from aispa_core.store import Invalid
+from aispa_core.verified_reads import ResourceLimit
 
 
 def sha(data):
@@ -66,6 +67,71 @@ class SupportFaqTests(unittest.TestCase):
             self.assertEqual(len(rendered["receipt"]["sourceSha256"]), 64)
             self.assertEqual(module.render(selected, format="html"), rendered)
             self.assertNotIn("canonicalSha256", value)
+
+    def test_selection_uses_one_operation_budget_across_source_files(self):
+        from aispa_core import scale
+        original = scale.Budget
+        created = []
+
+        def budget():
+            instance = original()
+            created.append(instance)
+            return instance
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            with patch.object(scale, "Budget", side_effect=budget):
+                self.module().select(root, version="0.4.0")
+        self.assertEqual(len(created), 1)
+
+    def test_resource_limit_is_not_mislabeled_as_version_or_json_error(self):
+        from aispa_core import scale
+        module = self.module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            expired = scale.Budget()
+            expired.deadline = -1.0
+            with patch.object(scale, "Budget", return_value=expired):
+                with self.assertRaises(ResourceLimit):
+                    module.select(root, version="0.4.0")
+
+            original = module._file
+
+            def expire_after_canonical(package, name, *, budget=None):
+                data = original(package, name, budget=budget)
+                if name == "references/support-faq.json":
+                    budget.deadline = -1.0
+                return data
+
+            with patch.object(module, "_file", side_effect=expire_after_canonical):
+                with self.assertRaises(ResourceLimit):
+                    module.select(root, version="0.4.0")
+
+    def test_selection_checks_deadline_after_result_materialization(self):
+        from aispa_core import scale
+        module = self.module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            budget = scale.Budget()
+            original = budget.check
+            passed_last_check = False
+
+            def expire_after_old_last_check(size=0, **kwargs):
+                nonlocal passed_last_check
+                result = original(size, **kwargs)
+                if kwargs.get("path") == "FAQ selection" and not passed_last_check:
+                    passed_last_check = True
+                    budget.deadline = -1.0
+                return result
+
+            with patch.object(budget, "check", side_effect=expire_after_old_last_check), \
+                    patch.object(scale, "Budget", return_value=budget):
+                with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                    module.select(root, version="0.4.0")
+            self.assertTrue(passed_last_check)
 
     def test_schema_selection_tamper_and_private_metadata_fail_closed(self):
         module = self.module()

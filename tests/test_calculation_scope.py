@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import dashboard_reader, dashboard_snapshot, display
 from aispa_core.store import Invalid, Journal, digest
-from aispa_core.verified_reads import VerifiedReads, current_scope
+from aispa_core.verified_reads import ResourceLimit, VerifiedReads, current_scope
 import test_cli_output as cli_helpers
 import test_workflow as helpers
 
@@ -51,6 +51,56 @@ class CalculationScopeTests(unittest.TestCase):
         self.assertLessEqual(hashes.call_count, 2,
                              "Nested projection rehashed events.jsonl instead of reusing its explicit scope")
         self.assertEqual(basis["journalSha256"], hashlib.sha256((self.store.run / "events.jsonl").read_bytes()).hexdigest())
+
+    def test_cached_artifact_json_and_journal_refuse_expired_scope(self):
+        ref = self.store.artifact("reports", b'{"value":"stable"}', ".json")
+        reader, _ = self.reader()
+        with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), reader._reads.scope():
+            self.assertEqual(reader.json(ref)["value"], "stable")
+            reader.read_journal(include_events=True)
+            reader.code()
+            reader._reads._stream_budget().deadline = -1.0
+            for operation in (lambda: reader.artifact_bytes(ref), lambda: reader.json(ref),
+                              lambda: reader.read_journal(include_events=True), reader.code):
+                with self.subTest(operation=operation), self.assertRaisesRegex(Invalid, "operationSeconds"):
+                    operation()
+
+    def test_final_pointer_checks_use_checked_fresh_reads(self):
+        reader, _ = self.reader()
+        pointer = self.store.home / "active.json"
+        original = Path.read_bytes
+
+        def guarded(path, *args, **kwargs):
+            if path == pointer:
+                raise AssertionError("raw active pointer Path.read_bytes")
+            return original(path, *args, **kwargs)
+
+        with reader._reads.scope(), patch.object(Path, "read_bytes", guarded):
+            reader.finish_snapshot()
+
+    def test_final_candidate_digest_cannot_finish_after_deadline_outside_scope(self):
+        reader, _ = self.reader()
+        original = dashboard_reader.digest
+
+        def expire_after_digest(value):
+            result = original(value)
+            reader._reads._stream_budget().deadline = -1.0
+            return result
+
+        with patch.object(dashboard_reader, "digest", side_effect=expire_after_digest):
+            with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                reader.finish_snapshot()
+
+    def test_malformed_active_pointer_is_a_controlled_snapshot_refusal(self):
+        reader, _ = self.reader()
+        pointer = self.store.home / "active.json"
+        original = pointer.read_bytes()
+        try:
+            pointer.write_bytes(b"[]")
+            with reader._reads.scope(), self.assertRaises(Invalid):
+                reader.finish_snapshot()
+        finally:
+            pointer.write_bytes(original)
 
     def test_outside_scope_and_unrelated_scope_still_refuse_immediate_corruption(self):
         for unrelated_scope in (False, True):

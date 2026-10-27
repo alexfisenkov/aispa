@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+import stat
 
 from . import participants, scale
 from .contracts import require
@@ -29,44 +30,65 @@ def _pin(state):
     return repairs[-1]["runtimePath"] if repairs else "runtime"
 
 
-def _package_digest(path):
+def _package_digest(path, *, budget=None):
     require(path.is_dir() and not is_link(path), "Preflight: pinned runtime отсутствует")
     rows = {}
-    for file in sorted(path.rglob("*")):
+    budget = budget or scale.Budget()
+    retained = 0
+    for file in path.rglob("*"):
+        budget.check(0, path=str(file))
         require(not is_link(file), "Preflight: ссылка в pinned runtime")
         if file.is_file() and "__pycache__" not in file.parts and file.suffix != ".pyc":
-            rows[file.relative_to(path).as_posix()] = file_hash(file)
-    return digest(rows)
+            name = file.relative_to(path).as_posix()
+            retained += 256 + len(name) * 4
+            budget.check_memory(retained, path=str(file))
+            previous_memory = budget.base_memory
+            budget.base_memory += retained
+            try:
+                rows[name] = file_hash(file, budget=budget, nofollow=True)
+            finally:
+                budget.base_memory = previous_memory
+    budget.check(0, path=str(path))
+    result = digest(rows)
+    budget.check(0, path=str(path))
+    return result
 
 
-def identity(store, state):
-    journal = store.read_journal()
+def identity(store, state, *, budget=None):
+    journal = store.read_journal(budget=budget)
     require(journal["last"]["state"]["run"] == state["run"] == store.run.name,
             "Preflight: active run не совпадает с журналом")
     require(digest(journal["last"]["state"]) == digest(state),
             "Preflight: состояние не сохранено или устарело относительно журнала")
-    return {"root": str(store.root), "run": state["run"], "runtimeDigest": state.get("runtimeDigest"),
+    result = {"root": str(store.root), "run": state["run"], "runtimeDigest": state.get("runtimeDigest"),
             "runtimePath": _pin(state), "journalSequence": journal["last"]["sequence"],
             "journalHash": journal["last"]["hash"], "stateDigest": digest(state)}
+    if budget is not None:
+        budget.check(0, path="preflight identity")
+    return result
 
 
-def _artifact(store, ref, *, state=None):
+def _artifact(store, ref, *, state=None, budget=None, source_metadata=None):
     require(isinstance(ref, dict) and isinstance(ref.get("file"), str)
             and isinstance(ref.get("sha256"), str), "Preflight: нужен источник с file/SHA")
     path = confined(store.run, ref["file"])
     return scale.read_file(path, allow_manifest=scale.enabled(state if state is not None else store.read_journal()["last"]["state"]),
-                           expected_sha256=ref["sha256"])
+                           expected_sha256=ref["sha256"], budget=budget,
+                           source_metadata=source_metadata)
 
 
-def _host(store, host, state):
+def _host(store, host, state, *, budget=None):
     require(isinstance(host, dict) and set(host) == {"source"}, "Preflight: нужен source-bound host report")
-    value = json.loads(_artifact(store, host["source"], state=state))
+    value = json.loads(_artifact(store, host["source"], state=state, budget=budget))
+    if budget is not None:
+        budget.check(0, path="host report")
     require(isinstance(value, dict) and value.get("schema") == 1, "Preflight: неверный host report")
     return value
 
 
-def _sources(store, state):
+def _sources(store, state, *, budget=None):
     refs, seen = [], set()
+    budget = budget or scale.Budget()
 
     def add(ref, kind):
         if not isinstance(ref, dict) or "file" not in ref or "sha256" not in ref:
@@ -74,13 +96,28 @@ def _sources(store, state):
         key = (ref["file"], ref["sha256"])
         if key in seen:
             return
-        raw = _artifact(store, ref, state=state)
+        physical = {}
+        raw = _artifact(store, ref, state=state, budget=budget, source_metadata=physical)
         path = confined(store.run, ref["file"])
-        physical = path.read_bytes()
-        require(hashlib.sha256(physical).hexdigest() == ref["sha256"], "Preflight: source changed during reading")
-        refs.append({"kind": kind, "file": ref["file"], "absolutePath": str(path),
-                     "sha256": ref["sha256"], "payloadSha256": hashlib.sha256(raw).hexdigest(),
-                     "representation": "manifest" if scale.is_manifest(physical) else "plain"})
+        previous_memory = budget.base_memory
+        try:
+            budget.check_memory(len(raw) * 4, path=str(path))
+            budget.base_memory += len(raw) * 4
+            current = path.stat()
+            budget.check(current.st_size, path=str(path))
+            generation = (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)
+            require(not is_link(path) and stat.S_ISREG(current.st_mode)
+                    and generation == physical["generation"]
+                    and physical["sha256"] == ref["sha256"],
+                    "Preflight: source changed during reading")
+            refs.append({"kind": kind, "file": ref["file"], "absolutePath": str(path),
+                         "sha256": ref["sha256"], "payloadSha256": hashlib.sha256(raw).hexdigest(),
+                         "representation": physical["representation"]})
+        finally:
+            budget.base_memory = previous_memory
+        accounted = 256 + 4 * (len(kind) + len(ref["file"]) + len(ref["sha256"]))
+        budget.check_memory(accounted, path=ref["file"])
+        budget.base_memory += accounted
         seen.add(key)
 
     for ref in state.get("briefs", []):
@@ -104,15 +141,18 @@ def _sources(store, state):
             add(value, key)
             if isinstance(value, dict):
                 add(value.get("report"), key)
+    budget.check(0, path="preflight sources")
     return refs
 
 
-def _relocation(store, state, host):
+def _relocation(store, state, host, *, budget=None):
     previous = state.get("projectRoot", str(store.root))
     if Path(previous).resolve() == store.root:
         return
     ref = host.get("relocation", {}).get("source")
-    value = json.loads(_artifact(store, ref, state=state))
+    value = json.loads(_artifact(store, ref, state=state, budget=budget))
+    if budget is not None:
+        budget.check(0, path="relocation report")
     require(isinstance(value.get("fromRoot"), str) and isinstance(value.get("toRoot"), str)
             and Path(value["fromRoot"]).resolve() == Path(previous).resolve()
             and Path(value["toRoot"]).resolve() == store.root
@@ -120,13 +160,14 @@ def _relocation(store, state, host):
             "Preflight: relocation identity не совпадает")
     brief = next((b for b in state["briefs"] if b["id"] == value.get("brief")), None)
     require(brief and isinstance(value.get("quote"), str) and value["quote"].strip()
-            and value["quote"] in _artifact(store, brief, state=state).decode("utf-8"),
+            and value["quote"] in _artifact(store, brief, state=state, budget=budget).decode("utf-8"),
             "Preflight: relocation требует текущую цитату владельца")
 
 
 def _check(store, state, envelope, purpose, *, current_basis=True):
     require(purpose in PURPOSES, "Preflight: неизвестная цель")
-    expected = identity(store, state)
+    budget = scale.Budget()
+    expected = identity(store, state, budget=budget)
     report = {"ok": False, "basis": digest(expected), "identity": expected, "purpose": purpose,
               "blockers": [], "actions": [], "requiredSources": [],
               "evidenceLevel": "source-bound host report; not host authentication",
@@ -137,11 +178,11 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
         report["actions"].append({"action": "resolve-" + code.lower(), "detail": str(detail), "requiresReply": False})
 
     try:
-        report["requiredSources"] = _sources(store, state)
-        require(_package_digest(confined(store.run, _pin(state))) == state.get("runtimeDigest"),
+        report["requiredSources"] = _sources(store, state, budget=budget)
+        require(_package_digest(confined(store.run, _pin(state)), budget=budget) == state.get("runtimeDigest"),
                 "Preflight: pinned runtime digest mismatch")
-        host = _host(store, envelope, state)
-        _relocation(store, state, host)
+        host = _host(store, envelope, state, budget=budget)
+        _relocation(store, state, host, budget=budget)
         observed = host.get("identity")
         require(isinstance(observed, dict), "Preflight: host identity отсутствует")
         keys = ("root", "run", "runtimeDigest", "runtimePath")
@@ -183,10 +224,15 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
             provided_rules = {row.get("file") for row in rules if isinstance(row, dict)}
             require(required_rules <= provided_rules,
                     "Preflight: applicable rule source omitted: " + ", ".join(sorted(required_rules - provided_rules)))
+        from .verified_reads import physical_read
         for rule in rules:
             path = confined(store.root, rule.get("file", ""))
-            require(path.is_file() and file_hash(path) == rule.get("sha256"), "Preflight: rule SHA mismatch: " + str(path))
-            text = path.read_text(encoding="utf-8")
+            raw = physical_read(path, budget)
+            require(hashlib.sha256(raw).hexdigest() == rule.get("sha256"),
+                    "Preflight: rule SHA mismatch: " + str(path))
+            text = raw.decode("utf-8")
+            budget.check_memory(len(raw) * 4 + len(text) * 4, path=str(path))
+            budget.check(0, path=str(path))
             if "delegation" in required and DENIAL.search(text):
                 block("RULE", {"file": rule["file"], "sha256": rule["sha256"], "quote": DENIAL.search(text).group()})
             for decision in rule.get("decisions", []):
@@ -194,6 +240,7 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
                         and decision["quote"] in text, "Preflight: rule decision quote отсутствует")
                 if decision.get("action") in required | {"all"} and decision.get("decision") != "allow":
                     block("RULE", {"file": rule["file"], **decision})
+            budget.base_memory += len(raw) * 4 + len(text) * 4
         if purpose not in ("browser", "identity"):
             assignments = host.get("assignments")
             require(isinstance(assignments, list), "Preflight: live assignments не наблюдались")
@@ -204,6 +251,7 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
                     block("ASSIGNMENT", actor["id"] + ": live/completed identity unknown; preserve history and replace explicitly")
         report["host"] = {"runtime": host["runtime"], "session": host["session"], "source": envelope["source"],
                           "observedAt": host["observedAt"]}
+        budget.check(0, path="preflight")
     except Invalid as error:
         from .verified_reads import ResourceLimit
         if isinstance(error, ResourceLimit):
@@ -212,6 +260,7 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
     except (OSError, ValueError, TypeError, KeyError) as error:
         block("HOST_SOURCE", error)
     report["ok"] = not report["blockers"]
+    budget.check(0, path="preflight result")
     return report
 
 

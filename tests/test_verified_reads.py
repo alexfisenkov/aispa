@@ -14,6 +14,7 @@ from aispa_core import docmeta, project_documents, scale
 from aispa_core.contracts import artifact_valid
 from aispa_core.dashboard_reader import SnapshotJournal
 from aispa_core.store import Invalid
+from aispa_core.verified_reads import ResourceLimit, VerifiedReads, current_scope, resource_limit
 import test_workflow as workflow_tests
 
 
@@ -94,6 +95,143 @@ class VerifiedReadTests(unittest.TestCase):
         chunk.write_text(json.dumps(value), encoding="utf-8")
         self.assertEqual(path.read_bytes(), outer)
         self.assertFalse(artifact_valid(self.reader(), ref))
+
+    def test_hashes_and_final_revalidation_share_one_calculation_deadline(self):
+        first = self.fx.root.resolve() / "first.bin"
+        second = self.fx.root.resolve() / "second.bin"
+        first.write_bytes(b"first source")
+        second.write_bytes(b"second source")
+        first_sha = hashlib.sha256(first.read_bytes()).hexdigest()
+        second_sha = hashlib.sha256(second.read_bytes()).hexdigest()
+        clock = [100.0]
+        with patch.dict(os.environ, {"AISPA_OPERATION_SECONDS": "5"}), \
+                patch.object(scale.time, "monotonic", side_effect=lambda: clock[0]):
+            delayed = VerifiedReads()
+            with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), delayed.scope():
+                clock[0] = 106.0
+                with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                    delayed.hash_valid(first, first_sha)
+
+            clock[0] = 110.0
+            reads = VerifiedReads()
+            with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), reads.scope():
+                self.assertTrue(reads.hash_valid(first, first_sha))
+                clock[0] = 116.0
+                with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                    reads.hash_valid(second, second_sha)
+
+            clock[0] = 120.0
+            fresh = VerifiedReads()
+            with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), fresh.scope():
+                self.assertTrue(fresh.hash_valid(first, first_sha))
+                clock[0] = 124.0
+                self.assertTrue(fresh.hash_valid(second, second_sha))
+                clock[0] = 126.0
+                with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                    fresh.revalidate()
+
+            clock[0] = 130.0
+            next_calculation = VerifiedReads()
+            with next_calculation.scope():
+                self.assertTrue(next_calculation.hash_valid(second, second_sha))
+                next_calculation.revalidate()
+
+    def test_protected_hash_refuses_regular_symlink_leaf(self):
+        source = self.fx.root / "regular.bin"
+        source.write_bytes(b"stable source")
+        link = self.fx.root / "protected-link.bin"
+        try:
+            link.symlink_to(source)
+        except OSError:
+            self.skipTest("Symlink creation requires a Windows privilege")
+        reads = VerifiedReads()
+        with reads.scope(), self.assertRaises(Invalid):
+            reads.hash_valid(link, hashlib.sha256(source.read_bytes()).hexdigest())
+
+    def test_cached_parse_digest_and_verdict_refuse_expired_scope(self):
+        raw = b'{"value":"stable"}'
+        for operation in (lambda reads: reads.parse(raw), lambda reads: reads.value_hash(raw),
+                          lambda reads: reads.sha256(self.fx.root / "unused", raw)):
+            with self.subTest(operation=operation):
+                reads = VerifiedReads()
+                with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), reads.scope():
+                    operation(reads)
+                    reads._stream_budget().deadline = -1.0
+                    with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                        operation(reads)
+        reader = self.reader()
+        with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), reader._reads.scope():
+            self.assertTrue(reader._reads.verdict(reader, "synthetic", {"value": 1}, lambda: True))
+            reader._reads._stream_budget().deadline = -1.0
+            with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                reader._reads.verdict(reader, "synthetic", {"value": 1}, lambda: True)
+
+    def test_revalidation_checks_deadline_after_confinement_without_hashes(self):
+        reads = VerifiedReads()
+        path = self.fx.root.resolve() / "confinement.txt"
+        path.write_bytes(b"source")
+        from aispa_core import verified_reads as reader_module
+        original = reader_module.confined
+        clock = [100.0]
+
+        def delayed(base, name):
+            value = original(base, name)
+            clock[0] = 106.0
+            return value
+
+        with patch.dict(os.environ, {"AISPA_OPERATION_SECONDS": "5"}), \
+                patch.object(scale.time, "monotonic", side_effect=lambda: clock[0]):
+            with self.assertRaisesRegex(ResourceLimit, "operationSeconds"), reads.scope():
+                reads._remember_confinement(path.parent, path.name, path)
+                with patch.object(reader_module, "confined", side_effect=delayed):
+                    with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+                        reads.revalidate()
+
+    def test_manifest_resource_limit_never_becomes_plain_json(self):
+        raw = b'{"aispaManifest":1}'
+
+        class LimitedCache:
+            def read(self, *_args, **_kwargs):
+                return raw
+
+            def parse(self, _raw):
+                raise ResourceLimit("RESOURCE_LIMIT operationSeconds: fixture")
+
+        cache = LimitedCache()
+        for operation in (lambda: scale._object(raw, cache=cache),
+                          lambda: scale.is_manifest(raw, cache=cache),
+                          lambda: scale.read_file(self.fx.root / "manifest.json", cache=cache)):
+            with self.subTest(operation=operation), self.assertRaises(ResourceLimit):
+                operation()
+        self.assertFalse(scale.is_manifest(b'{"aispaManifest":'))
+        with self.assertRaises(Invalid):
+            scale._object(b'{"aispaManifest":')
+
+    def test_successful_scope_exit_checks_deadline_and_swallowed_failure(self):
+        reads = VerifiedReads()
+        with self.assertRaisesRegex(ResourceLimit, "operationSeconds"):
+            with reads.scope():
+                self.assertIs(current_scope(), reads)
+                reads._stream_budget().deadline = -1.0
+        self.assertIsNone(current_scope())
+
+        another = VerifiedReads()
+        with self.assertRaisesRegex(ResourceLimit, "synthetic swallowed"):
+            with another.scope():
+                try:
+                    raise resource_limit("RESOURCE_LIMIT synthetic swallowed")
+                except ResourceLimit:
+                    pass
+        self.assertIsNone(current_scope())
+
+        exceptional = VerifiedReads()
+        with self.assertRaisesRegex(RuntimeError, "original body"):
+            with exceptional.scope():
+                exceptional._stream_budget().deadline = -1.0
+                raise RuntimeError("original body")
+        self.assertIsNone(current_scope())
+        with VerifiedReads().scope():
+            self.assertIsNotNone(current_scope())
 
     def test_immutable_document_binding_obeys_materialization_memory_budget(self):
         fx = self.fx

@@ -621,9 +621,14 @@ class AttachmentReplayRegressions(unittest.TestCase):
                     for text in ('RESOURCE_LIMIT', 'maxInputBytes', str(path), 'continuation:'):
                         self.assertIn(text, str(caught.exception))
             snapshot = SnapshotJournal(final.root); state = snapshot.load()
-            with snapshot._reads.scope():
-                with self.assertRaises(ResourceLimit):
+            inner_checked = False
+            with self.assertRaises(ResourceLimit) as exit_refusal, snapshot._reads.scope():
+                with self.assertRaises(ResourceLimit) as inner_refusal:
                     project(snapshot, state)
+                inner_checked = True
+            self.assertTrue(inner_checked)
+            self.assertIn("maxInputBytes", str(inner_refusal.exception))
+            self.assertIn("maxInputBytes", str(exit_refusal.exception))
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(file_hash(final.store.run / 'events.jsonl'), journal)
         self.assertEqual(final.state['status'], 'running')

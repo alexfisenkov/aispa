@@ -18,7 +18,7 @@
       },
       {
         "path": "tools/aispa_core/support_faq.py",
-        "sha256": "ed7abc7d23bd79dde8a48432bc26328416e312e0b80c2bb2aec1f7b16f573395"
+        "sha256": "28b6a11f8131794dfa7a835768b550a246e5d6094a14ef203217e4f974a9c544"
       },
       {
         "path": "tools/aispa_core/assessment.py",

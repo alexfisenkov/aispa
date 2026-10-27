@@ -80,13 +80,18 @@ def check_value(value, state):
     return None
 
 
-def _read(path, budget, limit=None, cache=None):
-    return cache.read(path, budget, limit) if cache is not None else physical_read(path, budget, limit)
+def _read(path, budget, limit=None, cache=None, source_metadata=None):
+    if source_metadata is not None and cache is not None:
+        raise Invalid("AISpa scale: physical source metadata requires a fresh read")
+    return (cache.read(path, budget, limit) if cache is not None else
+            physical_read(path, budget, limit, metadata=source_metadata))
 
 
 def _object(raw, cache=None):
     try:
         return cache.parse(raw) if cache is not None else json.loads(raw)
+    except Invalid:
+        raise
     except (ValueError, UnicodeError, RecursionError) as error:
         raise Invalid('AISpa scale: malformed manifest or chunk JSON') from error
 
@@ -97,17 +102,28 @@ def is_manifest(raw, cache=None):
         return False
     try:
         value = cache.parse(raw) if cache is not None else json.loads(raw)
+    except Invalid:
+        raise
     except (ValueError, UnicodeError, RecursionError):
         return False
     return isinstance(value, dict) and 'aispaManifest' in value
 
 
-def read_file(path, *, allow_manifest=True, budget=None, expected_sha256=None, verify_plain=True, cache=None):
+def read_file(path, *, allow_manifest=True, budget=None, expected_sha256=None,
+              verify_plain=True, cache=None, source_metadata=None):
     budget = budget or Budget()
-    raw = _read(path, budget, cache=cache)
-    if expected_sha256 is not None and (verify_plain or is_manifest(raw, cache=cache)) and (cache.sha256(path, raw) if cache is not None else hashlib.sha256(raw).hexdigest()) != expected_sha256:
+    physical = {} if source_metadata is not None else None
+    raw = _read(path, budget, cache=cache, source_metadata=physical)
+    manifest = is_manifest(raw, cache=cache)
+    raw_sha = ((cache.sha256(path, raw) if cache is not None else hashlib.sha256(raw).hexdigest())
+               if source_metadata is not None or expected_sha256 is not None else None)
+    if source_metadata is not None:
+        source_metadata.clear()
+        source_metadata.update(physical)
+        source_metadata.update(sha256=raw_sha, representation="manifest" if manifest else "plain")
+    if expected_sha256 is not None and (verify_plain or manifest) and raw_sha != expected_sha256:
         raise Invalid('AISpa scale: immutable artifact SHA mismatch')
-    if not is_manifest(raw, cache=cache):
+    if not manifest:
         budget.check(len(raw), path=str(path), progress=len(raw))
         return raw
     if not allow_manifest:
