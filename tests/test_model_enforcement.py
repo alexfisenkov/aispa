@@ -207,6 +207,25 @@ class CapabilityBlockTests(RoutedFixture):
         self.assertEqual({o["id"] for o in saved[0]["options"]}, {"enable-model", "owner-allows-other", "leave-in-remaining"})
         self.assertEqual(self.state.get("participants", {}), {})
 
+    def test_a_repeated_refusal_for_the_same_role_model_and_task_keeps_one_blocker(self):
+        evidence = host_model_source(self.store, self.state, runtime="claude-code", provider="anthropic",
+                                     requested="claude-sonnet-5-5", native="judge", session="host-session")
+        events = []
+        def save(event):
+            events.append(event)
+            self.store.append(self.state, event)
+        for native in ("judge", "judge", " judge"):
+            with self.assertRaisesRegex(Invalid, "BLOCKED_MODEL_CAPABILITY"):
+                model_routes.enforce(self.store, self.state, "brief-reviewer", "claude-code", native, "host-session",
+                                     "claude-opus-5-5", "high", evidence, save=save)
+        self.assertEqual(len(self.store.load()["modelBlocks"]), 1)
+        self.assertEqual(events, ["model-capability-blocked:brief-reviewer"])
+        # Another role is a separate blocker.
+        with self.assertRaisesRegex(Invalid, "BLOCKED_MODEL_CAPABILITY"):
+            model_routes.enforce(self.store, self.state, "planner", "claude-code", "judge", "host-session",
+                                 "claude-opus-5-5", "high", evidence, save=save)
+        self.assertEqual([row["role"] for row in self.store.load()["modelBlocks"]], ["brief-reviewer", "planner"])
+
 
 class CoordinatorTests(RoutedFixture):
     def test_coordinator_model_is_free_but_a_second_coordinator_in_the_session_is_refused(self):
@@ -255,6 +274,18 @@ class CoordinatorTests(RoutedFixture):
         self.assertFalse(participants.actor_check(self.store, self.state, stray, "coordinator"))
         with self.assertRaisesRegex(Invalid, "помощника регистрируйте его рабочей ролью"):
             self.register("coordinator", "claude-code", native="helper")
+
+
+    def test_the_coordinator_role_marked_external_is_a_clear_refusal_not_a_crash(self):
+        for external in (True, None, "yes", 1):
+            for call in (lambda: model_routes.check_assignment(self.state, "coordinator", "claude-code", "claude-opus-5-5",
+                                                               "high", session="host-session", native_id="x",
+                                                               external=external),
+                         lambda: model_routes.enforce(self.store, self.state, "coordinator", "claude-code", "x",
+                                                      "host-session", "claude-opus-5-5", "high", None,
+                                                      external=external)):
+                with self.subTest(external=external), self.assertRaisesRegex(Invalid, "Роль coordinator.*главн"):
+                    call()
 
 
 class RoutingBlockTests(RoutedFixture):

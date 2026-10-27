@@ -34,6 +34,22 @@ elif mode == "codex":
     print(json.dumps({"type": "thread.started"}))
     print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 200, "cached_input_tokens": 150, "output_tokens": 40}}))
     print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 300, "cached_input_tokens": 0, "output_tokens": 60}}))
+elif mode in ("claude-models", "claude-two"):
+    # The top-level usage covers the main chat only; modelUsage also has every subagent model.
+    answers = 2 if mode == "claude-two" else 1
+    for index in range(answers):
+        print(json.dumps({"type": "result", "result": "done", "usage": {"input_tokens": 1, "output_tokens": 1},
+                          "modelUsage": {
+                              "claude-opus-5-5": {"inputTokens": 100 + index, "outputTokens": 50,
+                                                  "cacheReadInputTokens": 1000, "cacheCreationInputTokens": 10,
+                                                  "costUSD": 0.5},
+                              "claude-sonnet-5-5": {"inputTokens": 400, "outputTokens": 70,
+                                                    "cacheReadInputTokens": 2000, "cacheCreationInputTokens": 30}}}))
+elif mode == "codex-long":
+    print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 200, "output_tokens": 40}}))
+    sys.stdout.write("x" * (5 * 1024 * 1024) + "\\n")
+    print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 300, "output_tokens": 60}}))
+    print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 7, "output_tokens": 3}}))
 elif mode == "silent":
     print("no json here")
 elif mode == "sleep":
@@ -117,6 +133,20 @@ class PairTests(ToolCase):
         self.assertEqual(record["autopilot"]["tokens"], "unknown")
         code, out2, record = self.pair(self.command("codex"), self.command("silent"))
         self.assertEqual(record["aispa"]["tokens"], {"input": 500, "output": 100, "total": 600})
+
+    def test_claude_tokens_count_every_model_of_model_usage_not_only_the_main_chat(self):
+        code, out, record = self.pair(self.command("claude-models"), self.command("claude-two"))
+        # Hand sums of the fixture: opus 100+50+1000+10, sonnet 400+70+2000+30.
+        self.assertEqual(record["aispa"]["tokens"], {"input": 500, "output": 120, "cacheRead": 3000,
+                                                      "cacheCreation": 40, "total": 3660})
+        # Two answers of a wrapper that continues the run: both are counted (second opus input is 101).
+        self.assertEqual(record["autopilot"]["tokens"], {"input": 1001, "output": 240, "cacheRead": 6000,
+                                                          "cacheCreation": 80, "total": 7321})
+
+    def test_tokens_are_counted_on_the_whole_stdout_and_only_the_saved_copy_is_cut(self):
+        code, out, record = self.pair(self.command("codex-long"), self.command("silent"), limit=60)
+        self.assertEqual(record["aispa"]["tokens"], {"input": 507, "output": 103, "total": 610})
+        self.assertLessEqual((out / "aispa-stdout.txt").stat().st_size, measure.MAX_STDOUT_BYTES)
 
     def test_questions_and_stops_come_from_the_events_file_and_are_unknown_without_it(self):
         code, out, record = self.pair(self.command("claude", "events"), self.command("claude"))

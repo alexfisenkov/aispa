@@ -31,6 +31,9 @@ FORBIDDEN_NAMES = ("spec.md", "manifest.md", "interfaces.md")
 HIDDEN_DIR = ".autopilot"
 TOKEN_FIELDS = (("input_tokens", "input"), ("output_tokens", "output"),
                 ("cache_creation_input_tokens", "cacheCreation"), ("cache_read_input_tokens", "cacheRead"))
+# Claude Code `modelUsage`: one entry per model, subagents included (top-level `usage` is the main chat only).
+MODEL_USAGE_FIELDS = (("inputTokens", "input"), ("outputTokens", "output"),
+                      ("cacheCreationInputTokens", "cacheCreation"), ("cacheReadInputTokens", "cacheRead"))
 MAX_STDOUT_BYTES = 4 * 1024 * 1024
 UNKNOWN = "unknown"
 WORSE, NOT_WORSE, NO_DATA = "хуже", "не хуже", "нет данных"
@@ -51,30 +54,56 @@ def git(repo, *args, check=True):
 
 # --- pair ------------------------------------------------------------------
 
-def parse_tokens(text):
-    """Sum of the environment's own usage numbers, or "unknown". Nothing is estimated."""
-    usages = []
+def _json_items(text):
+    """Objects the environment printed: one JSON document (object or list) or one per line."""
     try:
         whole = json.loads(text)
-        items = [whole] if isinstance(whole, dict) else []
     except ValueError:
+        whole = None
         items = []
         for line in text.splitlines():
             try:
                 value = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(value, dict):
-                items.append(value)
-    with_usage = [item for item in items if isinstance(item.get("usage"), dict)]
-    turns = [item for item in with_usage if item.get("type") == "turn.completed"]
-    usages = [item["usage"] for item in (turns or with_usage[-1:])]
+            items.extend(value if isinstance(value, list) else [value])
+    else:
+        items = whole if isinstance(whole, list) else [whole]
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _add(totals, usage, fields):
+    for source, name in fields:
+        value = usage.get(source)
+        if type(value) is int and value >= 0:
+            totals[name] = totals.get(name, 0) + value
+
+
+def parse_tokens(text):
+    """Sum of the environment's own usage numbers, or "unknown". Nothing is estimated.
+
+    Codex: every `turn.completed`. Claude Code: every answer with `modelUsage`
+    (all models, subagents included), summed over all answers when a wrapper
+    continues the run in several turns; without `modelUsage` every `result`
+    answer's `usage`. Otherwise the last top-level `usage`.
+    """
+    items = _json_items(text)
     totals = {}
-    for usage in usages:
-        for source, name in TOKEN_FIELDS:
-            value = usage.get(source)
-            if type(value) is int and value >= 0:
-                totals[name] = totals.get(name, 0) + value
+    turns = [item for item in items if item.get("type") == "turn.completed" and isinstance(item.get("usage"), dict)]
+    answers = [item for item in items if isinstance(item.get("modelUsage"), dict)]
+    if turns:
+        for item in turns:
+            _add(totals, item["usage"], TOKEN_FIELDS)
+    elif answers:
+        for item in answers:
+            for usage in item["modelUsage"].values():
+                if isinstance(usage, dict):
+                    _add(totals, usage, MODEL_USAGE_FIELDS)
+    else:
+        with_usage = [item for item in items if isinstance(item.get("usage"), dict)]
+        results = [item for item in with_usage if item.get("type") == "result"]
+        for item in results or with_usage[-1:]:
+            _add(totals, item["usage"], TOKEN_FIELDS)
     return {**totals, "total": sum(totals.values())} if totals else UNKNOWN
 
 
@@ -101,13 +130,16 @@ def make_repo(start_tree, parent, skill):
 
 
 def run_command(command, repo, env, limit):
-    """(exit code | "not-started", seconds, timed_out, stdout text)."""
+    """(exit code | "not-started", seconds, timed_out, whole stdout bytes).
+
+    Tokens are counted on the whole stdout; only the saved copy is cut to MAX_STDOUT_BYTES.
+    """
     began = time.monotonic()
     try:
         process = subprocess.Popen(shlex.split(command), cwd=repo, env=env, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, start_new_session=True)
     except (OSError, ValueError):
-        return "not-started", 0.0, False, ""
+        return "not-started", 0.0, False, b""
     timed_out = False
     try:
         out, _ = process.communicate(timeout=limit)
@@ -119,8 +151,7 @@ def run_command(command, repo, env, limit):
             process.kill()
         out, _ = process.communicate()
     seconds = time.monotonic() - began
-    return process.returncode, round(min(seconds, limit) if timed_out else seconds, 3), timed_out, \
-        out[:MAX_STDOUT_BYTES].decode("utf-8", errors="replace")
+    return process.returncode, round(min(seconds, limit) if timed_out else seconds, 3), timed_out, out or b""
 
 
 def measure_one(skill, command, args, out, brief_copy):
@@ -131,11 +162,11 @@ def measure_one(skill, command, args, out, brief_copy):
     env = {**os.environ, "AISPA_MEASURE_BRIEF": str(brief_copy), "AISPA_MEASURE_REPO": str(repo),
            "AISPA_MEASURE_EVENTS": str(events)}
     code, seconds, timed_out, stdout = run_command(command, repo, env, args.limit_seconds)
-    (out / ("%s-stdout.txt" % skill)).write_text(stdout, encoding="utf-8")
+    (out / ("%s-stdout.txt" % skill)).write_bytes(stdout[:MAX_STDOUT_BYTES])
     questions, stops = count_events(events)
     return {"skill": skill, "runtime": args.runtime, "repo": str(repo), "startTree": tree, "exitCode": code,
             "seconds": seconds, "timedOut": timed_out, "questions": questions, "stops": stops,
-            "tokens": parse_tokens(stdout)}
+            "tokens": parse_tokens(stdout.decode("utf-8", errors="replace"))}
 
 
 def pair(args):

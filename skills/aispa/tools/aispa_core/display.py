@@ -181,6 +181,26 @@ def _phase_steps(store, state, task, proof_current):
              **_phase_receipt(store, task, receipts.get(name), current_basis)} for name in TASK_PHASES]
 
 
+def _model_blocks(state):
+    """Approved models the host does not offer (modelRoutes): who needs what, for which task, and the options.
+
+    The internal message stays in the journal; the panel builds its own words in both languages.
+    """
+    rows = state.get("modelBlocks")
+    if not isinstance(rows, list):
+        return None
+    result = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        options = [{"id": o["id"], "text": o["text"]} for o in row.get("options") or []
+                   if isinstance(o, dict) and isinstance(o.get("id"), str) and isinstance(o.get("text"), str)]
+        result.append({"role": row.get("role"), "roleLabel": display_feed.ROLE_LABELS.get(row.get("role")),
+                       "runtime": row.get("runtime"), "model": row.get("model"), "effort": row.get("effort"),
+                       "task": row.get("task"), "options": options})
+    return result
+
+
 def project(store, state):
     observed = timestamp()
     gates = {name: gate_valid(store, state, name) for name in ("coverage", "plan", "acceptance")}
@@ -302,6 +322,9 @@ def project(store, state):
             "reasoningSupport": (row.get("selection") or {}).get("reasoningSupport"),
             "usage": usage.get(row.get("id"))}
             for row in participants.list_participants(store, state)]
+    blocks = _model_blocks(state)
+    if blocks is not None:
+        view["modelBlocks"] = blocks
     from . import findings, focused_review
     if "collectedFindings" in state or focused_review.enabled(state):
         view["findings"] = findings.view(state)

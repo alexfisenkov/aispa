@@ -1134,3 +1134,39 @@ test('"no connection" needs 20 seconds without any HTTP reply, and a quick failu
  const g=await fixture();g.advance(19999);assert.match(g.text('sourceLabel'),/Живые данные/);
  g.advance(2);assert.match(g.text('sourceLabel'),/Нет актуальных данных/);
 });
+// ---- Ticket F2: missing approved model, frozen remainder after an overrun -----------------------
+function modelBlock(extra={}){
+ return {role:'critic1',roleLabel:'Критик · круг 1',runtime:'claude-code',model:'claude-opus-5-5',effort:'high',task:'T01',
+  options:[{id:'enable-model',text:'Включите модель'},{id:'owner-allows-other',text:'Разрешите другую'},{id:'leave-in-remaining',text:'Оставьте в остатках'}],...extra};
+}
+test('a missing approved model is told in plain words with the role, the task and the options, in both languages',async()=>{
+ const d=sample();d.modelBlocks=[modelBlock(),modelBlock({role:'planner',roleLabel:'Планировщик',task:null,options:[]})];
+ const f=await fixture('',d);const text=f.text('modelBlocks');
+ assert.equal(f.el('modelBlocksPanel').hidden,false);
+ assert.match(text,/Критик · круг 1 · задача T01/);assert.match(text,/claude-opus-5-5 · high/);
+ assert.match(text,/claude-code/);assert.match(text,/другая модель не подставляется/i);
+ assert.match(text,/Включите модель claude-opus-5-5 в среде claude-code/);
+ assert.match(text,/Новыми словами разрешите другую модель/);assert.match(text,/Оставьте задачу в остатках/);
+ assert.match(text,/Планировщик/);
+ f.el('language').change('en');const en=f.text('modelBlocks');
+ assert.match(en,/Critic · round 1 · task T01/);assert.match(en,/is not offered/);assert.match(en,/no other model is substituted/i);
+ assert.match(en,/Enable claude-opus-5-5 in claude-code/);assert.match(en,/leave the task in the remaining items/i);
+ assert.doesNotMatch(en,/Включите|Оставьте/);
+ const old=await fixture();assert.equal(old.el('modelBlocksPanel').hidden,true);
+});
+test('malformed model blockers cannot replace the last good snapshot',async()=>{
+ for(const blocks of ['x',[null],[{...modelBlock(),model:7}],[{...modelBlock(),options:'enable'}]]){
+  const f=await fixture(),bad=sample();bad.title='Подмена';bad.modelBlocks=blocks;
+  await f.update(bad);assert.notEqual(f.text('title'),'Подмена');}
+});
+test('after an overrun the remainder and the task line do not melt with the clock',async()=>{
+ const d=sample();d.estimate=measured({overrunning:['T01'],afterOverrun:true,lowerSeconds:1205,upperSeconds:2330});
+ d.estimate.rows[0]={...d.estimate.rows[0],lowerSeconds:1205,upperSeconds:2330};
+ const f=await fixture('',d);const eta=f.text('eta'),rows=f.text('etaRows');
+ assert.equal(eta,'после этой задачи ещё примерно 20–40 минут');
+ f.advance(10000);
+ assert.equal(f.text('eta'),eta);assert.equal(f.text('etaRows'),rows);
+ // Without an overrun the same clock does count down: the freeze is the overrun's, not a broken tick.
+ const g=await fixture('',{...sample(),estimate:measured({lowerSeconds:1205,upperSeconds:2330})});
+ const before=g.text('eta');g.advance(10000);assert.notEqual(g.text('eta'),before);
+});

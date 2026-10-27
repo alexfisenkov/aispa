@@ -53,6 +53,7 @@ EVENT_LABELS = {
     "project-handoff-recorded": "Передача проекта записана", "document-metadata-registered": "Документ зарегистрирован",
     "document-metadata-refreshed": "Метаданные документа обновлены",
     "native-usage-recorded": "Записано использование среды", "native-usage-imported": "Импортировано использование среды",
+    "model-capability-blocked": "Нужной модели нет в среде, другая не подставлена",
 }
 # Frequent bookkeeping events: kept in the feed, but never counted as "what the agent is doing".
 NOISE = {"native-usage-recorded", "native-usage-imported", "execution-recorded", "verification-started",
@@ -104,6 +105,8 @@ def _event_text(row):
         return label + _target(task)
     if name == "participant-assigned":
         return "Назначение: " + ROLE_LABELS[target] if target in ROLE_LABELS else _label(name)
+    if name == "model-capability-blocked":
+        return _label(name) + (" · " + ROLE_LABELS[target] if target in ROLE_LABELS else _target(target))
     if name in ("work-progress-began", "work-progress-ended"):
         return _label(name) + (" · " + WORK_PHASE_LABELS[target] if target in WORK_PHASE_LABELS else "")
     if name == "project-document-bound":

@@ -412,6 +412,24 @@ class PanelFieldsTests(unittest.TestCase):
         self.assertNotIn("requirements", decisions[0])
         self.assertEqual(decisions[1]["requirements"], ["R01"])
 
+    def test_a_missing_approved_model_is_shown_with_role_model_task_and_options(self):
+        self.assertNotIn("modelBlocks", self.view())
+        options = [{"id": "enable-model", "text": "Включите модель"}, {"id": "leave-in-remaining", "text": "Оставьте"}]
+        self.fx.state["modelBlocks"] = [
+            {"code": "BLOCKED_MODEL_CAPABILITY", "role": "critic1", "runtime": "claude-code", "routeClass": "judge",
+             "task": "T01", "model": "claude-opus-5-5", "effort": "high", "message": "internal text",
+             "options": options, "at": "2026-10-28T10:00:00+00:00"}]
+        self.assertEqual(self.view()["modelBlocks"], [
+            {"role": "critic1", "roleLabel": "Критик · круг 1", "runtime": "claude-code", "model": "claude-opus-5-5",
+             "effort": "high", "task": "T01", "options": options}])
+
+    def test_the_model_capability_event_has_a_human_label(self):
+        text = display_feed.events([{"name": "model-capability-blocked", "target": "critic1",
+                                     "at": "2026-10-28T10:00:00+00:00"}])[0]["text"]
+        self.assertNotIn("Событие", text)
+        self.assertIn("модел", text)
+        self.assertIn("Критик · круг 1", text)
+
     def test_the_branch_lens_event_has_a_human_label_not_the_raw_event_name(self):
         text = display_feed.events([{"name": "project-integration-lens-reviewed", "target": "",
                                      "at": "2026-10-28T10:00:00+00:00"}])[0]["text"]

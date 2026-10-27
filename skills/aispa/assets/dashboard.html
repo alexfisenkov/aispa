@@ -324,6 +324,11 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
   <span class="eyebrow" id="waitingKind"></span><b id="waitingNote"></b><span class="note" id="waitingSince"></span>
 </section>
 
+<section class="card waiting-card" id="modelBlocksPanel" hidden aria-live="polite">
+  <span class="eyebrow" data-i18n="modelBlocks">Нет нужной модели</span>
+  <div id="modelBlocks" style="display:grid;gap:12px"></div>
+</section>
+
 <section class="card waves-card" aria-label="Задачи по волнам" data-aria-i18n="wavesAria">
   <div style="display:grid;gap:6px"><h2 class="h2" data-i18n="waves">Задачи по волнам</h2><span class="sub" id="wavesNote" data-i18n="wavesNote">После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.</span></div>
   <div id="journalNotice" class="sync-notice" hidden></div>
@@ -427,7 +432,7 @@ var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['
  decisions:['Решения агента','Agent decisions'],decisionsNote:['Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.','If you disagree with a decision, run AISpa again and state what to change.'],
  footer:['Экран только отображает результат. Право назвать работу готовой определяет движок.','This view only displays the result. The engine determines when work is complete.'],
  gateNote:['Изменение брифа, плана или кода делает связанные проверки устаревшими.','Changing the brief, plan or code makes related checks stale.'],
- models:['Участники и модели','Participants and models'],runContext:['Данные прогона','Run details'],overviewAria:['Сводка задач','Task overview'],activityAria:['Время работы','Work time'],wavesAria:['Задачи по волнам','Tasks by wave']};
+ models:['Участники и модели','Participants and models'],modelBlocks:['Нет нужной модели','Required model is missing'],runContext:['Данные прогона','Run details'],overviewAria:['Сводка задач','Task overview'],activityAria:['Время работы','Work time'],wavesAria:['Задачи по волнам','Tasks by wave']};
 var EN={
  'По замерам прогона':'From this run\'s timings','По прошлым прогонам':'From earlier runs','По замерам и прошлым прогонам':'From this run and earlier runs',
  'Ориентир по плану':'Plan-based estimate','По замерам и плану':'Based on timings and plan','По завершённым задачам':'Based on completed tasks','Ожидание блокеров не учтено':'Blocker waiting time excluded',
@@ -734,7 +739,8 @@ function measuredLeft(e,spent){
  var low=Math.max(0,e.lowerSeconds-spent),high=e.upperSeconds==null?null:Math.max(low,e.upperSeconds-spent);
  return [low,high];}
 function measuredEta(d,e){
- var left=measuredLeft(e,delta()),low=left[0],high=left[1],en=locale==='en',main,note;
+ // After an overrun the rest is counted after the long task: the clock must not melt it (parallel tasks: all of it).
+ var left=measuredLeft(e,e.afterOverrun===true?0:delta()),low=left[0],high=left[1],en=locale==='en',main,note;
  if(e.afterOverrun===true&&low===0&&high===0)main=tr('Идёт дольше обычного');
  else{main=remainingWords(low,high,e.sampleCount===1&&high===low);
   if(e.afterOverrun===true)main=en?'after this task '+main+' more':'после этой задачи ещё '+main;}
@@ -754,7 +760,7 @@ function etaRowsText(d){
   var label=tr(ROW_LABEL[r.kind])+': ',conditional=r.status==='conditional';
   if(!Number.isFinite(r.lowerSeconds))return label+(conditional?(en?'if needed — ':'если понадобится — ')+unknown:
    (en?'how long it takes is not known yet':'сколько займёт — пока не знаю'));
-  var left=measuredLeft(r,r.status==='running'?delta():0),words=remainingWords(left[0],left[1],r.sampleCount===1&&left[1]===left[0]);
+  var left=measuredLeft(r,r.status==='running'&&!(r.kind==='tasks'&&e.afterOverrun===true)?delta():0),words=remainingWords(left[0],left[1],r.sampleCount===1&&left[1]===left[0]);
   return label+(conditional?(en?'if needed — ':'если понадобится — ')+words:words)}).join('\n');
 }
 function etaText(d){
@@ -903,6 +909,25 @@ function modelLines(m){
   (en?'usage: unknown':'расход: неизвестно')));
  return lines;
 }
+function blockOption(b,o){var en=locale==='en',model=String(b.model),runtime=String(b.runtime),role=blockRole(b);
+ return o.id==='enable-model'?(en?'Enable '+model+' in '+runtime+' and repeat the assignment':'Включите модель '+model+' в среде '+runtime+' и повторите назначение'):
+  o.id==='owner-allows-other'?(en?'Allow another model for '+role+' in your own words; the engine never substitutes one itself':'Новыми словами разрешите другую модель для роли «'+role+'»; сам движок её не подставит'):
+  o.id==='leave-in-remaining'?(en?'Leave the task in the remaining items; independent work goes on':'Оставьте задачу в остатках; независимая работа продолжается'):
+  en?null:o.text}
+function blockRole(b){return tr(typeof b.roleLabel==='string'&&b.roleLabel?b.roleLabel:String(b.role))}
+function renderModelBlocks(d){
+ var panel=$('modelBlocksPanel'),box=$('modelBlocks'),rows=connected()&&Array.isArray(d.modelBlocks)?d.modelBlocks:[],en=locale==='en';
+ panel.hidden=!rows.length;box.replaceChildren();
+ rows.forEach(function(b){var item=h('div'),need=String(b.model)+(b.effort?' · '+b.effort:'');
+  item.append(h('b',null,blockRole(b)+(b.task?(en?' · task ':' · задача ')+b.task:'')));
+  item.append(h('div','note',en?'Needs '+need+', but it is not offered in '+b.runtime+'. No other model is substituted: the work for this role waits.':
+   'Нужна '+need+', но среда '+b.runtime+' её не предлагает. Другая модель не подставляется: работа этой роли ждёт.'));
+  var list=h('ul','note');b.options.forEach(function(o){var text=blockOption(b,o);if(text)list.append(h('li',null,text))});
+  if(list.children.length)item.append(list);box.append(item)});
+}
+function goodBlock(b){return object(b)&&typeof b.role==='string'&&typeof b.runtime==='string'&&typeof b.model==='string'&&
+ (b.effort==null||typeof b.effort==='string')&&(b.task==null||typeof b.task==='string')&&(b.roleLabel==null||typeof b.roleLabel==='string')&&
+ Array.isArray(b.options)&&b.options.every(function(o){return object(o)&&typeof o.id==='string'&&typeof o.text==='string'})}
 function renderModels(d){
  var panel=$('modelsPanel'),box=$('models'),rows=Array.isArray(d.models)?d.models.filter(object):[];
  panel.hidden=!rows.length;box.replaceChildren();$('modelsCount').textContent=rows.length?String(rows.length):'';
@@ -1038,7 +1063,7 @@ function render(d){
  var stages=$('stages');stages.replaceChildren();
  STAGES.forEach(function(x,i){var past=i<idx||(done&&i===idx),cur=i===idx&&!done,c=h('div','stage'+(cur?' cur':past?' past':''));
   c.append(h('i'));var t=h('div');t.append(h('small',null,pad(i+1)),h('b',null,tr(x[1])));c.append(t);stages.append(c)});
- renderActivity(d,status);renderOverview(d);renderWaiting(d);renderModels(d);renderModeChanges(d);renderEvents(d);renderWorkSplit(d);
+ renderActivity(d,status);renderOverview(d);renderWaiting(d);renderModels(d);renderModelBlocks(d);renderModeChanges(d);renderEvents(d);renderWorkSplit(d);
  var waveNums=Array.from(new Set(tasks.map(function(t){return t.wave}))).sort(function(a,b){return a-b});
  Object.keys(FILTERS).forEach(function(k){var b=tabButtons[k];if(!b){b=h('button','tab');b.type='button';
    b.addEventListener('click',function(){filter=k;render(last)});tabButtons[k]=b;$('tabs').append(b)}
@@ -1104,7 +1129,7 @@ function valid(d){return object(d)&&typeof d.status==='string'&&Array.isArray(d.
   (t.requirementsDetails===undefined||Array.isArray(t.requirementsDetails)&&t.requirementsDetails.every(goodRequirement))&&
   (t.criteriaDetails===undefined||Array.isArray(t.criteriaDetails)&&t.criteriaDetails.every(function(c){return object(c)&&typeof c.text==='string'&&typeof c.status==='string'}));})&&
  Array.isArray(d.decisions)&&d.decisions.every(function(x){return typeof x==='string'||object(x)&&typeof x.text==='string'&&(x.requirements===undefined||strings(x.requirements))})&&
- (d.models===undefined||Array.isArray(d.models)&&d.models.every(object))&&optionalObject(d.findings)&&
+ (d.models===undefined||Array.isArray(d.models)&&d.models.every(object))&&(d.modelBlocks===undefined||Array.isArray(d.modelBlocks)&&d.modelBlocks.every(goodBlock))&&optionalObject(d.findings)&&
  optionalObject(d.gates)&&optionalObject(d.gateDetails)&&(!d.gateDetails||Object.values(d.gateDetails).every(function(g){return object(g)&&typeof g.status==='string'}))&&
  optionalObject(d.currentWork)&&optionalObject(d.workProgress)&&optionalObject(d.autonomy)&&optionalObject(d.activity)&&optionalObject(d.estimate)&&optionalObject(d.remaining)&&
  (!d.remaining||Object.values(d.remaining).every(function(rows){return !Array.isArray(rows)||rows.every(function(x){return typeof x==='string'||object(x)})}))&&

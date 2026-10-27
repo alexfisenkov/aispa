@@ -101,6 +101,7 @@ BLOCKED = "BLOCKED_MODEL_CAPABILITY"
 FORBIDDEN_MODELS = frozenset({"inherit", "fable", "best", "claude-fable-5-1", "gpt-6-astra"})
 FORBIDDEN_WORDS = ("fable", "astra")
 MODEL_BLOCKS = "modelBlocks"
+BLOCK_KEY = ("role", "runtime", "model", "task")
 
 
 def enabled(state):
@@ -160,6 +161,10 @@ def check_assignment(state, role, runtime, model, reasoning, *, session, native_
     if is_coordinator(role, external):
         _single_coordinator(state, session, native_id)
         return {"routeClass": "coordinator", "model": None, "effort": None}
+    if ROLE_CLASS.get(role) == "coordinator":
+        # The exact role name with an external mark: neither the main chat nor a subagent class.
+        raise Invalid("Роль coordinator — только главный чат и не бывает внешней; внешнего участника регистрируйте "
+                      "отдельным именем роли, помощника — его рабочей ролью")
     # An external phase role (explicit external name) has no class: only the prohibitions apply.
     cls = route_class(state, role, task, attempt) if role in ROLE_CLASS else None
     runtime = _fold(runtime)
@@ -235,9 +240,13 @@ def enforce(store, state, role, runtime, native_id, session, model, reasoning, e
         block = unavailable_block(state, role, runtime.strip().casefold(), _capability(store, evidence),
                                   task=task, attempt=attempt)
         if block is not None:
-            state.setdefault(MODEL_BLOCKS, []).append(dict(block, at=timestamp()))
-            if save is not None:
-                save("model-capability-blocked:" + role)
+            # One record per (role, runtime, model, task): a repeated attempt is the same blocker.
+            key = tuple(block[k] for k in BLOCK_KEY)
+            rows = state.setdefault(MODEL_BLOCKS, [])
+            if not any(isinstance(row, dict) and tuple(row.get(k) for k in BLOCK_KEY) == key for row in rows):
+                rows.append(dict(block, at=timestamp()))
+                if save is not None:
+                    save("model-capability-blocked:" + role)
             raise Invalid(block["message"])
     return route
 
