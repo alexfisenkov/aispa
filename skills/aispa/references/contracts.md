@@ -66,7 +66,8 @@ init, update-*, serve, dashboard, journal-recover и вложенный batch.
 пометка панели; `waveEntries.<n>.checkMode` и `fastWaves` (волна, открытая в `fast`,
 не сверяется; `fastWaves` переживает `reset`, но не смену плана); в записи сценариев
 `checkMode` (набор измерений проверяется по режиму записи);
-`routing.modelRule` в рекомендации модели — совет, не выбор. Класс `fast` — worker-only,
+модель и усилие роли — из строгой [таблицы маршрутов](model-routing.md): `routing` несёт
+`routeClass`, `model` и `effort`, без `modelRule`. Класс `fast` — worker-only,
 как light/standard, без test-intent и критиков.
 
 ## Требования

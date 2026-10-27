@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 import unittest
@@ -233,6 +234,28 @@ class PacketTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(Invalid):
                 packets.record_usage(self.store, self.state, dict(actor="synthetic", callId="x", source="fixture",
                     inputTokens=value, outputTokens=1, cachedInputTokens=0))
+
+
+from test_focused_review import FocusedFixture, POLICY  # noqa: E402  (needs the tests dir on sys.path)
+
+
+class FocusedPacketTests(FocusedFixture):
+    def test_task_packet_carries_the_roles_the_engine_chose(self):
+        # Prompts send worker and critic to the packet's criticRoles: the engine writes them to the attempt only.
+        for mode, expected in (("balanced", ["worker", "critic1", "critic2"]), ("fast", ["worker"])):
+            with self.subTest(mode=mode):
+                self.configure(POLICY, mode)
+                self.start("T01")
+                self.assertEqual(self.attempt("T01")["criticRoles"], expected)
+                self.assertEqual(self.packet("T01", "worker")["criticRoles"], expected)
+
+    def test_focused_reading_rule_names_only_the_scopes_the_packet_sets(self):
+        named = set(re.findall(r"(?:scope |; )(\w+):", packets.FOCUSED_CRITIC_READING))
+        self.assertEqual(named, {"attempt", "repair"})
+        self.start("T01")
+        self.write("a.txt", "a by T01")
+        self.submit("T01")
+        self.assertIn(self.packet("T01", "critic1")["zoneChangesScope"], named)
 
 
 if __name__ == "__main__":

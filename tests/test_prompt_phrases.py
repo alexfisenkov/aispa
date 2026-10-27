@@ -51,6 +51,37 @@ PHRASES = {
 }
 CHECKED = tuple(PHRASES) + ("references/failure-checks.md",)
 
+# The worker and task critic run on every task: their texts must not outgrow the plan base 5604ac2.
+MAX_BYTES = {"prompts/worker.md": 13_846, "prompts/task-critic.md": 14_403}
+# Old-policy branches; a new run is always focused and old runs read their pinned runtime copy.
+OLD_POLICY = re.compile(r"two_rounds|adaptive|legacy|reviewPolicy: lean|Прогоны с `focusedReview`", re.IGNORECASE)
+# Wording that contradicted the focused engine -> phrase that carries the rule now (must be present).
+RETIRED = {
+    "prompts/worker.md": {
+        "В режиме проверки `fast` RED и `test-intent` не нужны":
+            "Тестовый контракт и RED нужны heavy-задаче в любом режиме",
+        "Сохрани связь каждого обязательного `blocking` и `warning` ID":
+            "`addresses` перечисляет все блокирующие ID первого отчёта",
+        "кандидат переходит отдельному приёмщику": "Отдельного приёмщика задачи нет",
+        "в `fast` общего обзора версии нет": "в `fast` ветку смотрит один ревьюер",
+        "до общего обзора версии": "до проверки ветки",
+        # The engine writes criticRoles to the attempt and the task packet, not to the role card.
+        "видно в карточке (`criticRoles`)": "видно в пакете (`criticRoles`)",
+        # A first PASS of a heavy task in max hands over to critic2 (secondRound).
+        "PASS критика сразу закрывает задачу": "PASS критика закрывает задачу, кроме тяжёлой в `max`",
+    },
+    "prompts/task-critic.md": {
+        "как `blocking`, исключает PASS": "Отчёт с одними warning получает PASS",
+        "заполни `branchReview`": "`branchReview` в отчёт не добавляй",
+        "критерии всех задач замыкания": "Критерии принятых предков проверяй только те, что есть в твоих `expectedChecks`",
+        "Эта роль назначается только heavy-задаче": "Роли задачи выбирает движок",
+        "`zoneChangesScope: branch`": "читает свою попытку",
+        "в общем обзоре": "ветку смотрят ревьюеры по линзам",
+        "видны в карточке (`criticRoles`)": "видны в пакете (`criticRoles`)",
+        "твой PASS закрывает задачу.": "твой PASS закрывает задачу, кроме PASS critic1 тяжёлой задачи в `max`",
+    },
+}
+
 
 def read(name):
     return re.sub(r"\s+", " ", (PACKAGE / name).read_text(encoding="utf-8"))
@@ -63,6 +94,25 @@ class PromptPhraseTests(unittest.TestCase):
             for phrase in phrases:
                 with self.subTest(file=name, phrase=phrase):
                     self.assertIn(phrase, text)
+
+    def test_worker_and_critic_fit_the_base_size(self):
+        for name, limit in MAX_BYTES.items():
+            with self.subTest(file=name):
+                self.assertLessEqual(len((PACKAGE / name).read_bytes()), limit)
+
+    def test_worker_and_critic_carry_only_the_focused_policy(self):
+        for name in MAX_BYTES:
+            with self.subTest(file=name):
+                found = OLD_POLICY.search(read(name))
+                self.assertIsNone(found, found and found.group(0))
+
+    def test_retired_wording_has_its_replacement(self):
+        for name, rules in RETIRED.items():
+            text = read(name)
+            for old, new in rules.items():
+                with self.subTest(file=name, old=old):
+                    self.assertNotIn(old, text)
+                    self.assertIn(new, text)
 
     def test_texts_name_no_model_and_no_xhigh(self):
         for name in CHECKED:

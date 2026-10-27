@@ -189,8 +189,8 @@ def _blocking_classes():
 
 
 FOCUSED_CRITIC_READING = ("Focused critic: read the role card, every file in zoneChanges in full (scope attempt: what "
-    "this attempt changed; repair: only the repair diff after repairBaseline; branch: the whole branch of the final "
-    "task), the test intent, expectedChecks and the exact owner quotes in traceRequirements. criteriaFiles are the "
+    "this attempt changed, the final task included; repair: only the repair diff after repairBaseline), the test "
+    "intent, expectedChecks and the exact owner quotes in traceRequirements. criteriaFiles are the "
     "files the criteria rest on: open one when you check a criterion that rests on it, not wholesale. Fields in "
     "onDemand are reference material. Accepted ancestors appear in expectedChecks only when this attempt changed "
     "their files. Only blockingClass " + ", ".join(BLOCKING_CLASSES) + " blocks; mark everything else warning: it is collected for the branch review.")
@@ -364,6 +364,9 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                       inheritedProofs=pipeline.inherited_proofs(task_id),
                       neighbors=[{"id": t["id"], "zones": t["zones"], "status": t["status"]}
                                  for t in state["tasks"] if t["id"] != task_id])
+        if isinstance(current.get("criticRoles"), list):
+            # The engine's choice of roles for this attempt: the worker and critic prompts point here.
+            packet["criticRoles"] = list(current["criticRoles"])
         from . import mixed_evidence
         summary = test_intent.route_summary(store, state, task_id)
         if summary.get("mode") == "mixed":
