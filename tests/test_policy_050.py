@@ -116,20 +116,25 @@ class ReservedCommandTests(RunFixture):
                 for word in words:
                     self.assertIn(word, result.stdout)
 
-    def test_reserved_commands_name_the_ticket_that_brings_them(self):
+    def test_no_reserved_placeholder_is_left_and_composites_answer_on_substance(self):
+        # Ticket 10 replaced the last placeholders: task-open and task-close are real commands.
         self.init()
         evidence = self.root / "report.json"
         evidence.write_text("{}", encoding="utf-8")
         participant = ["--runtime", "claude-code", "--native-id", "agent-1", "--session", "session-1",
                        "--model", "claude-sonnet-5-5", "--reasoning", "medium"]
         before = (self.run_directory / "events.jsonl").read_bytes()
-        for command, ticket in ((["task-open", "T01", "--role", "worker", *participant], "10"),
-                                (["task-close", "T01", "--role", "worker", "--file", str(evidence)], "10")):
+        for command in (["task-open", "T01", "--role", "worker", *participant],
+                        ["task-close", "T01", "--role", "worker", "--file", str(evidence)],
+                        ["final-repair", "open", "--file", str(evidence)], ["findings"]):
             with self.subTest(command=command):
                 result = run(self.cli, self.root, *command)
-                self.assertEqual(result.returncode, 2, result.stdout)
-                self.assertIn("задаче " + ticket, result.stderr)
+                self.assertNotRegex(result.stderr, r"появится в задаче \d+")
                 self.assertNotIn("Traceback", result.stderr)
+                if command[0].startswith("task-"):
+                    # The run has no plan yet: the composite refuses on the task itself, writing nothing.
+                    self.assertEqual(result.returncode, 2, result.stdout)
+                    self.assertIn("Неизвестная задача", result.stderr)
         self.assertEqual((self.run_directory / "events.jsonl").read_bytes(), before)
 
     def test_final_repair_is_real_and_refuses_before_the_build_without_writing(self):

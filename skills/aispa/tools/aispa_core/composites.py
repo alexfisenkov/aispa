@@ -167,7 +167,8 @@ def close_task(flow, tid, role, report_path, *, usage_path=None):
         sha = _sha(flow, report_path)
         record = _accepted(_attempt(flow, tid), role, sha)
         if record is not None:
-            ok = True if role in ("worker", "acceptor") else record.get("passed") is True
+            # A repeat answers with the outcome already recorded: a refused acceptance stays refused.
+            ok = True if role == "worker" else record.get("passed") is True
             report, kind = record["report"], record.get("completionKind")
         else:
             ok, report, kind = _record(flow, tid, role, report_path, sha)

@@ -176,5 +176,92 @@ class TestIntentTests(unittest.TestCase):
         self.assertFalse(test_intent.view(self.store, self.state, "T01")["present"])
 
 
+class PrechangeRevisionTests(unittest.TestCase):
+    """Stories 80-81: after critique starts, one revision may only add prechangeExecution."""
+    setUp = TestIntentTests.setUp
+    tearDown = TestIntentTests.tearDown
+    CHECK = [sys.executable, "-c", "import runpy; assert runpy.run_path('app.py')['VALUE'] in (0, 1)"]
+
+    def frozen(self, flag=True):
+        self.state["policy"]["prechangeRevision"] = flag
+        self.assertTrue(self.flow.verify(self.CHECK, 10, "T01"))
+        prechange = executions.record(self.store, self.state, kind="task", purpose="check", task_id="T01")
+        self.store.append(self.state, "execution-recorded")
+        source = {"path": "README.md", "sha256": file_hash(self.root / "README.md")}
+        self.report = {"mode": "not_applicable", "attempt": "T01-A01",
+                       "basis": task_basis(self.store, self.state, "T01"), "criteria": ["VALUE equals one"],
+                       "notApplicable": [{"criterion": "VALUE equals one", "purpose": "existing_behavior",
+                                          "source": source, "reason": "Existing integration already checks this value."}]}
+        self.original = test_intent.record(self.store, self.state, "T01", self.report)
+        self.store.append(self.state, "test-intent-recorded:T01")
+        (self.root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self.assertTrue(self.flow.verify(self.CHECK, 10, "T01"))
+        attempt = self.state["taskHistory"]["T01"][-1]
+        attempt["submitted"] = {"testIntent": self.original}
+        self.store.append(self.state, "task-submitted:T01")
+        attempt["rounds"].append({"number": 1, "testIntent": self.original})
+        self.store.append(self.state, "critic-reviewed:T01")
+        self.rounds = copy.deepcopy(attempt["rounds"])
+        self.basis = task_basis(self.store, self.state, "T01")
+        return prechange
+
+    def test_one_revision_adding_prechange_is_accepted_without_resetting_critique(self):
+        prechange = self.frozen()
+        self.assertFalse(test_intent.valid(self.store, self.state, "T01"))
+        revised = dict(self.report, prechangeExecution=prechange)
+        ref = test_intent.record(self.store, self.state, "T01", revised)
+        self.store.append(self.state, "test-intent-recorded:T01")
+        attempt = self.state["taskHistory"]["T01"][-1]
+        self.assertEqual(attempt["testIntentHistory"], [self.original, ref])
+        self.assertEqual(attempt["rounds"], self.rounds)
+        self.assertEqual(task_basis(self.store, self.state, "T01"), self.basis)
+        self.assertTrue(test_intent.valid(self.store, self.state, "T01"))
+        self.assertTrue(test_intent.chain_matches(self.store, attempt, attempt["submitted"], attempt["rounds"], None))
+        with self.assertRaisesRegex(Invalid, "разрешено только добавить prechangeExecution"):
+            test_intent.record(self.store, self.state, "T01", revised)
+
+    def test_revision_with_any_other_difference_is_refused_and_contract_kept(self):
+        prechange = self.frozen()
+        attempt = self.state["taskHistory"]["T01"][-1]
+        changed = copy.deepcopy(dict(self.report, prechangeExecution=prechange))
+        changed["notApplicable"][0]["reason"] = "Rewritten reason."
+        for report in (changed, dict(self.report), dict(self.report, prechangeExecution=prechange,
+                                                         basis=task_basis(self.store, self.state, "T01"))):
+            with self.subTest(report=sorted(report)), \
+                    self.assertRaisesRegex(Invalid, "разрешено только добавить prechangeExecution"):
+                test_intent.record(self.store, self.state, "T01", report)
+            self.assertEqual(attempt["testIntentHistory"], [self.original])
+
+    def test_prechange_must_be_this_attempts_check_before_changes(self):
+        self.frozen()
+        self.assertTrue(self.flow.verify(self.CHECK, 10, "T01"))
+        after = executions.record(self.store, self.state, kind="task", purpose="check", task_id="T01")
+        self.store.append(self.state, "execution-recorded")
+        with self.assertRaisesRegex(Invalid, "verify --task этой попытки, снятая до изменений"):
+            test_intent.record(self.store, self.state, "T01", dict(self.report, prechangeExecution=after))
+        self.assertEqual(self.state["taskHistory"]["T01"][-1]["testIntentHistory"], [self.original])
+
+    def test_documentation_guard_and_revision_judge_the_receipt_by_one_rule(self):
+        # The same check taken after the changes is refused with the same words before critique, in _na_guard.
+        self.state["policy"]["prechangeRevision"] = True
+        self.assertTrue(self.flow.verify(self.CHECK, 10, "T01"))
+        (self.root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self.assertTrue(self.flow.verify(self.CHECK, 10, "T01"))
+        after = executions.record(self.store, self.state, kind="task", purpose="check", task_id="T01")
+        self.store.append(self.state, "execution-recorded")
+        source = {"path": "README.md", "sha256": file_hash(self.root / "README.md")}
+        report = {"mode": "not_applicable", "attempt": "T01-A01", "basis": task_basis(self.store, self.state, "T01"),
+                  "criteria": ["VALUE equals one"], "prechangeExecution": after,
+                  "notApplicable": [{"criterion": "VALUE equals one", "purpose": "existing_behavior",
+                                     "source": source, "reason": "Existing integration already checks this value."}]}
+        with self.assertRaisesRegex(Invalid, "verify --task этой попытки, снятая до изменений"):
+            test_intent.record(self.store, self.state, "T01", report)
+
+    def test_without_the_flag_the_contract_stays_frozen(self):
+        prechange = self.frozen(flag=False)
+        with self.assertRaisesRegex(Invalid, "заморожен"):
+            test_intent.record(self.store, self.state, "T01", dict(self.report, prechangeExecution=prechange))
+
+
 if __name__ == "__main__":
     unittest.main()

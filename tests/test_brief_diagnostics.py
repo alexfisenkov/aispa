@@ -69,5 +69,52 @@ class BriefDiagnosticsTests(ManagedFixture):
             self.analyze()
 
 
+class BriefMapDiagnosticsTests(ManagedFixture):
+    """Story 76: brief-map returns the diagnostics before seal; they still change nothing."""
+    def brief_map(self):
+        """A run ready to record its brief-map; returns the command arguments."""
+        import argparse
+        import test_preparation_workflow as preparation_tests
+        from aispa_core import preparation
+        fixture = preparation_tests.PreparationTests
+        fixture.sources(self)
+        self.flow.requirements(self.file([
+            {"id": "R02", "text": "Export", "brief": "B001", "quote": "Build export.", "acceptance": ["Local CSV"]}]))
+        for kind, actor in (("brief-extract", self.analyst), ("brief-review", self.reviewer)):
+            report = preparation.template(self.store, self.state, kind, actor=actor)
+            for unit in report["units"]:
+                unit.update(kind="intent", summary=unit["text"], reason="Explicit owner instruction")
+            preparation.record(self.store, self.state, kind, report)
+        self.flow.save("extract-and-review")
+        report = preparation.template(self.store, self.state, "brief-map", actor=self.reviewer)
+        for row, rids in zip(report["rows"], (["R01", "R02"], ["G01"])):
+            row.update(disposition="requirement", requirements=rids, reason="Exact source accounted for")
+        return argparse.Namespace(action="brief-map", file=self.file(report, "map.json"))
+
+    def test_a_failing_analysis_writes_no_brief_map(self):
+        from unittest.mock import patch
+        from aispa_core import brief_diagnostics, controls
+        args = self.brief_map()
+        journal = (self.store.run / "events.jsonl").read_bytes()
+        with patch.object(brief_diagnostics, "analyze", side_effect=Invalid("сбой диагностики")), \
+                self.assertRaisesRegex(Invalid, "сбой диагностики"):
+            controls.execute(self.store, self.state, self.flow, args)
+        self.assertEqual((self.store.run / "events.jsonl").read_bytes(), journal)
+        self.assertNotIn("brief-map-recorded", journal.decode("utf-8"))
+
+    def test_brief_map_receipt_carries_diagnostics_and_records_only_the_map(self):
+        from aispa_core import controls
+        args = self.brief_map()
+        requirements = copy.deepcopy(self.state["requirements"])
+        result = controls.execute(self.store, self.state, self.flow, args)
+        diagnostics = result["briefDiagnostics"]
+        self.assertTrue(diagnostics["exactDuplicates"])
+        self.assertIn("fragmentation", diagnostics)
+        self.assertTrue(diagnostics["authority"].startswith("diagnostic only"))
+        self.assertEqual(self.state["requirements"], requirements)
+        self.assertEqual(self.store.load()["requirements"], requirements)
+        self.assertEqual(self.store.load()["briefMap"], self.state["briefMap"])
+
+
 if __name__ == "__main__":
     unittest.main()

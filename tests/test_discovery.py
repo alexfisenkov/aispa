@@ -378,6 +378,36 @@ class UnchangedInputsTests(unittest.TestCase):
         self.assertFalse(receipt["reused"])
         self.assertNotEqual(self.state["discoveryCollection"], saved)
 
+    def test_cli_rediscovery_on_the_same_inputs_writes_no_event(self):
+        # Ticket 10b: the discover command itself skips the event when the saved study is reused.
+        cli = Path(__file__).resolve().parents[1] / "skills/aispa/tools/aispa.py"
+        temp = tempfile.TemporaryDirectory(prefix="aispa-rediscover-")
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+        (root / ".gitignore").write_text(".aispa/\n", encoding="utf-8")
+        (root / "README.md").write_text("# Fixture\n", encoding="utf-8")
+
+        def call(*args):
+            result = subprocess.run([sys.executable, "-B", str(cli), "--root", str(root), *args],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=60)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            return json.loads(result.stdout)
+
+        call("init", "--slug", "rediscover", "--title", "Rediscover", "--mode", "auto", "--runtime", "codex")
+        store = Journal(root)
+        self.assertIs(store.load()["policy"]["focusedReview"], True)
+        events = store.run / "events.jsonl"
+        first = call("discover")
+        lines = len(events.read_bytes().splitlines())
+        again = call("discover")
+        self.assertEqual(len(events.read_bytes().splitlines()), lines)
+        self.assertIs(again["receipt"]["reused"], True)
+        self.assertEqual(again["receipt"]["collection"], first["receipt"]["collection"])
+        (root / "README.md").write_text("# Edited outside every task zone\n", encoding="utf-8")
+        call("discover")
+        self.assertEqual(len(events.read_bytes().splitlines()), lines + 1)
+
     def test_a_new_include_is_never_a_reuse(self):
         self.focus(("src/main.py",))
         self.study()

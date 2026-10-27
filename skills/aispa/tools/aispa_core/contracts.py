@@ -32,7 +32,83 @@ def task_closure(state, task_id):
     return DependencyIndex(state["tasks"], budget=scale.Budget() if scale.enabled(state) else None).closure(task_id)
 
 
+def targeted(state):
+    """targetedRebrief: a task's contract is its own requirements and slices, not the whole brief."""
+    return state.get("policy", {}).get("targetedRebrief") is True
+
+
+def requirement_fingerprint(requirement):
+    """What a task owes for one requirement: text, source quote, criteria and standing."""
+    return {key: requirement.get(key) for key in ("id", "text", "brief", "quote", "acceptance", "kind", "parent", "scope")}
+
+
+def task_slices(store, state, tasks, review=None):
+    """targetedRebrief: per-task digest of the design and delivery rows that bind this task.
+
+    Computed by plan from the saved scenarios, interface contract and the plan
+    review; a row of another task's requirement or zone does not reach it.
+    """
+    features, interfaces = [], []
+    design = bool(state.get("policy", {}).get("designContract"))
+    if design:
+        from . import design_contract
+        features = design_contract._saved(store, state, "featureScenarios", "featureScenarioHistory",
+                                          "feature-scenarios").get("features", [])
+        interfaces = design_contract._saved(store, state, "interfaceContract", "interfaceContractHistory",
+                                            "interface-contracts").get("interfaces", [])
+    delivery = (review or {}).get("delivery") if state.get("policy", {}).get("deliveryPlan") else None
+    result = {}
+    for task in tasks:
+        tid, owned = task["id"], set(task["requirements"])
+        zones = task["zones"] + task.get("readZones", [])
+        value = {"features": [row for row in features if row.get("requirement") in owned],
+                 "interfaces": [row for row in interfaces if owned & set(row.get("requirements", []))
+                                or overlap([canonical_zone(z) for z in [row["ownerZone"], *row.get("consumers", [])]], zones)]}
+        if design:
+            value.update(references=state.get("ownerReferences", []), depth=state.get("depth", "balanced"))
+        if isinstance(delivery, dict):
+            value["delivery"] = {
+                "profile": delivery.get("profile"),
+                "slices": [row for row in delivery.get("slices", []) if tid in row.get("tasks", [])],
+                "migrations": [row for row in delivery.get("migrations", [])
+                               if tid in row.get("expand", []) + row.get("migrate", []) + row.get("contract", [])]}
+        result[tid] = digest(value)
+    return result
+
+
+def _brief_part(state, closure):
+    requirements = {r["id"]: r for r in state["requirements"]}
+    owned = sorted({rid for task in closure for rid in task["requirements"]})
+    return {"requirements": [requirement_fingerprint(requirements[rid]) for rid in owned if rid in requirements],
+            "constraints": [requirement_fingerprint(r) for r in active(state) if r.get("kind") == "constraint"]}
+
+
+def requirement_basis(state, task_id):
+    """targetedRebrief: the brief's share of a task contract — requirements of its chain and the constraints.
+
+    Plan keeps it on the task; when it moves, the owner's new brief changed the task, not the planner.
+    """
+    return digest(_brief_part(state, task_closure(state, task_id)))
+
+
+def _targeted_contract(state, task_id):
+    closure = task_closure(state, task_id)
+    return digest({"targetedRebrief": 1, **_brief_part(state, closure),
+                   "closure": [{k: v for k, v in definition(t).items() if k != "wave"} for t in closure],
+                   "slices": [t.get("contractSlice") for t in closure]})
+
+
+def plan_inputs(store, state, tasks, review=None):
+    """focusedReview: the normalized plan and everything it was checked against."""
+    return digest({"tasks": [definition(t) for t in tasks], "coverage": basis(store, state, "coverage"),
+                   "scenarios": state.get("featureScenarios"), "interfaces": state.get("interfaceContract"),
+                   "references": state.get("ownerReferences", []), "review": review,
+                   "slices": [t.get("contractSlice") for t in tasks]})
+
+
 def task_contract(state, task_id):
+    if targeted(state):
+        return _targeted_contract(state, task_id)
     return digest({"scope": scope_basis(state), "spec": state["spec"],
                    **design_basis(state),
                    "closure": [{k: v for k, v in definition(t).items() if k != "wave"}

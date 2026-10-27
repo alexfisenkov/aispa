@@ -1,5 +1,6 @@
 """One briefing boundary per new run; no authority or delivery is inferred."""
 from .contracts import require
+from .store import timestamp
 
 
 def interview_setting(scope="standard", duration_minutes=15):
@@ -28,12 +29,24 @@ def view(state):
     may_ask = (state.get("mode") in ("important", "interview") and not closed
                and not state.get("sealed") and not state.get("tasks")
                and state.get("status") == "running" and not state.get("waiting"))
-    return {"mode": state.get("mode"), "briefingClosedAt": closed, "mayAsk": may_ask,
+    value = {"mode": state.get("mode"), "briefingClosedAt": closed, "mayAsk": may_ask,
             "decisions": "Decide within the agreed scope and record with decision; report choices at the end.",
             "blockers": "Record the blocked step, preserve requirements and continue independent work.",
             "newOwnerInput": "Apply new owner instructions without reopening an agent-initiated interview.",
             "authority": {"existingPermissionsOnly": True, "hostApprovalRulesUnchanged": True,
                           "scopeAndRequirementsUnchanged": True}}
+    if state.get("policy", {}).get("interviewBudget") is True:
+        value["interviewBudget"] = interview_budget(state)
+    return value
+
+
+def interview_budget(state):
+    """interviewBudget: wall-clock minutes from the run's creation to the first seal; frozen after it."""
+    from .timing import difference
+    minutes = state.get("interview", interview_setting())["durationMinutes"]
+    end = state.get("firstBriefingClosedAt") or timestamp()
+    elapsed = round(difference(end, state["createdAt"]) / 60, 1)
+    return {"minutes": minutes, "elapsedMinutes": elapsed, "exceeded": elapsed > minutes}
 
 
 def require_questions_allowed(state):
@@ -48,5 +61,7 @@ def start_request(state):
     require(enabled(state) and state.get("firstBriefingClosedAt"), "Бриф ещё не завершён")
     return [{"action": "notify-autonomous-start", "surface": "conversation",
              "message": "Бриф готов. Дальше работаю самостоятельно в согласованных границах — "
-                        "можете отойти. Принятые решения, результат и блокеры покажу в финале.",
+                        "можете отойти. Принятые решения, результат и блокеры покажу в финале. "
+                        "Вы понадобитесь, только если не хватит доступа или полномочия: это будет блокер "
+                        "с понятным действием. Если я остановлюсь без итога и без вопроса, напишите «продолжай».",
              "requiresReply": False}]

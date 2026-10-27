@@ -22,6 +22,7 @@ MAX_ROUTES = 4096
 MAX_REVISIONS = 16
 MAX_REASON = 1600
 MAX_TEST_BYTES = 2 * 1024 * 1024
+ONLY_PRECHANGE = "Test intent: после начала критики разрешено только добавить prechangeExecution"
 
 
 def revision_limit(state):
@@ -92,15 +93,35 @@ def capture_baseline(store, state, task_id):
     return attempt["testBaseline"]
 
 
-def _na_guard(store, state, task, attempt, report):
-    """Obvious code changes cannot masquerade as documentation-only work."""
-    from . import executions
-    from pathlib import PurePosixPath
+PRECHANGE_RECEIPT = ("Test intent: prechangeExecution — успешная verify --task этой попытки, "
+                     "снятая до изменений задачи")
+
+
+def _task_baseline(store, state, task_id, attempt):
+    """The code snapshot this attempt started from."""
     ref = attempt.get("testBaseline")
     require(ref and artifact_valid(store, ref), "Test intent: нет исходного снимка запуска задачи")
     base = store.json(ref)
-    require(base.get("run") == state["run"] and base.get("task") == task["id"]
+    require(base.get("run") == state["run"] and base.get("task") == task_id
             and base.get("attempt") == attempt["id"], "Test intent: чужой исходный снимок")
+    return base
+
+
+def _prechange_receipt(store, state, task_id, attempt, base, precheck):
+    """One rule for a check taken before the changes: this attempt's successful verify --task at its start."""
+    from . import executions
+    receipt = executions.resolve(store, state, precheck)
+    require(receipt.get("kind") == "task" and receipt.get("task") == task_id
+            and receipt.get("purpose") == "check" and receipt.get("attempt") == attempt["id"]
+            and receipt.get("successful") is True and receipt.get("candidate") == base.get("basis"),
+            PRECHANGE_RECEIPT)
+    return receipt
+
+
+def _na_guard(store, state, task, attempt, report):
+    """Obvious code changes cannot masquerade as documentation-only work."""
+    from pathlib import PurePosixPath
+    base = _task_baseline(store, state, task["id"], attempt)
     old = dict(base["records"])
     if attempt.get("zoneExtensions"):
         from . import task_zone_extension
@@ -118,12 +139,7 @@ def _na_guard(store, state, task, attempt, report):
             "Test intent: изменения кода нельзя объявить только документацией или конфигурацией")
     precheck = report.get("prechangeExecution")
     require(isinstance(precheck, dict), "Test intent: изменённому существующему поведению нужна проверка до изменений")
-    receipt = executions.resolve(store, state, precheck)
-    require(receipt.get("kind") == "task" and receipt.get("task") == task["id"]
-            and receipt.get("purpose") == "check"
-            and receipt.get("attempt") == attempt["id"] and receipt.get("successful") is True
-            and receipt.get("candidate") == base["basis"],
-            "Test intent: исходная проверка должна успешно выполняться до изменений задачи")
+    receipt = _prechange_receipt(store, state, task["id"], attempt, base, precheck)
     current = attempt.get("verification")
     if current and current.get("exitCode") == 0:
         require(current.get("command") == receipt["command"],
@@ -340,6 +356,8 @@ def record(store, state, task_id, report):
         from . import task_zone_extension
         task_zone_extension.history_valid(store, state, task_id, attempt)
         task_zone_extension._stage(task, attempt)
+    if attempt.get("rounds") and not epoch_repair and state.get("policy", {}).get("prechangeRevision") is True:
+        return _prechange_revision(store, state, task_id, task, attempt, report)
     require(task.get("status") == "running" and (not attempt.get("rounds") or epoch_repair)
             and not attempt.get("acceptance") and not attempt.get("verifiedCompletion") and not attempt.get("terminal"),
             "Test intent: контракт заморожен после начала критики")
@@ -411,6 +429,47 @@ def record(store, state, task_id, report):
     attempt["testIntent"] = ref
     attempt["testIntentHistory"] = [*previous_refs, ref]
     return copy.deepcopy(ref)
+
+
+def _prechange_revision(store, state, task_id, task, attempt, report):
+    """prechangeRevision: one revision after critique began, equal to the frozen
+    contract except an added link to this attempt's check taken before the changes.
+
+    Critic rounds, their records and task_basis are untouched; the caller saves the state.
+    """
+    require(task.get("status") == "running" and not attempt.get("acceptance")
+            and not attempt.get("verifiedCompletion") and not attempt.get("terminal"),
+            "Test intent: контракт заморожен после начала критики")
+    refs = attempt.get("testIntentHistory")
+    require(isinstance(refs, list) and refs and attempt.get("testIntent") == refs[-1],
+            "Test intent: нет замороженного контракта для ревизии")
+    contracts = [_saved(store, ref) for ref in refs]
+    previous = contracts[-1]
+    require(not any(contract.get("prechangeRevision") for contract in contracts),
+            ONLY_PRECHANGE + " — и только один раз на попытку")
+    old = previous.get("report") or {}
+    require(previous.get("schema") == SCHEMA and previous.get("mode") == "not_applicable"
+            and isinstance(report, dict) and "prechangeExecution" not in old
+            and set(report) == set(old) | {"prechangeExecution"}
+            and {key: value for key, value in report.items() if key != "prechangeExecution"} == old,
+            ONLY_PRECHANGE)
+    require(previous.get("run") == state["run"] and previous.get("task") == task_id
+            and previous.get("attempt") == attempt["id"]
+            and previous.get("taskContract") == task_contract(state, task_id),
+            "Test intent: прежний контракт повреждён или устарел")
+    base = _task_baseline(store, state, task_id, attempt)
+    _prechange_receipt(store, state, task_id, attempt, base, report["prechangeExecution"])
+    journal = store.read_journal()
+    require(digest(journal["last"]["state"]) == digest(state), "Test intent: сначала сохраните исполнение в журнал")
+    require_revision_available(state, attempt)
+    contract = {**copy.deepcopy(previous), "report": copy.deepcopy(report), "revision": len(refs) + 1,
+                "recordedAfterSequence": journal["last"]["sequence"], "at": timestamp(),
+                "prechangeRevision": True, "revises": copy.deepcopy(refs[-1])}
+    saved = store.artifact("test-intent", (json.dumps(contract, ensure_ascii=False,
+        sort_keys=True, indent=2) + "\n").encode(), ".json")
+    attempt["testIntent"] = saved
+    attempt["testIntentHistory"] = [*refs, saved]
+    return copy.deepcopy(saved)
 
 
 def _valid(store, state, task_id, *, require_green, allow_source_changes=False, historical=False):
@@ -531,7 +590,13 @@ def chain_matches(store, attempt, submitted, rounds, repair):
         from . import incremental_test_intent
         return incremental_test_intent.chain_matches(store, attempt, submitted, rounds, repair)
     if not attempt.get("zoneExtensions"):
-        return all(r.get("testIntent") == attempt.get("testIntent")
+        allowed = [attempt.get("testIntent")]
+        if attempt.get("testIntent"):
+            latest = _saved(store, attempt["testIntent"])
+            if latest.get("prechangeRevision") and latest.get("revises") in attempt.get("testIntentHistory", []):
+                # prechangeRevision: records made before the one link revision keep the frozen contract.
+                allowed.append(latest["revises"])
+        return all(r.get("testIntent") in allowed
                    for r in [submitted, *rounds, *([repair] if repair else [])])
     original = submitted.get("testIntent")
     first_contract = attempt["zoneExtensions"][0]["before"]["contract"]

@@ -359,6 +359,24 @@ class StepNamingTests(unittest.TestCase):
                 self.open(error)
             self.assertIs(caught.exception, error)
 
+    def test_a_repeated_acceptance_close_answers_with_the_recorded_outcome(self):
+        # Ticket 10b: the repeat finds the recorded acceptance and keeps its result instead of claiming ok.
+        import hashlib
+        from unittest.mock import patch
+        text = '{"verdict": "FAIL"}'
+        for passed in (False, True):
+            with self.subTest(passed=passed):
+                acceptance = {"report": {"file": "reviews/a.json", "sha256": hashlib.sha256(text.encode()).hexdigest()},
+                              "passed": passed}
+                task = {"status": "completed" if passed else "running", "phase": "task_acceptance"}
+                flow = SimpleNamespace(task=lambda tid: task, read_input=lambda path: text, ready=lambda: [],
+                                       s={"taskHistory": {"T01": [{"actors": {}, "acceptance": acceptance}]}},
+                                       complete_task=lambda *args: self.fail("a recorded report is not accepted twice"))
+                with patch.object(composites.controls, "documents_refresh", lambda flow: None):
+                    receipt = composites.close_task(flow, "T01", "acceptor", "acceptance.json")
+                self.assertIs(receipt["ok"], passed)
+                self.assertEqual(receipt["steps"][0], {"step": "report", "status": "skipped"})
+
     def test_an_unknown_role_is_refused_before_any_step(self):
         flow = SimpleNamespace(task=lambda tid: {})
         with self.assertRaisesRegex(Invalid, "Неизвестная роль"):

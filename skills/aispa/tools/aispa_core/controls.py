@@ -197,5 +197,10 @@ def execute(store, state, flow, args):
     report = json.loads(flow.read_input(args.file))
     result = preparation.owner_reference(store, state, report) if action == "reference" else preparation.record(
         store, state, action, report)
+    if action == "brief-map":
+        # Story 76: duplicates and fragmentation are shown before seal; the diagnostics change nothing.
+        # Computed before the save: a failing analysis refuses the command whole, never after the map is written.
+        from . import brief_diagnostics
+        result = {**result, "briefDiagnostics": brief_diagnostics.analyze(store, state)}
     flow.save(action + "-recorded")
     return result

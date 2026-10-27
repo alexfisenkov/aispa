@@ -218,7 +218,9 @@ def parser():
     verify.add_argument("command", nargs=argparse.REMAINDER)
     close = sub.add_parser("close")
     close.add_argument("status", choices=("paused", "blocked", "cancelled")); close.add_argument("--note", required=True)
-    sub.add_parser("decision").add_argument("text")
+    decision = sub.add_parser("decision"); decision.add_argument("text")
+    decision.add_argument("--requirement", action="append", default=[],
+                          help="ID действующего требования, к которому относится решение (повторяемый)")
     serve = sub.add_parser("serve"); serve.add_argument("--port", type=int, default=0)
     sub.add_parser("batch").add_argument("--file", required=True)
     return p
@@ -577,7 +579,11 @@ def execute(args):
             if isinstance(result, bool):
                 ok = result
         elif action == "plan":
-            flow.plan(args.file, review_path=args.review, actor=args.actor)
+            result = flow.plan(args.file, review_path=args.review, actor=args.actor)
+            if isinstance(result, dict) and result.get("unchanged"):
+                # Story 115: nothing was written, so neither a view nor a saved CLI answer is produced.
+                print(json.dumps({"ok": True, "run": state["run"], "receipt": result}, ensure_ascii=False, indent=2))
+                return 0
             receipt = state.get("planReview")
         elif action == "page":
             from aispa_core import scale
@@ -659,12 +665,20 @@ def execute(args):
                 phase_receipts.record(store, state, "discovery", receipt, actor=author)
                 flow.save("project-discovery-recorded")
             else:
-                metadata_receipt = {}
-                evidence = discovery.collect(store, state, paths=args.include, metadata_receipt=metadata_receipt, cursor=args.cursor)
+                metadata_receipt, reuse_receipt = {}, {}
+                unchanged_state = digest(state)
+                evidence = discovery.collect(store, state, paths=args.include, metadata_receipt=metadata_receipt,
+                                             cursor=args.cursor, reuse_receipt=reuse_receipt)
                 receipt = {"collection": state["discoveryCollection"],
                            "absolutePath": str(store.run / state["discoveryCollection"]["file"]),
                            "sourceCount": len(evidence["sources"]), "omitted": evidence["omitted"],
                            "documentRegistration": metadata_receipt}
+                if (state.get("policy", {}).get("focusedReview") is True and reuse_receipt.get("reused")
+                        and digest(state) == unchanged_state):
+                    # Same inputs: the saved study is returned and nothing is written (no event, no view).
+                    print(json.dumps({"ok": True, "run": state["run"], "receipt": {**receipt, "reused": True}},
+                                     ensure_ascii=False, indent=2))
+                    return 0
                 flow.save("project-discovery-collected")
         elif action == "discovery":
             print(json.dumps(discovery.view(store, state), ensure_ascii=False, indent=2))
@@ -848,7 +862,7 @@ def execute(args):
         elif action == "close":
             flow.close(args.status, args.note)
         elif action == "decision":
-            flow.decision(args.text)
+            flow.decision(args.text, requirements=args.requirement)
         try:
             view = publish(store, state)
         except (Invalid, OSError, ValueError, KeyError, TypeError):

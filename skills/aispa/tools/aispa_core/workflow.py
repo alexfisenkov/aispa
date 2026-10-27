@@ -1,4 +1,5 @@
 """Domain operations. No publishing, agent spawning or external messages."""
+import copy
 import json
 import math
 import os
@@ -8,7 +9,8 @@ import time
 
 from .contracts import (active, add_requirements, artifact_valid, basis, definition,
                         evidence_rows, gate_valid, plan_basis, report_header, require,
-                        validate_plan, verified, task_basis, task_verified, task_closure)
+                        validate_plan, verified, task_basis, task_verified, task_closure,
+                        targeted, task_contract, task_slices, plan_inputs, requirement_basis)
 from .store import Invalid, timestamp
 from . import timing, phase_receipts, execution_obligations, measured_estimate
 from . import autonomy, project_documents, preflight
@@ -17,6 +19,7 @@ from . import check_modes, project_context, discovery, carryover, cleanroom, bli
 from . import final_repairs
 
 WAVES_UNCHECKED = "В этой политике волны не сверяются; бриф проверяют на входе и в слепой приёмке"
+CODE_CHANGES_LIMIT = 200  # resumeReport: paths listed per kind; the total counts all of them
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -45,8 +48,13 @@ class Workflow:
         self.pipeline = TaskPipeline(self)
         # Idle marks and calibration samples exist only in runs with measuredTiming.
         self.tracker = measured_estimate.Tracker(state) if measured_estimate.enabled(state) else None
+        # targetedRebrief: plan opens brief-authorized attempts first and journals them with the plan itself.
+        self._deferred_saves = False
+        self._appended = 0
 
     def save(self, event, at=None):
+        if getattr(self, "_deferred_saves", False):
+            return
         at = at or timestamp()
         from . import work_progress
         work_progress.sync(self.s, event, at)
@@ -54,6 +62,7 @@ class Workflow:
             timing.sync_phase(task, at, self.s.get("status") == "running" and not timing.waiting(self.s))
         samples = self.tracker.prepare(self.store, self.s, at) if self.tracker else []
         self.store.append(self.s, event)
+        self._appended = getattr(self, "_appended", 0) + 1
         if samples:
             self.tracker.commit(samples)
         if self.s.get("projectContext", {}).get("initialized"):
@@ -240,17 +249,44 @@ class Workflow:
             require(design_contract.valid_interfaces(self.store, self.s),
                     "До плана нужен актуальный контракт интерфейсов: interfaces")
             design_contract.validate_plan_bindings(self.store, self.s, tasks)
+        review_report = json.loads(self.read_input(review_path)) if review_path else None
+        reopen = self._targeted_tasks(tasks, review_report) if targeted(self.s) else []
+        if not reopen:
+            return self._apply_plan(tasks, text, author, review_path, review_report)
+        # The new brief reopens reviewed tasks before the replan checks them; the attempts are journaled only
+        # together with the plan, and a refused plan leaves the state exactly as it was.
+        snapshot, appended = copy.deepcopy(self.s), self._appended
+        try:
+            self._deferred_saves = True
+            try:
+                self._reopen_by_brief(reopen)
+            finally:
+                self._deferred_saves = False
+            return self._apply_plan(tasks, text, author, review_path, review_report, reopened=True)
+        except BaseException:
+            if self._appended == appended:
+                self.s.clear()
+                self.s.update(snapshot)
+            raise
+
+    def _apply_plan(self, tasks, text, author, review_path, review_report, reopened=False):
         self.pipeline.validate_replan(tasks)
         if self.s.get("policy", {}).get("planReview"):
             require(review_path is not None, "До плана нужен разбор размера задач: plan-check, затем plan --review")
-        size_review = planning.review(self.store, self.s, tasks, json.loads(self.read_input(review_path))) if review_path else None
+        inputs = plan_inputs(self.store, self.s, tasks, review_report) if self._focused() else None
+        if not reopened and inputs is not None and self._plan_unchanged(tasks, inputs):
+            # Same plan, same inputs: no event, no artifact, no new cards.
+            return {"unchanged": True}
+        size_review = planning.review(self.store, self.s, tasks, review_report) if review_path else None
         integration_task = integration.choose_task(self.store, self.s, tasks) if self.s.get("policy", {}).get("integrationReview") else None
         old = {t["id"]: t for t in self.s["tasks"]}
         contract = basis(self.store, self.s, "coverage")
+        next_state = {**self.s, "tasks": tasks}
         for task in tasks:
             previous = old.get(task["id"])
-            task["origin"] = contract
-            if previous and definition(previous) == definition(task) and previous.get("origin") == contract:
+            # targetedRebrief: a task keeps its status while its own requirements, slices and closure stand.
+            task["origin"] = task_contract(next_state, task["id"]) if targeted(self.s) else contract
+            if previous and definition(previous) == definition(task) and previous.get("origin") == task["origin"]:
                 for key in ("status", "phase", "proof", "note", "phaseTiming", *timing.FIELDS):
                     if key in previous:
                         task[key] = previous[key]
@@ -268,10 +304,59 @@ class Workflow:
             self.s.pop("planReview", None)
         self.pipeline.prepare()
         self.s["gates"]["plan"] = {"passed": True, "basis": basis(self.store, self.s, "plan"),
-                                     "report": self.store.artifact("plans", text.encode(), ".json")}
+                                     "report": self.store.artifact("plans", text.encode(), ".json"),
+                                     **({"inputs": inputs} if inputs is not None else {})}
         phase_receipts.record(self.store, self.s, "planner", self.s["gates"]["plan"]["report"], actor=author)
         self.s["stage"] = "build"
         self.save("plan-validated")
+
+    def _targeted_tasks(self, tasks, review_report):
+        """targetedRebrief: bind each task to its own slices and say which reviewed tasks the new brief reopens.
+
+        A reviewed task whose requirement chain moved since the last plan, with an owner brief newer than its
+        attempt, is reopened by that brief (returned). A reviewed task changed by the plan alone keeps its
+        frozen contract: refused before any write, as before.
+        """
+        slices = task_slices(self.store, self.s, tasks, review_report)
+        for task in tasks:
+            task["contractSlice"] = slices[task["id"]]
+        next_state = {**self.s, "tasks": tasks}
+        old = {t["id"]: t for t in self.s["tasks"]}
+        reopen, frozen = [], []
+        for task in tasks:
+            tid = task["id"]
+            task["requirementsBasis"] = requirement_basis(next_state, tid)
+            latest = (self.s.get("taskHistory", {}).get(tid) or [None])[-1]
+            if not (latest and (latest.get("rounds") or latest.get("verifiedCompletion"))
+                    and latest.get("contract") != task_contract(next_state, tid)):
+                continue
+            before = old.get(tid, {}).get("requirementsBasis")
+            by_brief = (before is not None and before != task["requirementsBasis"]
+                        and len(self.s["briefs"]) > latest.get("briefCount", len(self.s["briefs"])))
+            (reopen if by_brief else frozen).append(tid)
+        require(not frozen, "План меняет уже проверенные задачи " + ", ".join(frozen)
+                + ", а их требования новым брифом не менялись: контракт проверенной задачи меняется только "
+                  "новой попыткой владельца (new-attempt <id> --brief <новый бриф> --quote «…»); "
+                  "задачи, чьи требования изменил новый бриф, и их потомки переоткрываются планом сами")
+        return reopen
+
+    def _reopen_by_brief(self, tids):
+        """targetedRebrief: the newest owner brief is the basis of a new attempt of each task whose contract it changed.
+
+        Prior proof is dropped by the new attempt: it proved the old contract, not this one.
+        """
+        if not tids:
+            return
+        brief = self.s["briefs"][-1]
+        quote = next((line.strip() for line in self.store.text(brief).splitlines() if line.strip()), "")[:500]
+        for tid in tids:
+            self.pipeline.new_attempt(tid, brief["id"], quote)
+
+    def _plan_unchanged(self, tasks, inputs):
+        gate = self.s.get("gates", {}).get("plan")
+        return bool(gate and gate.get("inputs") == inputs
+                    and [definition(t) for t in self.s["tasks"]] == [definition(t) for t in tasks]
+                    and gate_valid(self.store, self.s, "plan"))
 
     def task(self, tid):
         result = next((t for t in self.s["tasks"] if t["id"] == tid), None)
@@ -407,6 +492,7 @@ class Workflow:
         if preflight.enabled(self.s):
             timing.begin_wait(self.s, "owner_question", at)
         self.s["waiting"] = {"kind": "owner_question", "note": note, "since": at}
+        self._snapshot_code()
         self.save("owner-answer-awaited", at)
         return self.s["waiting"]
 
@@ -526,6 +612,7 @@ class Workflow:
             attempt["verification"] = receipt
         else:
             self.s["verification"] = receipt
+            self._snapshot_code()
         self.s.pop("activity", None)
         self.save("verification-executed")
         return task_verified(self.store, self.s, task_id) if task_id else verified(self.store, self.s)
@@ -749,15 +836,19 @@ class Workflow:
                 self.s["waiting"]["note"] = note
         else:
             self.s["waiting"] = note
+        self._snapshot_code()
         self.save("run-" + status, at)
 
     def resume(self, host=None, expected_basis=None):
+        report = None
         require(not self.s.get("journalRecovery", {}).get("pending"),
                 "После восстановления сначала journal-verify и journal-reconcile")
         if preflight.enabled(self.s):
             require(self.s["status"] in ("running", "paused", "blocked"), "Preflight: terminal run cannot resume")
             previous_session = self.s.get("hostSession")
             report = preflight.adopt(self, host, expected_basis=expected_basis, save=False)
+            if self._resume_report():
+                report = {**report, "codeChanges": self.code_changes()}
             if self.s["status"] == "running":
                 self.s.setdefault("continuations", []).append({"previousSession": previous_session,
                     "session": self.s["hostSession"], "source": host["source"], "basis": report["basis"], "at": timestamp()})
@@ -776,11 +867,54 @@ class Workflow:
                 timing.start(task, at)
         self.s.pop("activity", None)
         self.s["gates"].pop("acceptance", None)
+        receipt = None
+        if self._resume_report():
+            receipt = report if report is not None else {"codeChanges": self.code_changes()}
         self.save("run-resumed", at)
+        return receipt
 
-    def decision(self, text):
+    def _resume_report(self):
+        return self.s.get("policy", {}).get("resumeReport") is True
+
+    def _snapshot_code(self):
+        """resumeReport: the code as it stood at close, wait and the general verify; resume compares with it."""
+        if not self._resume_report():
+            return
+        records = json.loads(json.dumps(self.store.code_records()))
+        self.s["lastCodeSnapshot"] = self.store.artifact(
+            "code-snapshots", (json.dumps({"records": records}, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
+
+    def code_changes(self):
+        """Read-only diff of the current code against lastCodeSnapshot; lists capped, total exact."""
+        ref = self.s.get("lastCodeSnapshot")
+        if not ref:
+            return {"baseline": None}
+        require(artifact_valid(self.store, ref), "Снимок кода для продолжения повреждён")
+        before = self.store.json(ref)["records"]
+        rows = integration._changes(before, json.loads(json.dumps(self.store.code_records())))
+
+        def absent(value):  # a tracked file deleted from the tree is recorded as missing
+            return value is None or value == {"missing": True}
+        changed = [r["path"] for r in rows if not absent(r["before"]) and not absent(r["after"])]
+        added = [r["path"] for r in rows if absent(r["before"]) and not absent(r["after"])]
+        removed = [r["path"] for r in rows if not absent(r["before"]) and absent(r["after"])]
+        rows = [r for r in rows if not (absent(r["before"]) and absent(r["after"]))]
+        return {"changed": changed[:CODE_CHANGES_LIMIT], "added": added[:CODE_CHANGES_LIMIT],
+                "removed": removed[:CODE_CHANGES_LIMIT], "total": len(rows), "since": ref}
+
+    def decision(self, text, requirements=()):
         self.running()
         require(bool(text.strip()), "Пустое решение")
         require(not SECRET.search(text), "В решении обнаружен возможный секрет")
-        self.s["notes"].append({"at": timestamp(), "text": text})
+        note = {"at": timestamp(), "text": text}
+        if requirements:
+            # linkedDecisions: a decision names only requirements in force now; nothing is written otherwise.
+            require(self.s.get("policy", {}).get("linkedDecisions") is True,
+                    "Привязка решения к требованиям доступна только в прогоне новой политики (linkedDecisions)")
+            current = [r["id"] for r in active(self.s)]
+            unknown = [rid for rid in requirements if rid not in current]
+            require(not unknown, "Неизвестное или снятое требование: " + ", ".join(unknown)
+                    + ". Допустимые: " + ", ".join(current))
+            note["requirements"] = list(dict.fromkeys(requirements))
+        self.s["notes"].append(note)
         self.save("agent-decision-recorded")

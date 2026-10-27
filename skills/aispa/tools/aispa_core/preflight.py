@@ -21,8 +21,73 @@ DENIAL = re.compile(r"delegation.{0,35}(?:forbidden|denied|prohibited)|do not sp
                     r"(?:запрет|запрещ).{0,45}(?:делег|субагент)|не\s+(?:запуска|использ).{0,30}субагент", re.I)
 
 
+# Story 66: what the person enables when the environment forbids sub-agents, named for the host they use.
+DELEGATION_DISABLED = ("Субагенты в этой среде выключены: разрешите их в настройках Codex или уберите запрет "
+                       "из своих правил и начните новый чат")
+DELEGATION_DISABLED_BY_RUNTIME = {
+    "codex": DELEGATION_DISABLED,
+    "claude-code": ("Субагенты в этой среде выключены: разрешите запуск субагентов (инструмент Agent) в разрешениях "
+                    "Claude Code или уберите запрет из своих правил (CLAUDE.md) и начните новый чат"),
+}
+DELEGATION_DISABLED_UNKNOWN = ("Субагенты в этой среде выключены: разрешите их — в Codex в его настройках, в Claude Code "
+                               "запуск субагентов (инструмент Agent) в разрешениях — или уберите запрет из своих правил "
+                               "и начните новый чат")
+DELEGATION_CAPABILITIES = frozenset({"delegation", "independentRoles"})
+# resumeReport: a participant the new chat cannot see, accepted only without open work.
+LOST = "lost"
+
+
 def enabled(state):
     return state.get("policy", {}).get("managedExecution") is True
+
+
+def delegation_disabled(runtime):
+    """The pointer for the host the report came from; a neutral text naming both when it is unknown."""
+    return DELEGATION_DISABLED_BY_RUNTIME.get(runtime if isinstance(runtime, str) else None,
+                                              DELEGATION_DISABLED_UNKNOWN)
+
+
+def _open_work(state, aid):
+    """(task or repair, role) rows a participant still owes; finished or reported roles owe nothing."""
+    rows = []
+    tasks = {t.get("id"): t for t in state.get("tasks", [])}
+    for tid, history in sorted(state.get("taskHistory", {}).items()):
+        task = tasks.get(tid)
+        attempt = history[-1] if history else {}
+        if (task is None or task.get("status") in ("completed", "blocked") or attempt.get("terminal")
+                or attempt.get("acceptance") or attempt.get("verifiedCompletion")):
+            continue
+        for role, actor in sorted((attempt.get("actors") or {}).items()):
+            if actor != aid:
+                continue
+            reported = (role.startswith("critic") and role[-1:].isdigit()
+                        and len(attempt.get("rounds") or []) >= int(role[-1]))
+            if not reported:
+                rows.append({"task": tid, "role": role,
+                             "replacement": "assign %s --role %s с новым участником" % (tid, role)})
+    for repair in state.get("finalRepairs", []) or []:
+        if repair.get("status") not in ("open", "submitted"):
+            continue
+        worker = (repair.get("worker") or {}).get("id")
+        checker = ((repair.get("rounds") or [{}])[-1].get("checker") or {}).get("id") if repair.get("rounds") else None
+        if repair.get("status") == "open" and worker == aid:
+            rows.append({"task": repair.get("id"), "role": "worker",
+                         "replacement": "final-repair assign --role worker с новым участником"})
+        if repair.get("status") == "submitted" and checker == aid:
+            rows.append({"task": repair.get("id"), "role": "checker",
+                         "replacement": "final-repair assign --role checker с новым участником"})
+    return rows
+
+
+def _repair_people(state):
+    """Distinct seated workers and checkers of final repairs (sealed identity records)."""
+    seen, people = set(), []
+    for repair in state.get("finalRepairs", []) or []:
+        for person in [repair.get("worker"), *[row.get("checker") for row in repair.get("rounds") or []]]:
+            if isinstance(person, dict) and isinstance(person.get("id"), str) and person["id"] not in seen:
+                seen.add(person["id"])
+                people.append(person)
+    return people
 
 
 def _pin(state):
@@ -173,15 +238,18 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
               "evidenceLevel": "source-bound host report; not host authentication",
               "authority": {"existingPermissionsOnly": True}, "host": None}
 
-    def block(code, detail):
-        report["blockers"].append({"code": code, "detail": str(detail)})
-        report["actions"].append({"action": "resolve-" + code.lower(), "detail": str(detail), "requiresReply": False})
+    def block(code, detail, message=None):
+        extra = {"message": message} if message else {}
+        report["blockers"].append({"code": code, "detail": str(detail), **extra})
+        report["actions"].append({"action": "resolve-" + code.lower(), "detail": str(detail), **extra,
+                                  "requiresReply": False})
 
     try:
         report["requiredSources"] = _sources(store, state, budget=budget)
         require(_package_digest(confined(store.run, _pin(state)), budget=budget) == state.get("runtimeDigest"),
                 "Preflight: pinned runtime digest mismatch")
         host = _host(store, envelope, state, budget=budget)
+        disabled = delegation_disabled(host.get("runtime"))
         _relocation(store, state, host, budget=budget)
         observed = host.get("identity")
         require(isinstance(observed, dict), "Preflight: host identity отсутствует")
@@ -203,7 +271,8 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
         for name in sorted(required):
             row = capabilities.get(name, {})
             if row.get("status") != "allowed" or not row.get("source"):
-                block("CAPABILITY", name + ": " + str(row.get("status", "unknown")))
+                block("CAPABILITY", name + ": " + str(row.get("status", "unknown")),
+                      disabled if name in DELEGATION_CAPABILITIES else None)
         tools = host.get("tools")
         require(isinstance(tools, list) and all(isinstance(t, dict) and isinstance(t.get("name"), str)
                 for t in tools), "Preflight: неверный фактический список инструментов")
@@ -211,7 +280,8 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
         for name, words in (("delegation", ("spawn", "delegate", "agent")),
                             ("processes", ("exec", "shell", "process")), ("browser", ("browser", "chrome"))):
             if name in required and not any(word in tool for tool in available for word in words):
-                block("TOOL", name + ": required actual tool missing")
+                block("TOOL", name + ": required actual tool missing",
+                      disabled if name == "delegation" else None)
         minimal_identity = purpose in ("browser", "identity")
         rules = host.get("rules", [])
         require(isinstance(rules, list) and (minimal_identity or rules), "Preflight: applicable rules не прочитаны")
@@ -234,21 +304,44 @@ def _check(store, state, envelope, purpose, *, current_basis=True):
             budget.check_memory(len(raw) * 4 + len(text) * 4, path=str(path))
             budget.check(0, path=str(path))
             if "delegation" in required and DENIAL.search(text):
-                block("RULE", {"file": rule["file"], "sha256": rule["sha256"], "quote": DENIAL.search(text).group()})
+                block("RULE", {"file": rule["file"], "sha256": rule["sha256"], "quote": DENIAL.search(text).group()},
+                      disabled)
             for decision in rule.get("decisions", []):
                 require(isinstance(decision.get("quote"), str) and decision["quote"].strip()
                         and decision["quote"] in text, "Preflight: rule decision quote отсутствует")
                 if decision.get("action") in required | {"all"} and decision.get("decision") != "allow":
-                    block("RULE", {"file": rule["file"], **decision})
+                    block("RULE", {"file": rule["file"], **decision},
+                          disabled if decision.get("action") in DELEGATION_CAPABILITIES | {"all"} else None)
             budget.base_memory += len(raw) * 4 + len(text) * 4
         if purpose not in ("browser", "identity"):
             assignments = host.get("assignments")
             require(isinstance(assignments, list), "Preflight: live assignments не наблюдались")
+            lost_allowed = state.get("policy", {}).get("resumeReport") is True
+
+            def refuse_lost(aid):
+                for row in _open_work(state, aid):
+                    block("ASSIGNMENT", "%s: участник не виден в этой среде, но у него открытая работа — задача %s, "
+                                        "роль %s; замените его штатно: %s"
+                          % (aid, row["task"], row["role"], row["replacement"]))
+            listed = set()
             for actor in participants.list_participants(store, state):
+                listed.add(actor["id"])
                 matches = [a for a in assignments if a.get("actor") == actor["id"]
                            and a.get("nativeId") == actor["nativeId"] and a.get("session") == actor["session"]]
-                if len(matches) != 1 or matches[0].get("status") not in ("live", "completed"):
+                status = matches[0].get("status") if len(matches) == 1 else None
+                if lost_allowed and status == LOST:
+                    refuse_lost(actor["id"])
+                    continue
+                if status not in ("live", "completed"):
                     block("ASSIGNMENT", actor["id"] + ": live/completed identity unknown; preserve history and replace explicitly")
+            if lost_allowed:
+                # Final-repair people are not task participants: a lost one still may not leave a repair open.
+                for person in _repair_people(state):
+                    if person["id"] not in listed and any(
+                            a.get("actor") == person["id"] and a.get("nativeId") == person.get("nativeId")
+                            and a.get("session") == person.get("session") and a.get("status") == LOST
+                            for a in assignments):
+                        refuse_lost(person["id"])
         report["host"] = {"runtime": host["runtime"], "session": host["session"], "source": envelope["source"],
                           "observedAt": host["observedAt"]}
         budget.check(0, path="preflight")

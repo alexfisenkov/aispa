@@ -139,7 +139,8 @@ class AutonomyTests(unittest.TestCase):
         self.assertEqual(self.state["briefs"], [])
         self.assertEqual(self.state["requirements"], [])
         self.assertEqual(self.state["core"], [])
-        self.assertEqual(result["requiredHostActions"][0]["action"], "start-and-open-dashboard")
+        # Story 82: init only starts the dashboard; it is opened once from the answer of `dashboard start`.
+        self.assertEqual(result["requiredHostActions"][0]["action"], "start-dashboard")
 
     def test_first_seal_notifies_once_and_compact_status_retains_contract(self):
         self.prepare()
@@ -188,6 +189,58 @@ class AutonomyTests(unittest.TestCase):
             text = (self.store.home / "context" / name).read_text(encoding="utf-8")
             self.assertIn('"mayAsk": false', text)
             self.assertIn(self.state["firstBriefingClosedAt"], text)
+
+
+class InterviewBudgetTests(unittest.TestCase):
+    setUp = helpers.WorkflowTests.setUp
+    tearDown = helpers.WorkflowTests.tearDown
+    git = helpers.WorkflowTests.git
+    commit = helpers.WorkflowTests.commit
+    file = helpers.WorkflowTests.file
+    prepare = AutonomyTests.prepare
+
+    def budget(self, minutes=15, started_minutes_ago=30):
+        from datetime import datetime, timedelta, timezone
+        self.prepare("interview")
+        self.state["policy"]["interviewBudget"] = True
+        self.state["interview"] = {"scope": "standard", "durationMinutes": minutes}
+        self.state["createdAt"] = (datetime.now(timezone.utc) - timedelta(minutes=started_minutes_ago)).isoformat()
+
+    def test_view_reports_minutes_elapsed_and_exceeded_before_seal(self):
+        from aispa_core import autonomy
+        self.budget(15, 30)
+        value = autonomy.view(self.state)["interviewBudget"]
+        self.assertEqual(value["minutes"], 15)
+        self.assertGreaterEqual(value["elapsedMinutes"], 30)
+        self.assertLess(value["elapsedMinutes"], 31)
+        self.assertTrue(value["exceeded"])
+        from datetime import datetime, timezone
+        self.state["createdAt"] = datetime.now(timezone.utc).isoformat()
+        self.assertFalse(autonomy.view(self.state)["interviewBudget"]["exceeded"])
+
+    def test_budget_stops_growing_after_seal(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import patch
+        from aispa_core import autonomy
+        self.budget(15, 5)
+        self.flow.seal()
+        frozen = autonomy.view(self.state)["interviewBudget"]
+        self.assertFalse(frozen["exceeded"])
+        later = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        with patch.object(autonomy, "timestamp", return_value=later):
+            self.assertEqual(autonomy.view(self.state)["interviewBudget"], frozen)
+
+    def test_runs_without_the_flag_have_no_budget_field(self):
+        from aispa_core import autonomy
+        self.prepare("interview")
+        self.assertNotIn("interviewBudget", autonomy.view(self.state))
+
+    def test_start_message_says_when_the_person_is_needed(self):
+        from aispa_core import autonomy
+        self.prepare(seal=True)
+        message = autonomy.start_request(self.state)[0]["message"]
+        for text in ("Бриф готов.", "можете отойти", "доступа или полномочия", "блокер", "продолжай"):
+            self.assertIn(text, message)
 
 
 if __name__ == "__main__":

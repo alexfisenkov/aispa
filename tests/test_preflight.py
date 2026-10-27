@@ -289,5 +289,110 @@ class PreflightTests(ManagedFixture):
         self.assertEqual((self.store.run / "events.jsonl").read_bytes(), before)
 
 
+DISABLED = ("Субагенты в этой среде выключены: разрешите их в настройках Codex или уберите запрет "
+            "из своих правил и начните новый чат")
+
+
+class DelegationAndLostTests(ManagedFixture):
+    def test_every_delegation_blocker_names_what_to_enable(self):
+        self.managed()
+        raw = self.payload(self.host())
+        raw["capabilities"]["delegation"]["status"] = "denied"
+        def blocked(name, host):
+            with self.subTest(blocker=name):
+                report = self.api().check(self.store, self.state, host, purpose="seal")
+                self.assertFalse(report["ok"])
+                self.assertEqual([b["code"] for b in report["blockers"]], [name])
+                self.assertIn(DISABLED, json.dumps(report["blockers"], ensure_ascii=False))
+        blocked("CAPABILITY", self.reseal(raw))
+        blocked("TOOL", self.host(tools=[{"name": "exec_command", "status": "available"}]))
+        (self.root / "AGENTS.md").write_text("Delegation is forbidden here.\n", encoding="utf-8")
+        blocked("RULE", self.host(rules=[{"file": "AGENTS.md", "sha256": file_hash(self.root / "AGENTS.md"), "decisions": []}]))
+
+    def test_the_pointer_follows_the_host_and_is_neutral_when_the_host_is_unknown(self):
+        for runtime, expected, absent in (
+                ("claude-code", ("инструмент Agent", "разрешениях Claude Code", "CLAUDE.md", "новый чат"),
+                 ("настройках Codex",)),
+                ("openclaw", ("Codex", "Claude Code", "инструмент Agent", "уберите запрет из своих правил", "новый чат"),
+                 ())):
+            with self.subTest(runtime=runtime):
+                self.managed()
+                self.state["runtime"] = runtime
+                self.flow.save("runtime-" + runtime)
+                raw = self.payload(self.host(runtime=runtime))
+                raw["capabilities"]["delegation"]["status"] = "denied"
+                report = self.api().check(self.store, self.state, self.reseal(raw), purpose="seal")
+                self.assertEqual([b["code"] for b in report["blockers"]], ["CAPABILITY"])
+                message = report["blockers"][0]["message"]
+                self.assertTrue(message.startswith("Субагенты в этой среде выключены"), message)
+                self.assertNotEqual(message, DISABLED)
+                for part in expected:
+                    self.assertIn(part, message)
+                for part in absent:
+                    self.assertNotIn(part, message)
+                self.tearDown()
+                self.setUp()
+
+    def test_other_blockers_do_not_claim_disabled_subagents(self):
+        self.managed()
+        raw = self.payload(self.host())
+        raw["capabilities"]["processes"]["status"] = "denied"
+        report = self.api().check(self.store, self.state, self.reseal(raw), purpose="seal")
+        self.assertFalse(report["ok"])
+        self.assertNotIn(DISABLED, json.dumps(report, ensure_ascii=False))
+
+    def lost_host(self, aid, status="lost"):
+        row = next(r for r in participants.list_participants(self.store, self.state) if r["id"] == aid)
+        return self.host(assignments=[{"actor": aid, "nativeId": row["nativeId"], "session": row["session"],
+                                       "status": status}])
+
+    def test_lost_participant_without_open_work_does_not_block_continuation(self):
+        self.managed()
+        self.state["policy"]["resumeReport"] = True
+        aid = participants.register(self.store, self.state, "brief-reviewer", "codex", "old-native", "old-chat")
+        self.flow.save("existing-actor")
+        report = self.api().check(self.store, self.state, self.lost_host(aid))
+        self.assertTrue(report["ok"], report["blockers"])
+
+    def test_lost_status_is_unknown_without_the_flag(self):
+        self.managed()
+        aid = participants.register(self.store, self.state, "brief-reviewer", "codex", "old-native", "old-chat")
+        self.flow.save("existing-actor")
+        self.assertFalse(self.api().check(self.store, self.state, self.lost_host(aid))["ok"])
+
+    def test_lost_participant_with_open_task_work_is_refused_with_task_role_and_replacement(self):
+        self.managed()
+        self.state["policy"]["resumeReport"] = True
+        self.state["tasks"] = [{"id": "T01", "title": "Export", "requirements": ["R01"], "dependsOn": [],
+                                "zones": ["app.py"], "criteria": ["Local CSV"], "wave": 1, "status": "running"}]
+        aid = participants.register(self.store, self.state, "brief-reviewer", "codex", "old-native", "old-chat")
+        self.state["taskHistory"] = {"T01": [{"id": "attempt-1", "actors": {"critic1": aid}, "rounds": [],
+                                              "acceptance": None, "terminal": False}]}
+        self.flow.save("open-task-work")
+        report = self.api().check(self.store, self.state, self.lost_host(aid))
+        self.assertFalse(report["ok"])
+        text = json.dumps(report["blockers"], ensure_ascii=False)
+        for part in ("T01", "critic1", aid, "assign T01 --role critic1"):
+            self.assertIn(part, text)
+
+    def test_lost_worker_of_an_open_final_repair_is_refused_and_named_with_its_replacement(self):
+        self.managed()
+        self.state["policy"]["resumeReport"] = True
+        worker = {"id": digest(["codex", "repair-native", "repair-chat"]), "runtime": "codex",
+                  "nativeId": "repair-native", "session": "repair-chat", "role": "final-repair-worker", "repair": "F01"}
+        self.state["finalRepairs"] = [{"id": "F01", "kind": "findings", "items": ["W001"], "zones": ["app.py"],
+                                       "worker": worker, "rounds": [], "status": "open"}]
+        self.flow.save("open-final-repair")
+        lost = [{"actor": worker["id"], "nativeId": "repair-native", "session": "repair-chat", "status": "lost"}]
+        report = self.api().check(self.store, self.state, self.host(assignments=lost))
+        self.assertFalse(report["ok"])
+        text = json.dumps(report["blockers"], ensure_ascii=False)
+        for part in ("F01", "worker", worker["id"], "final-repair assign --role worker"):
+            self.assertIn(part, text)
+        self.state["finalRepairs"][0]["status"] = "passed"
+        self.flow.save("final-repair-passed")
+        self.assertTrue(self.api().check(self.store, self.state, self.host(assignments=lost))["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
