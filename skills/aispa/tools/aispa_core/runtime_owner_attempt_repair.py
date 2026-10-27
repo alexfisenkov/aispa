@@ -21,15 +21,20 @@ OLD_DIGEST = "062f4fb7d168422870c47bb63725617947aef29bb2518811b8e2c5fae2c5a471"
 EVENT = "runtime-repaired:owner-task-attempt-0.4.0"
 STEM = "owner-task-attempt-0.4.0-"
 SOURCE_HASHES = {
-    "tools/aispa.py": "7bcfa1146363fcfc85c1c5a7afe684ea249919ac386a1724fb28075d0041a465",
+    # 0.5.0 package: the new-attempt parser and dispatch seams are byte-identical to 7bcfa114….
+    "tools/aispa.py": "6bbd46c00b824d4313218cff317f5822fe3b7519fae8c8c29cdc6e35e17ab9cf",
     "tools/aispa_core/team.py": "0788ad62d24aafa866a9472aa5e7bb819c7674af1ebf35736225b4a366c247bc",
     "tools/aispa_core/workflow.py": "0d7606ce9273b1f79933489aad98818d11badd705461320051c6a0ae833dfe03",
     "tools/aispa_core/owner_task_attempt.py": "27cf4c2c480b65fb233c7db5dac4296186344b8722faf8bd81558346adba0b9a",
 }
-HISTORICAL_SOURCE_HASHES = {
-    **SOURCE_HASHES,
-    "tools/aispa_core/workflow.py": "7c53f2f7ca48ccc80962d8123144dd9dd47344ac65142f4950c998982c3b678d",
-}
+# Earlier reviewed sources of the same seams; manifests prepared from them stay valid.
+HISTORICAL_SOURCE_HASHES = (
+    {**SOURCE_HASHES,
+     "tools/aispa.py": "7bcfa1146363fcfc85c1c5a7afe684ea249919ac386a1724fb28075d0041a465"},
+    {**SOURCE_HASHES,
+     "tools/aispa.py": "7bcfa1146363fcfc85c1c5a7afe684ea249919ac386a1724fb28075d0041a465",
+     "tools/aispa_core/workflow.py": "7c53f2f7ca48ccc80962d8123144dd9dd47344ac65142f4950c998982c3b678d"},
+)
 OLD_HASHES = {
     "tools/aispa.py": "e1a07f26e106c1e826bb829192749f6755efefaf1aa980cf0699518190c6e080",
     "tools/aispa_core/team.py": "a34803f27c7a02806b791f2831bb7a4a798c42853e08cc0131db41faa1f7ef7c",
@@ -176,7 +181,7 @@ def _scan_run(root):
     A second hash binds the streaming artifact scan to Journal.load's generation.
     """
     _need(not is_link(Path(root)), "корень проекта является ссылкой")
-    store = Journal(root)
+    store = zone.RepairJournal(root)
     _need(store.home.is_dir(), "нет существующего .aispa")
     state = store.load()
     _need(state.get("version") == zone.VERSION and state.get("status") in {"running", "paused", "blocked"}
@@ -281,7 +286,7 @@ def _manifest(store, ref):
           and value["kind"] == EVENT and value["run"] == store.run.name
           and value["version"] == zone.VERSION and value["sourceBaseline"] == zone.SOURCE_BASELINE
           and value["oldRuntimeDigest"] == OLD_DIGEST
-          and value["sourceHashes"] in (SOURCE_HASHES, HISTORICAL_SOURCE_HASHES)
+          and value["sourceHashes"] in (SOURCE_HASHES, *HISTORICAL_SOURCE_HASHES)
           and re.fullmatch(STEM + r"[0-9a-f]{32}", value["id"])
           and value["runtimePath"] == "runtime-repairs/" + value["id"] + "/runtime"
           and ref["file"] == "runtime-repairs/" + value["id"] + "/manifest.json", "неверная привязка manifest")
@@ -519,7 +524,7 @@ def apply(root, *, manifest_file, expected_manifest_sha256, expected_journal_sha
                 selected = _selected(root)
             except Exception:
                 try:
-                    Journal(root).inspect_recovery()
+                    zone.RepairJournal(root).inspect_recovery()
                 except Exception:
                     raise Invalid("Owner-attempt runtime repair: OUTCOME_UNKNOWN_AFTER_APPEND; "
                                   "свидетельства сохранены, не повторяйте apply до осмотра журнала") from exc

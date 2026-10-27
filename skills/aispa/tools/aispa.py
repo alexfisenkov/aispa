@@ -19,6 +19,7 @@ from aispa_core.cli_output import emit, saved_without_view
 from aispa_core import phase_receipts, dashboard_host, work_progress
 from aispa_core import autonomy, project_documents, preflight, brief_diagnostics, participants, timing
 from aispa_core import task_zone_extension
+from aispa_core import model_routes, composites, final_repairs
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -33,7 +34,9 @@ def parser():
     p = argparse.ArgumentParser(description="AISpa " + VERSION)
     p.add_argument("--root", default=".", help="Корень Git-проекта")
     p.add_argument("--compact", action="store_true",
-                   help="Краткий ответ изменений/status/init со ссылкой и SHA-256 полного JSON; перед подкомандой")
+                   help="Краткий ответ со ссылкой и SHA-256 полного JSON (умолчание); перед подкомандой")
+    p.add_argument("--full", dest="full_output", action="store_true",
+                   help="Полный JSON-ответ изменений/status/init вместо краткого; перед подкомандой")
     p.add_argument("--version", action="version", version=VERSION)
     sub = p.add_subparsers(dest="action", required=True)
     audit = sub.add_parser("assess", help="audit-only: bounded filesystem reading without a run, writes or commands")
@@ -65,8 +68,8 @@ def parser():
     init.add_argument("--depth", choices=("strict", "balanced", "deep"), default="balanced")
     init.add_argument("--interview-scope", choices=("compact", "standard", "deep"), default="standard")
     init.add_argument("--interview-minutes", type=int, default=15)
-    init.add_argument("--check", required=True, choices=check_modes.MODES,
-                      help="Сколько проверять: fast (быстро), balanced (сбалансированно), max (максимум)")
+    init.add_argument("--check", choices=check_modes.MODES,
+                      help="Сколько проверять: fast (быстро), balanced (сбалансированно, по умолчанию), max (максимум)")
     controls.parsers(sub)
     progress = sub.add_parser("progress")
     progress_steps = progress.add_subparsers(dest="progress_action", required=True)
@@ -354,6 +357,8 @@ def resources_command(store, state, flow, args):
 
 
 def execute(args):
+    # Commands whose full answer cli_output.compact saves answer briefly unless --full is given.
+    args.compact = bool(getattr(args, "compact", False) or not getattr(args, "full_output", False))
     if args.action == "assess":
         from aispa_core import assessment
         result = assessment.assess(args.root, max_entries=args.max_entries, max_depth=args.max_depth,
@@ -460,7 +465,12 @@ def execute(args):
                                    "errorBoundaryChecks": True, "taskTiers": True,
                                    "leanControl": True, "projectDocuments": True,
                                    "firstBriefingClosure": True, "scalableInputs": True,
-                                   "criticalProductFlows": True, "managedExecution": True}
+                                   "criticalProductFlows": True, "managedExecution": True,
+                                   # 0.5.0: fast and faithful to the brief; old runs never get these keys.
+                                   "focusedReview": True, "modelRoutes": True, "measuredTiming": True,
+                                   "deltaJournal": True, "linkedDecisions": True, "interviewBudget": True,
+                                   "targetedRebrief": True, "prechangeRevision": True, "flowDetails": True,
+                                   "resumeReport": True}
                 store.scale_enabled = True
                 state["mode"], state["sealed"], state["core"] = args.mode, False, []
                 state["depth"] = args.depth
@@ -490,6 +500,7 @@ def execute(args):
             project_context.initialize(store, state, args.runtime)
             store.append(state, "project-context-initialized")
             project_context.refresh(store, state)
+            advice = model_routes.coordinator_advice(state["runtime"])
             try:
                 output = {**publish(store, state), "autonomy": autonomy.view(state),
                           "requiredHostActions": dashboard_host.start_request(managed=True)}
@@ -497,6 +508,8 @@ def execute(args):
                 output = saved_without_view(store, state, {"run": state["run"]}, ok=True)
                 if output is None:
                     raise
+            if advice is not None:
+                output["coordinatorAdvice"] = advice
             emit(store, output, compact_mode=args.compact)
             return 0
         state = store.load()
@@ -658,10 +671,7 @@ def execute(args):
             return 0
         elif action == "documents":
             if args.refresh:
-                flow.running()
-                receipt = docmeta.refresh(store, state, paths=args.path)
-                flow.save("document-metadata-refreshed")
-                receipt = {"refresh": receipt, "catalog": docmeta.catalog(store, state, paths=args.path, detailed=args.detailed)}
+                receipt = controls.documents_refresh(flow, paths=args.path, detailed=args.detailed)
             else:
                 print(json.dumps(docmeta.catalog(store, state, paths=args.path, detailed=args.detailed), ensure_ascii=False, indent=2))
                 return 0
@@ -731,6 +741,16 @@ def execute(args):
             receipt = project_context.refresh(store, state)
         elif action == "team":
             receipt = flow.pipeline.team(args.file)
+        elif action == "final-repair":
+            receipt = final_repairs.execute(store, state, flow, args)
+            ok = not isinstance(receipt, dict) or receipt.get("ok", True) is not False
+        elif action == "task-open":
+            receipt = composites.open_task(flow, args.id, args.role, runtime=args.runtime, native_id=args.native_id,
+                session=args.session, model=args.model, reasoning=args.reasoning,
+                model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)
+        elif action == "task-close":
+            receipt = composites.close_task(flow, args.id, args.role, args.file, usage_path=args.usage)
+            ok = not isinstance(receipt, dict) or receipt.get("ok", True) is not False
         elif action == "assign":
             receipt = {"actor": flow.pipeline.assign(args.id, args.role, args.runtime, args.native_id, args.session, model=args.model,
                 reasoning=args.reasoning, model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)}

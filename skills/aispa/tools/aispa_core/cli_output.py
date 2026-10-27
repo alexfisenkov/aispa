@@ -36,7 +36,7 @@ def compact(store, output):
         "compact": True,
         "ok": output.get("ok", True),
         **{key: output[key] for key in ("run", "runDirectory", "status", "stage", "gates", "autonomy", "requiredHostActions",
-                                       "committed", "committedEvent", "viewError", "doNotRepeat") if key in output},
+                                       "coordinatorAdvice", "committed", "committedEvent", "viewError", "doNotRepeat") if key in output},
         **reference,
         "absolutePath": str(store.run / reference["file"]),
         "bytes": len(raw),

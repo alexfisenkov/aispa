@@ -122,7 +122,7 @@ def _patch(old_runtime, source):
 def _scan_run(root):
     """Verify the journal while retaining only four repair event pairs."""
     _need(not is_link(Path(root)), "корень проекта является ссылкой")
-    store = Journal(root)
+    store = zone.RepairJournal(root)
     _need(store.home.is_dir(), "нет существующего .aispa")
     state = store.load()
     _need(state.get("version") == zone.VERSION
@@ -518,7 +518,7 @@ def apply(root, *, manifest_file, expected_manifest_sha256,
                 selected = _selected(root)
             except Exception:
                 try:
-                    Journal(root).inspect_recovery()
+                    zone.RepairJournal(root).inspect_recovery()
                 except Exception:
                     raise Invalid("Final-retry runtime repair: OUTCOME_UNKNOWN_AFTER_APPEND; "
                                   "свидетельства сохранены, не повторяйте apply до осмотра журнала") from exc

@@ -4,14 +4,16 @@ from . import participants, preparation, briefmap, design_contract, telemetry, t
 from .contracts import require
 from .project_context import RUNTIMES
 
-READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context", "execution-obligations"}
+READS = {"preparation", "brief-source", "brief-map-context", "template", "ready", "participants", "journal-context",
+         "execution-obligations", "findings"}
+TASK_ROLE_CHOICES = ("worker", "critic1", "critic2", "acceptor")
 WRITES = {"brief-extract", "brief-review", "brief-map", "scenarios", "interfaces",
           "reference", "participant", "usage-import", "wait", "answered",
           "journal-verify", "journal-reconcile", "test-intent", "execution-obligation"}
 
 
 def parsers(sub):
-    for name in sorted(READS - {"template"}):
+    for name in sorted(READS - {"template", "findings"}):
         command = sub.add_parser(name)
         if name in ("brief-source", "brief-map-context"):
             command.add_argument("--write", action="store_true", help="Сохранить адресный пакет исходного контекста")
@@ -44,9 +46,60 @@ def parsers(sub):
     sub.add_parser("journal-inspect")
     a = sub.add_parser("journal-recover")
     a.add_argument("--sha256", required=True); a.add_argument("--confirm", action="store_true")
+    _new_parsers(sub)
     dashboard = sub.add_parser("dashboard")
     dashboard.add_argument("operation", choices=("start", "refresh-view", "status", "stop", "archive"))
     dashboard.add_argument("--port", type=int, default=0)
+
+
+def _participant_arguments(command, *, required_role=True, roles=TASK_ROLE_CHOICES):
+    command.add_argument("--role", required=required_role, choices=roles)
+    command.add_argument("--runtime", required=True, choices=RUNTIMES)
+    command.add_argument("--native-id", required=True)
+    command.add_argument("--session", required=True)
+    command.add_argument("--model", help="Модель из таблицы маршрутов (references/model-routing.md)")
+    command.add_argument("--reasoning", help="Усилие из таблицы маршрутов: low, medium или high")
+
+
+def _new_parsers(sub):
+    """Commands of the 0.5.0 policy; their logic lives in findings, final_repairs and composites."""
+    from . import findings
+    listing = sub.add_parser("findings", help="Read-only: накопленные предупреждения прогона (collectedFindings)")
+    listing.add_argument("--status", choices=findings.STATUSES, help="Показать находки только с этим статусом")
+    repair = sub.add_parser("final-repair", help="Финальный ремонт находок ветки или расхождений слепой приёмки")
+    steps = repair.add_subparsers(dest="repair_action", required=True)
+    steps.add_parser("open", help="Открыть ремонт: выбор находок или пунктов приёмки и зоны").add_argument(
+        "--file", required=True, help="JSON: kind (findings|blind), items, zones")
+    _participant_arguments(steps.add_parser("assign", help="Назначить исполнителя или проверяющего ремонта"),
+                           roles=("worker", "checker"))
+    steps.add_parser("submit", help="Сдать отчёт исполнителя ремонта").add_argument("--file", required=True)
+    steps.add_parser("check", help="Записать отчёт проверяющего ремонта").add_argument("--file", required=True)
+    opening = sub.add_parser("task-open", help="Открыть задачу одной командой: context, start, assign, карточка, пакет роли")
+    opening.add_argument("id")
+    _participant_arguments(opening)
+    opening.add_argument("--model-evidence", help="JSON-доказательство модели от среды")
+    closing = sub.add_parser("task-close", help="Закрыть шаг задачи одной командой: отчёт, documents --refresh, usage-import")
+    closing.add_argument("id")
+    closing.add_argument("--role", required=True, choices=TASK_ROLE_CHOICES)
+    closing.add_argument("--file", required=True, help="Отчёт роли")
+    closing.add_argument("--usage", help="Лог расхода участника для usage-import")
+
+
+def documents_refresh(flow, *, paths=None, detailed=False):
+    """Body of `documents --refresh`: refresh changed registered sources and return the catalogue."""
+    from . import docmeta
+    flow.running()
+    receipt = docmeta.refresh(flow.store, flow.s, paths=paths)
+    flow.save("document-metadata-refreshed")
+    return {"refresh": receipt, "catalog": docmeta.catalog(flow.store, flow.s, paths=paths, detailed=detailed)}
+
+
+def usage_import(flow, path, *, format, participant=None, final=False, includes_final_coordinator_reply=False):
+    """Body of `usage-import`: import one native usage log and save its event."""
+    value = telemetry.import_log(flow.store, flow.s, path, format=format, participant=participant, final=final,
+                                 includes_final_coordinator_reply=includes_final_coordinator_reply)
+    flow.save("native-usage-imported")
+    return value
 
 
 def execute(store, state, flow, args):
@@ -96,6 +149,9 @@ def execute(store, state, flow, args):
         return flow.ready()
     if action == "participants":
         return participants.list_participants(store, state)
+    if action == "findings":
+        from . import findings
+        return findings.listing(state, status=args.status)
     if action == "participant":
         if args.role != "recovery-reviewer":
             flow.running()
@@ -105,10 +161,8 @@ def execute(store, state, flow, args):
         flow.save("participant-assigned:" + args.role)
         return value
     if action == "usage-import":
-        value = telemetry.import_log(store, state, args.file, format=args.format, participant=args.participant,
-                                     final=args.final, includes_final_coordinator_reply=args.includes_final_coordinator_reply)
-        flow.save("native-usage-imported")
-        return value
+        return usage_import(flow, args.file, format=args.format, participant=args.participant, final=args.final,
+                            includes_final_coordinator_reply=args.includes_final_coordinator_reply)
     if action in ("wait", "answered"):
         return flow.wait(args.note) if action == "wait" else flow.answered(args.file)
     if action.startswith("journal-"):

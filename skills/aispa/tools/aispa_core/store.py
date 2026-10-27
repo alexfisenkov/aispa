@@ -273,10 +273,15 @@ class Journal:
     def _require_version(self, state, *, handoff_only=False):
         """Normal writers stay version-pinned; a read-only viewer may specialize this guard."""
         if state.get("version") != VERSION:
-            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10", "0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", "0.3.5", "0.3.6"}
+            supported = {"0.1.0-alpha.1", "0.1.0-alpha.2", "0.1.0-alpha.3", "0.1.0-alpha.4", "0.1.0-alpha.5", "0.1.0-alpha.6", "0.1.0-alpha.7", "0.1.0-alpha.8", "0.1.0-alpha.9", "0.1.0-alpha.10", "0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", "0.3.5", "0.3.6", "0.4.0"}
             if not (handoff_only and state.get("version") in supported
                     and state.get("status") in ("accepted", "delivered_with_remaining", "cancelled")):
                 raise Invalid("Версия движка отличается: активный прогон продолжайте закреплённым runtime; handoff доступен только для завершённых поддерживаемых версий")
+
+    def _require_recovery_version(self, state):
+        """Only the run's own pinned runtime recovers it; a read-only repair reader may specialize this."""
+        if state.get("version") != VERSION:
+            raise Invalid("Журнал другой версии восстанавливает только его закреплённый runtime")
 
     def _verify_sources(self, state, *, budget=None):
         if budget is None:
@@ -667,8 +672,7 @@ class Journal:
         state = result["last"]["state"]
         if state.get("schema") != SCHEMA:
             raise Invalid("Неподдерживаемая схема журнала")
-        if state.get("version") != VERSION:
-            raise Invalid("Журнал другой версии восстанавливает только его закреплённый runtime")
+        self._require_recovery_version(state)
         if not isinstance(state.get("gates", {}), dict):
             raise Invalid("Некорректные контрольные поля прогона")
         self._verify_sources(state, budget=budget)

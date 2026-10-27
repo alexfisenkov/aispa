@@ -13,10 +13,16 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/aispa/tools"))
 from aispa_core import runtime_zone_repair as repair
+from aispa_core import store as store_module
 from aispa_core.store import Invalid, Journal, digest, file_hash
 
 CLI = ROOT / "skills/aispa/tools/repair_task_zones.py"
 MAINTENANCE_COMMIT = "e2f3ddb8284bb6539c1eaa3e1eddd5d1501eda98"
+
+
+def official_line(case):
+    """In-process synthetic fixtures speak the official 0.4.0 line for this test only."""
+    case.enterContext(patch.object(store_module, "VERSION", repair.VERSION))
 
 
 class ZoneRuntimeRepairTests(unittest.TestCase):
@@ -73,7 +79,7 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(self.root)], check=True, capture_output=True)
         self.call(self.package / "tools/aispa.py", "init", "--slug", "zone-runtime", "--title", "Synthetic fixture",
                   "--mode", "auto", "--runtime", "codex", "--check", "max")
-        self.store = Journal(self.root)
+        self.store = repair.RepairJournal(self.root)  # Real 0.4.0 run, read by the 0.5.0 package.
         self.before_state = self.store.load()
         self.run = self.store.run
         self.history = self.run / "events.jsonl"
@@ -191,6 +197,7 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         import test_mixed_evidence
         from aispa_core.team import _seal
         fixture = test_mixed_evidence.MixedEvidenceTests(methodName="test_receipts_and_attachments_bound_and_sealed")
+        official_line(self)
         self.official_init(fixture.setUp)
         self.addCleanup(fixture.doCleanups)
         module, report, observations = fixture.observations()
@@ -259,6 +266,27 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         self.assertTrue(repair.REQUIRED_DIFF <= {r["path"] for r in manifest["diff"]} <= repair.ALLOWED_DIFF)
         self.assertEqual(manifest["newRuntimeDigest"], digest(repair._tree(Path(prepared["runtime"]))))
 
+    def test_newer_package_accepts_active_040_run_without_weaker_chain_checks(self):
+        from aispa_core import VERSION
+        self.assertNotEqual(VERSION, repair.VERSION)
+        self.assertEqual(self.before_state["version"], "0.4.0")
+        with self.assertRaisesRegex(Invalid, "Версия движка отличается"):
+            Journal(self.root).load()  # Engine writers of the newer package stay version-pinned.
+        expected = (self.run.name, "0.4.0", self.sha, False)
+        info = repair.inspect(self.root)
+        self.assertEqual((info["run"], info["version"], info["journalSha256"], info["alreadyRepaired"]), expected)
+        info = self.call(CLI, "inspect")
+        self.assertEqual((info["run"], info["version"], info["journalSha256"], info["alreadyRepaired"]), expected)
+        with self.assertRaisesRegex(Invalid, "закреплённый runtime"):
+            repair.RepairJournal(self.root).apply_recovery(self.sha, confirmed=True)
+        lines = self.prefix.splitlines(keepends=True)
+        self.assertIn(b"Synthetic fixture", lines[0])
+        self.history.write_bytes(lines[0].replace(b"Synthetic fixture", b"Synthetic fixturE", 1) + b"".join(lines[1:]))
+        with self.assertRaises(Invalid):
+            repair.inspect(self.root)
+        self.history.write_bytes(self.prefix)
+        self.assertEqual(repair.inspect(self.root)["journalSha256"], self.sha)
+
     def test_exact_prefix_original_runtime_and_future_pinned_cli_write(self):
         original = repair._tree(self.run / "runtime")
         prepared = self.prepare()
@@ -320,6 +348,7 @@ class ZoneRuntimeRepairTests(unittest.TestCase):
         from aispa_core.contracts import basis
         from aispa_core.team import _history_valid, acceptance_chain
         fixture = ZoneExtensionTests(methodName="test_same_attempt_old_fail_new_red_green_and_second_critic")
+        official_line(self)
         self.official_init(fixture.setUp)
         try:
             state, store = fixture.state, fixture.store

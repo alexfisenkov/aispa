@@ -154,7 +154,7 @@ class DocumentCliTests(unittest.TestCase):
         self.temp.cleanup()
 
     def call(self, *args, success=True):
-        result = subprocess.run([sys.executable, "-B", str(TOOLS / "aispa.py"), "--root", str(self.root), *args],
+        result = subprocess.run([sys.executable, "-B", str(TOOLS / "aispa.py"), "--root", str(self.root), "--full", *args],
                                 capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 0 if success else 2, result.stderr.decode("utf-8", "replace"))
         return json.loads(result.stdout.decode("utf-8")) if success else result.stderr.decode("utf-8", "replace")

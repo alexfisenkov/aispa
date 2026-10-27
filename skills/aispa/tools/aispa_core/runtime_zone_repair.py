@@ -46,6 +46,23 @@ def _need(value, message):
         raise Invalid("Zone runtime repair: " + message)
 
 
+class RepairJournal(Journal):
+    """The version exception of the 0.4.0 maintenance tools, scoped to them.
+
+    A newer package reads an active 0.4.0 run here; the hash chain, saved
+    sources and every repair check stay exactly as in Journal. Recovery stays
+    with the run's own pinned runtime: only read-only inspection is allowed.
+    """
+    def _require_version(self, state, *, handoff_only=False):
+        _need(state.get("version") == VERSION, "нужен прогон официальной 0.4.0")
+
+    def _require_recovery_version(self, state):
+        _need(state.get("version") == VERSION, "нужен прогон официальной 0.4.0")
+
+    def apply_recovery(self, expected_sha256, *, confirmed=False):
+        raise Invalid("Журнал другой версии восстанавливает только его закреплённый runtime")
+
+
 def _approval_bytes(path, *, link_check=None):
     """Read one ordinary approval file with a physical cap and no link/FIFO wait."""
     if link_check is None:
@@ -196,7 +213,7 @@ def _manifest(store, ref, depth=0):
 
 def _load(root):
     _need(not is_link(Path(root)), "корень проекта является ссылкой")
-    store = Journal(root)
+    store = RepairJournal(root)
     _need(store.home.is_dir(), "нет существующего .aispa")
     state = store.load()
     _need(state.get("version") == VERSION and state.get("status") in {"running", "paused", "blocked"},

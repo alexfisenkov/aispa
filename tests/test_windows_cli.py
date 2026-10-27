@@ -21,7 +21,7 @@ class WindowsCliEncodingTests(unittest.TestCase):
             environment = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
             cli = CLI
             def call(*args):
-                result = subprocess.run([sys.executable, "-B", str(cli), "--root", str(root), *args],
+                result = subprocess.run([sys.executable, "-B", str(cli), "--root", str(root), "--full", *args],
                                         env=environment, capture_output=True, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
                 return json.loads(result.stdout.decode("utf-8"))

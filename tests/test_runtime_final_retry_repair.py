@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/aispa/tools"))
 
 from aispa_core import runtime_final_retry_repair as repair
+from aispa_core.runtime_zone_repair import RepairJournal
 from aispa_core.store import Invalid, Journal, file_hash
 import test_runtime_owner_attempt_repair as owner_tests
 
@@ -42,7 +43,7 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-final-retry-fixture-")
         self.root = Path(self.temp.name) / "project"
         shutil.copytree(self.template, self.root)
-        self.store = Journal(self.root)
+        self.store = RepairJournal(self.root)  # Real 0.4.0 run, read by the 0.5.0 package.
         self.state = self.store.load()
         self.run = self.store.run
         self.journal = self.run / "events.jsonl"
@@ -165,7 +166,7 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
     def test_zone_selector_mutate_then_restore_after_final_selection_is_rejected(self):
         prepared = self.prepare()
         self.apply(prepared)
-        store = Journal(self.root)
+        store = RepairJournal(self.root)
         state = store.load()
         original = state["runtimeZoneRepair"]
         state["runtimeZoneRepair"] = None
@@ -264,7 +265,7 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
             prepared = self.prepare()
             self.apply(prepared)
             repair.inspect(self.root)
-            selected_store = Journal(self.root)
+            selected_store = RepairJournal(self.root)
             selected_state = selected_store.load()
             for number in range(40):
                 selected_store.append(selected_state, "synthetic-later-" + str(number))
@@ -424,7 +425,7 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
                 self.apply(prepared)
         for name in ("before-events.jsonl", "owner-authorization.txt", "receipt.json"):
             self.assertTrue((stage / name).is_file(), name)
-        self.assertEqual(Journal(self.root).inspect_recovery()["validSequence"],
+        self.assertEqual(RepairJournal(self.root).inspect_recovery()["validSequence"],
                          len(self.prefix.splitlines()))
 
     def test_selected_cli_starts_only_fresh_final_owner_retry(self):
@@ -434,6 +435,7 @@ class FinalRetryRuntimeRepairTests(unittest.TestCase):
         from aispa_core.contracts import basis
 
         fixture = final_tests.FinalRetryStartTests(methodName="test_owner_retry_of_started_final_heavy_task_is_ready_and_starts")
+        zone_tests.official_line(self)
         old = zone_tests.ZoneRuntimeRepairTests(
             methodName="test_second_immutable_repair_preserves_first_manifest_prefix_runtime_and_attempts")
         real_create = Journal.create

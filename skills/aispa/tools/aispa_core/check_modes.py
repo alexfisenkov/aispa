@@ -28,10 +28,14 @@ def is_max(state):
     return current(state) == "max"
 
 
-def initialize(state, mode):
+def initialize(state, mode=None):
+    """Without the owner's choice the run starts balanced; the history says it was the default."""
+    source = "init"
+    if mode is None:
+        mode, source = DEFAULT, "default"
     require(mode in MODES, "Режим проверки: fast, balanced или max")
     state["checkMode"] = mode
-    state["checkModeHistory"] = [{"mode": mode, "at": timestamp(), "source": "init"}]
+    state["checkModeHistory"] = [{"mode": mode, "at": timestamp(), "source": source}]
 
 
 def effective_tier(state, declared):

@@ -682,9 +682,11 @@ class CheckFlagTests(unittest.TestCase):
                 state = Journal(self.root).load()
                 self.assertEqual((state["checkMode"], state["checkModeHistory"][0]["mode"]), (mode, mode))
 
-    def test_check_mode_is_required(self):
-        self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", "--runtime", "codex", expected=2)
-        self.assertFalse((self.root / ".aispa/active.json").exists())
+    def test_check_mode_defaults_to_balanced(self):
+        self.call("init", "--slug", "example", "--title", "Пример", "--mode", "auto", "--runtime", "codex")
+        state = Journal(self.root).load()
+        self.assertEqual(state["checkMode"], "balanced")
+        self.assertEqual(state["checkModeHistory"][0]["source"], "default")
 
     def test_unknown_mode_is_rejected(self):
         self.init("--check", "careless", expected=2)

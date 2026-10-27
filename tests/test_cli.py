@@ -109,7 +109,9 @@ class CliTests(unittest.TestCase):
                         args = (*args, "--host", str(host_file))
                     else:
                         self.call("host-context", "--file", str(host_file), cli=cli)
-        r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *args],
+        # Fixtures read full answers; --full keeps the previous default contract of these tests.
+        output = [] if args and args[0].startswith("-") else ["--full"]
+        r = subprocess.run([sys.executable, "-B", str(cli), "--root", str(self.root), *output, *args],
                            text=True, capture_output=True,
                            timeout=getattr(self, "cli_timeout", 20) if timeout is None else timeout,
                            encoding="utf-8", env=self.command_env,

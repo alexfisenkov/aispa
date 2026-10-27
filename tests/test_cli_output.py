@@ -33,7 +33,8 @@ class CliOutputTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True)
 
     def call(self, *args, compact_mode=False, expected=0):
-        flags = ["--compact"] if compact_mode else []
+        # True: --compact; False: --full (the previous default contract); None: no output flag.
+        flags = {True: ["--compact"], False: ["--full"], None: []}[compact_mode]
         result = subprocess.run([sys.executable, "-B", str(self.cli), "--root", str(self.root), *flags, *args],
                                 capture_output=True, text=True, encoding="utf-8", timeout=30)
         self.assertEqual(result.returncode, expected, result.stderr + result.stdout)
@@ -80,7 +81,7 @@ class CliOutputTests(unittest.TestCase):
         reader.load()
         before = reader.read_journal()["count"]
         args = candidate_cli.parser().parse_args([
-            "--root", str(self.root), *(["--compact"] if compact_mode else []),
+            "--root", str(self.root), *(["--compact"] if compact_mode else ["--full"]),
             "participant", "--role", "brief-analyst", "--runtime", "codex",
             "--native-id", "actual-saved-fixture", "--session", "fixture-session"])
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -122,7 +123,7 @@ class CliOutputTests(unittest.TestCase):
         candidate_cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(candidate_cli)
         args = candidate_cli.parser().parse_args([
-            "--root", str(self.root), *(["--compact"] if compact_mode else []), "init",
+            "--root", str(self.root), *(["--compact"] if compact_mode else ["--full"]), "init",
             "--slug", "saved-init", "--title", "Saved initial run",
             "--mode", "auto", "--runtime", "codex", "--check", "balanced"])
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -171,6 +172,43 @@ class CliOutputTests(unittest.TestCase):
         self.assertEqual(status["decisions"][0]["text"], "Сохранить обычный вывод")
         self.assertNotIn("compact", status)
         self.assertFalse((self.run / "cli-output").exists())
+
+    def test_mutations_init_and_status_answer_briefly_without_a_flag(self):
+        initial = self.init(compact_mode=None)
+        self.assertTrue(initial["compact"])
+        self.assertEqual(self.full_response(initial)["title"], "Русский проект 🙂")
+        self.assertEqual(initial["coordinatorAdvice"]["model"], "gpt-6.1-sol")
+        brief = json.loads(self.call("decision", "Краткий ответ по умолчанию", compact_mode=None).stdout)
+        self.assertTrue(brief["compact"])
+        self.assertEqual(brief["counts"], dict.fromkeys(("pending", "running", "blocked", "completed"), 0))
+        self.assertIn("ok", brief)
+        selected = json.loads(self.call("decision", "Флаг --compact как прежде", compact_mode=True).stdout)
+        self.assertEqual(set(selected), set(brief))
+        full = json.loads(self.call("decision", "Полный ответ флагом", compact_mode=False).stdout)
+        self.assertNotIn("compact", full)
+        self.assertIn("contextIndex", full)
+        status = json.loads(self.call("status", compact_mode=None).stdout)
+        self.assertTrue(status["compact"])
+        self.assertEqual([d["text"] for d in self.full_response(status)["decisions"]],
+                         ["Краткий ответ по умолчанию", "Флаг --compact как прежде", "Полный ответ флагом"])
+
+    def test_batch_and_assess_answers_do_not_depend_on_the_output_default(self):
+        self.init()
+        steps = self.root / ".aispa/steps.json"
+        steps.write_text(json.dumps([["decision", "Шаг пакета"], ["memory"]]), encoding="utf-8")
+        answers = []
+        for mode in (None, False):
+            batch = json.loads(self.call("batch", "--file", str(steps), compact_mode=mode).stdout)
+            self.assertTrue(batch["batch"])
+            self.assertTrue(batch["ok"])
+            self.assertTrue(batch["steps"][0]["output"]["compact"], "batch steps keep their compact receipt")
+            self.assertNotIn("compact", batch["steps"][1]["output"])
+            answers.append((set(batch), set(batch["steps"][0]["output"])))
+        self.assertEqual(answers[0], answers[1])
+        default = json.loads(self.call("assess", compact_mode=None).stdout)
+        selected = json.loads(self.call("assess", compact_mode=True).stdout)
+        self.assertNotIn("compact", default)
+        self.assertEqual(set(default), set(selected))
 
     def test_compact_init_is_recoverable_and_preserves_unicode_paths(self):
         receipt = self.init(compact_mode=True)

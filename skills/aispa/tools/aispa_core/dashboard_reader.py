@@ -5,7 +5,7 @@ from .store import Invalid, Journal, canonical_zone, confined, digest
 from .verified_reads import ContextChanged, VerifiedReads, current_scope
 
 
-SUPPORTED_VERSIONS = frozenset({"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", "0.3.5", "0.3.6", VERSION})
+SUPPORTED_VERSIONS = frozenset({"0.1.0", "0.2.0", "0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", "0.3.5", "0.3.6", "0.4.0", VERSION})
 
 
 class SnapshotJournal(Journal):

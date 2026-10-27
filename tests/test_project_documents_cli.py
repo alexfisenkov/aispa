@@ -27,7 +27,7 @@ class ProjectDocumentIntegrationTests(unittest.TestCase):
         self.temp.cleanup()
 
     def call(self, *args, code=0):
-        result = subprocess.run([sys.executable, "-B", str(self.cli), "--root", str(self.root), *args],
+        result = subprocess.run([sys.executable, "-B", str(self.cli), "--root", str(self.root), "--full", *args],
                                 capture_output=True, text=True, encoding="utf-8", timeout=45)
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return json.loads(result.stdout) if code == 0 else result
