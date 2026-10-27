@@ -14,10 +14,36 @@ from . import mixed_evidence, scale
 
 INTERFACES = frozenset({'web-ui', 'native-ui', 'cli'})
 STATUSES = mixed_evidence.STATUSES
+FLOW_FIELDS = frozenset({'id', 'criterion', 'role', 'interface', 'controls',
+                         'action', 'result', 'forbidden', 'accessReason', 'ownerDecision'})
+DETAIL_FIELDS = frozenset({'placement', 'persistence', 'acceptsInput', 'positiveCase'})
+# Lexical, not semantic: a word the owner wrote verbatim, unless negated just before it.
+BUTTON_WORDS = re.compile(r'\b(?:кнопк\w*|button\w*|меню|menu\w*|клавиатур\w*)', re.IGNORECASE)
+NEGATION_WORDS = frozenset({'без', 'не', 'нет', 'никаких', 'никакой', 'no', 'not', 'without', 'never', 'neither'})
+NEGATION_WINDOW = 3
 
 
 def enabled(state):
     return state.get('policy', {}).get('criticalProductFlows') is True
+
+
+def details_enabled(state):
+    return enabled(state) and state.get('policy', {}).get('flowDetails') is True
+
+
+def requests_buttons(quote):
+    """True when the owner's quote names buttons, a menu or a keyboard without a negation right before."""
+    for match in BUTTON_WORDS.finditer(quote):
+        before = re.findall(r'\w+', quote[:match.start()].casefold())[-NEGATION_WINDOW:]
+        if not NEGATION_WORDS & set(before):
+            return True
+    return False
+
+
+def declared_details(flow):
+    """Detail fields a flow declares, which an observation must then confirm."""
+    return [key for key in ('placement', 'persistence') if key in flow] + \
+           (['positiveCase'] if flow.get('acceptsInput') is True else [])
 
 
 def _text(value, state):
@@ -37,6 +63,21 @@ def effective(flow):
     return (decision['interface'], decision['controls']) if decision else (flow['interface'], flow['controls'])
 
 
+def _details(flow, state):
+    for key in ('placement', 'persistence'):
+        if key in flow:
+            _text(flow[key], state)
+    accepts = flow.get('acceptsInput', False)
+    require(type(accepts) is bool, 'Product flows: acceptsInput — true или false')
+    case = flow.get('positiveCase')
+    if accepts:
+        require(isinstance(case, dict) and set(case) == {'input', 'expected'},
+                'Product flows: потоку с вводом нужен positiveCase с input и expected')
+        _text(case['input'], state); _text(case['expected'], state)
+    else:
+        require('positiveCase' not in flow, 'Product flows: positiveCase нужен только потоку с вводом (acceptsInput: true)')
+
+
 def validate_features(store, state, rows, requirements, sources):
     """Admission extension; no semantic guessing from a regex of owner prose."""
     seen = set()
@@ -52,8 +93,9 @@ def validate_features(store, state, rows, requirements, sources):
                 'Product flows: применимой функции нужен основной поток; неприменимой — только причина')
         req = requirements[feature['requirement']]
         for flow in flows:
-            require(isinstance(flow, dict) and set(flow) == {'id', 'criterion', 'role', 'interface', 'controls',
-                    'action', 'result', 'forbidden', 'accessReason', 'ownerDecision'},
+            details = details_enabled(state)
+            require(isinstance(flow, dict) and FLOW_FIELDS <= set(flow)
+                    and set(flow) <= (FLOW_FIELDS | DETAIL_FIELDS if details else FLOW_FIELDS),
                     'Product flows: нужны роль, запрошенный UI, действие, результат и запреты доступа')
             fid = flow['id']
             require(isinstance(fid, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]*', fid)
@@ -66,6 +108,12 @@ def validate_features(store, state, rows, requirements, sources):
             _controls(flow['controls'], flow['interface'], state)
             for key in ('role', 'action', 'result', 'accessReason'):
                 _text(flow[key], state)
+            if details:
+                _details(flow, state)
+                require(flow['interface'] != 'cli' or flow['ownerDecision'] is not None
+                        or not requests_buttons(feature['sourceQuote']),
+                        'Product flows: владелец просил кнопки, меню или клавиатуру; поток нельзя заменить '
+                        'командной строкой без отдельного решения владельца')
             forbidden = flow['forbidden']
             require(isinstance(forbidden, list), 'Product flows: нужны запрещённые действия ролей')
             pairs = set()
@@ -108,6 +156,7 @@ def _flows(value):
 def templates(store, state, candidate):
     value = contract(store, state)
     checks, observations = [], []
+    details = details_enabled(state)
     for rid, flow in _flows(value):
         interface, controls = effective(flow)
         kind = 'browser' if interface == 'web-ui' else 'process'
@@ -123,7 +172,36 @@ def templates(store, state, candidate):
                       'result': {'expected': flow['result'], 'observed': None, 'status': 'not_tested'},
                       'forbidden': [dict(item, attempted=None, denied=None, status='not_tested')
                                     for item in flow['forbidden']]}, 'attachments': []})
+        if details:
+            observations[-1]['chain'].update(_detail_templates(flow))
     return value, checks, observations
+
+
+def _detail_templates(flow):
+    rows = {key: {'expected': flow[key], 'observed': None, 'status': 'not_tested'}
+            for key in ('placement', 'persistence') if key in flow}
+    if flow.get('acceptsInput') is True:
+        rows['positiveCase'] = {'input': flow['positiveCase']['input'], 'expected': flow['positiveCase']['expected'],
+                                'accepted': None, 'observed': None, 'status': 'not_tested'}
+    return rows
+
+
+def worker_flows(store, state, requirement_ids):
+    """Contract of the buttons and flows for the worker's own requirements, nothing else."""
+    if not details_enabled(state) or not state.get('featureScenarios'):
+        return None
+    from . import design_contract
+    report = design_contract._saved(store, state, 'featureScenarios', 'featureScenarioHistory', 'feature-scenarios')
+    wanted = set(requirement_ids)
+    rows = []
+    for feature in report['features']:
+        if feature['requirement'] not in wanted:
+            continue
+        for flow in feature.get('productFlows', {}).get('flows', []):
+            interface, controls = effective(flow)
+            rows.append({'requirement': feature['requirement'], 'interface': interface,
+                         'controls': copy.deepcopy(controls), 'flow': copy.deepcopy(flow)})
+    return rows
 
 
 def _observation(store, state, name, value, rid, flow, candidate):
@@ -144,7 +222,8 @@ def _observation(store, state, name, value, rid, flow, candidate):
     _text(body['procedure'], state); _text(body['observed'], state)
     mixed_evidence.source_valid(body['source'], kind, scalable=scalable)
     chain = body['chain']
-    require(isinstance(chain, dict) and set(chain) == {'role', 'controls', 'action', 'result', 'forbidden'}
+    extras = declared_details(flow) if details_enabled(state) else []
+    require(isinstance(chain, dict) and set(chain) == {'role', 'controls', 'action', 'result', 'forbidden', *extras}
             and chain['role'] == flow['role'], 'Product flows: исполненная роль не совпадает с запросом')
     recorded = chain['controls']
     require(isinstance(recorded, list) and len(recorded) == len(controls),
@@ -178,7 +257,37 @@ def _observation(store, state, name, value, rid, flow, candidate):
                 and row['denied'] is True and row['status'] == 'passed',
                 'Product flows: запрещённое действие не проверено или не запрещено')
         seen.add(pair)
-    return mixed_evidence.attachment_refs(store, body['attachments'], observation_ref, scalable=scalable)
+    failures = _detail_failures(state, flow, chain, rid)
+    return mixed_evidence.attachment_refs(store, body['attachments'], observation_ref, scalable=scalable), failures
+
+
+def _detail_failures(state, flow, chain, rid):
+    """Confirm declared placement, persistence and accepted input; a non-passed claim is a flow failure."""
+    failures = []
+    for key in declared_details(flow) if details_enabled(state) else ():
+        row = chain[key]
+        if key == 'positiveCase':
+            case = flow['positiveCase']
+            require(isinstance(row, dict) and set(row) == {'input', 'expected', 'accepted', 'observed', 'status'}
+                    and row['input'] == case['input'] and row['expected'] == case['expected'],
+                    'Product flows: наблюдение проверяет не тот корректный ввод, что заявлен в потоке')
+            accepted = row['accepted']
+            require(type(accepted) is bool and isinstance(row['status'], str) and row['status'] in STATUSES
+                    and (row['status'] != 'passed' or accepted is True),
+                    'Product flows: корректный ввод не подтверждён принятым')
+            note = 'Корректный ввод не принят или не проверен: ' + case['input']
+        else:
+            require(isinstance(row, dict) and set(row) == {'expected', 'observed', 'status'}
+                    and row['expected'] == flow[key]
+                    and isinstance(row['status'], str) and row['status'] in STATUSES,
+                    'Product flows: наблюдение не подтверждает заявленное ' + key)
+            note = {'placement': 'Расположение элемента не подтверждено: ', 'persistence': 'Постоянство элемента не подтверждено: '}[key] + flow[key]
+        if row['status'] == 'passed':
+            _text(row['observed'], state)
+        else:
+            failures.append({'requirement': rid, 'criterion': flow['criterion'], 'flow': flow['id'],
+                             'kind': 'product-flow', 'status': row['status'], 'detail': key, 'note': note})
+    return failures
 
 
 def check(store, state, report, source_failures=()):
@@ -214,8 +323,10 @@ def check(store, state, report, source_failures=()):
                     'Product flows: чужой, повторный поток или неверный статус')
             _text(item['note'], state); seen.add(item['flow'])
             if item['status'] == 'passed':
-                artifacts.extend(_observation(store, state, item['artifact'], value, pair[0],
-                                               expected[item['flow']], report['basis']))
+                refs, detail_failures = _observation(store, state, item['artifact'], value, pair[0],
+                                                     expected[item['flow']], report['basis'])
+                artifacts.extend(refs)
+                failures.extend(detail_failures)
             else:
                 failures.append({'requirement': pair[0], 'criterion': pair[1], 'flow': item['flow'],
                                  'kind': 'product-flow', 'status': item['status'], 'note': item['note']})

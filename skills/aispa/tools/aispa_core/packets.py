@@ -387,6 +387,11 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                                                   "featureScenarios", "interfaceContract", "knowledgeHints",
                                                   "projectContext", "carryover") if key in packet]
             packet["documentReadingRule"] = LEAN_CRITIC_READING
+        if role == "worker":
+            from . import product_flows
+            flows = product_flows.worker_flows(store, state, task["requirements"])
+            if flows is not None:
+                packet["productFlows"] = flows
         if role:
             packet["routing"] = routing(state, task, role, current, store)
             packet["expectedChecks"] = [{"requirement": rid, "criterion": criterion}
