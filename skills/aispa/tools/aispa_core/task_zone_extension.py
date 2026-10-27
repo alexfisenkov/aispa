@@ -138,6 +138,27 @@ def baseline_records(store, attempt):
     return records
 
 
+def _missing_roles(attempt):
+    return [role for role in task_tiers.roles(attempt) if role not in attempt.get("roles", {})]
+
+
+def _added_cards_valid(store, old, new):
+    """Only a focused epoch may add cards: the attempt's missing roles, on the new contract."""
+    added = set(new["roles"]) - set(old["roles"])
+    if not set(old["roles"]) <= set(new["roles"]):
+        return False
+    if not added:
+        return True
+    if not (review_policy.focused(new) and added == set(_missing_roles(old)) and "critic1" not in added):
+        return False
+    for role in added:
+        card = store.json(new["roles"][role])
+        if not (isinstance(card, dict) and card.get("role") == role and card.get("attempt") == new["id"]
+                and card.get("contract") == new["contract"]):
+            return False
+    return True
+
+
 def history_valid(store, state, tid, attempt):
     """Bind every epoch to its exact append, retaining all earlier state bytes."""
     from .team import _sealed_valid
@@ -197,6 +218,7 @@ def history_valid(store, state, tid, attempt):
                 "Zone extension: расширение не является монотонным")
         for role, ref in new["roles"].items():
             require(artifact_valid(store, ref), "Zone extension: повреждена карточка эпохи")
+        require(_added_cards_valid(store, old, new), "Zone extension: эпоха добавила карточку вне ролей попытки")
         require(old["roles"]["critic1"] == new["roles"]["critic1"], "Zone extension: изменён первый критик")
         baseline_records(store, {"zoneExtensions": [row]})
     if rows:
@@ -334,6 +356,11 @@ def apply(host, tid, report, *, actor, expected_journal_sha256):
                     zoneEpoch=len(attempt.get("zoneExtensions", [])) + 1, previousCard=copy.deepcopy(ref))
         attempt["roles"][role] = {**_artifact_json(store, "roles", card),
                                   "checks": ref["checks"], "specialization": ref["specialization"]}
+    if review_policy.focused(attempt):
+        # Focused cards appear on assignment, so critic2 has none yet: the new
+        # epoch carries it, bound to the extended contract (see history_valid).
+        for role in _missing_roles(attempt):
+            pipeline._make_card(tid, attempt, role, (attempt.get("roleOverrides") or {}).get(role, {}))
     for descendant in proposal["descendants"]:
         pipeline._cards(descendant, state["taskHistory"][descendant][-1])
     state["gates"]["plan"] = {"passed": True, "basis": basis(store, state, "plan"),

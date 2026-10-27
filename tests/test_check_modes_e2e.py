@@ -110,11 +110,17 @@ class Scenario(unittest.TestCase):
                              "reason": "This source unit maps to the stated output requirement."})
         return {"basis": context["basis"], "actor": actor, "rows": rows}
 
+    # Requirements without a critical user scenario: focused runs keep their tasks standard.
+    flowless = ()
+
     def feature(self, state, rid):
         row = fixtures.scenarios(state, source_quote=SENTENCE[rid], spec_quote=HEAD[rid])["features"][0]
         for cell in row["dimensions"]:  # max asks a concrete counterexample for every covered dimension
             if cell["status"] == "covered":
                 cell["counterexample"] = "If stdout printed anything but %s the scenario would fail." % OUTPUT[rid]
+        if rid in self.flowless:
+            row["productFlows"] = {"applicability": "not_applicable", "flows": [],
+                                   "reason": "The command has no interactive user action beyond its output."}
         return dict(row, requirement=rid)
 
     def prepare(self, check, requirements=("R01", "R02")):
@@ -227,7 +233,8 @@ class Scenario(unittest.TestCase):
         """A critic round that refuses: FAIL with one finding that names the task's own criterion."""
         role = "critic%d" % round_number
         report, ctx = self.report(tid, role, rid, verdict="FAIL", findings=[
-            {"id": finding, "severity": "blocking", "text": "Required correction", "criterion": CRITERION[rid]}])
+            {"id": finding, "severity": "blocking", "blockingClass": "failing_tests", "text": "Required correction",
+             "criterion": CRITERION[rid]}])
         if round_number == 2:
             report.update(previousReport=previous, repairReceipt=repair, resolutions=list(resolutions))
         return self.verdict("critic", tid, "--round", str(round_number),
@@ -353,20 +360,14 @@ class FastModeE2E(Scenario):
         self.prepare("fast")
         self.plan([self.task("T01", "R01"), self.task("T02", "R02", ["T01"])])
         self.assertEqual(self.status()["checkMode"], "fast")
-        self.seat("T01", "worker")
+        # Focused: the engine weighs the task; fast still gives a critic to a critical user scenario.
+        MaxModeE2E.complete(self, "T01", "R01")
         attempt = self.attempt("T01")
-        self.assertEqual((attempt["tier"], attempt["checkMode"]), ("fast", "fast"))
-        self.assertEqual(set(attempt["roles"]), {"worker"})
-        # No test contract and no critics: a verified worker submission completes the task.
-        self.call("assign", "T01", "--role", "critic1", "--runtime", "codex", "--native-id", "x", "--session", "s", expected=2)
-        self.verify_task("T01")
-        self.submit("T01", "R01")
-        view = self.task_view("T01")
-        self.assertEqual((view["status"], view["completionKind"]), ("completed", "verified_completion"))
+        self.assertEqual((attempt["tier"], attempt["checkMode"]), ("heavy", "fast"))
+        self.assertEqual(attempt["criticRoles"], ["worker", "critic1", "critic2"])
+        self.assertEqual(set(attempt["roles"]), {"worker", "critic1"})
         # The next wave starts without a whole-brief check of the previous one.
-        self.seat("T02", "worker")
-        self.verify_task("T02")
-        self.submit("T02", "R02")
+        MaxModeE2E.complete(self, "T02", "R02")
         self.assertEqual(self.task_view("T02")["status"], "completed")
         self.commit("fast tasks")
         self.call("verify", "--", sys.executable, "tests/check_output.py")
@@ -401,11 +402,18 @@ class MaxModeE2E(Scenario):
 
     def complete(self, tid, rid):
         self.seat(tid, "worker", "critic1")
-        self.intent(tid, rid)
+        if self.attempt(tid).get("tier", "heavy") == "heavy":
+            self.intent(tid, rid)
         self.verify_task(tid)
         self.submit(tid, rid)
         report, _ = self.report(tid, "critic1", rid)
         self.call("critic", tid, "--round", "1", "--file", self.input(report, "critic-%s.json" % tid))
+        if self.task_view(tid)["phase"] == "critic_2":
+            # max: a heavy task gets a second fresh critic after the first PASS.
+            self.assign(tid, "critic2")
+            first = self.attempt(tid)["rounds"][0]["report"]["sha256"]
+            report, _ = self.report(tid, "critic2", rid, previousReport=first, repairReceipt=None, resolutions=[])
+            self.call("critic", tid, "--round", "2", "--file", self.input(report, "critic2-%s.json" % tid))
         view = self.task_view(tid)
         self.assertEqual((view["status"], view["completionKind"]), ("completed", "critic_acceptance"))
 
@@ -447,6 +455,7 @@ class MaxModeE2E(Scenario):
 
 class SwitchModeE2E(Scenario):
     complete = MaxModeE2E.complete  # a heavy task closed by its passing critic
+    flowless = ("R02",)
 
     def test_switch_to_max_gives_the_next_task_a_heavy_attempt(self):
         self.prepare("balanced")
@@ -456,7 +465,7 @@ class SwitchModeE2E(Scenario):
         status = self.status()
         self.assertEqual((status["checkMode"], len(status["checkModeHistory"])), ("balanced", 0))
         self.complete("T01", "R01")
-        self.assertNotIn("checkMode", self.attempt("T01"))  # balanced keeps the plan's class and leaves no mark
+        self.assertEqual(self.attempt("T01")["checkMode"], "balanced")  # the mode its reviews were frozen under
         self.call("verify", "--", sys.executable, "tests/check_output.py")
         self.wave(1, {"R02": "not_tested"})
         words = "Давай теперь максимально строго проверим вторую команду."
@@ -466,14 +475,15 @@ class SwitchModeE2E(Scenario):
         # The switch is recorded as the owner's own words, apart from the sealed brief.
         self.assertEqual([(row["previous"], row["mode"], row["text"]) for row in status["checkModeHistory"]],
                          [("balanced", "max", words)])
-        # Finished work keeps the mode it was done under; the idle task takes the new class.
-        self.assertNotIn("checkMode", self.attempt("T01"))
+        # Finished work keeps the mode it was done under; the idle task takes the new number of reviews.
+        self.assertEqual(self.attempt("T01")["checkMode"], "balanced")
         self.assertEqual(self.attempt("T01")["tier"], "heavy")
         self.seat("T02", "worker", "critic1")
         attempt = self.attempt("T02")
-        self.assertEqual((attempt["tier"], attempt["plannedTier"], attempt["checkMode"]), ("heavy", "standard", "max"))
-        self.assertEqual(set(attempt["roles"]), {"worker", "critic1", "critic2"})
-        self.intent("T02", "R02")
+        # The engine keeps the weight (standard: no dependants, no critical scenario); max adds the critic.
+        self.assertEqual((attempt["tier"], attempt["checkMode"], attempt["criticRoles"]),
+                         ("standard", "max", ["worker", "critic1", "critic2"]))
+        self.assertEqual(set(attempt["roles"]), {"worker", "critic1"})
         self.verify_task("T02")
         self.submit("T02", "R02")
         report, _ = self.report("T02", "critic1", "R02")
@@ -491,6 +501,7 @@ class SwitchModeE2E(Scenario):
 
 class PromoteE2E(Scenario):
     complete = MaxModeE2E.complete
+    flowless = ("R01",)
 
     def test_promoted_standard_task_is_delivered(self):
         self.prepare("balanced", ("R01",))

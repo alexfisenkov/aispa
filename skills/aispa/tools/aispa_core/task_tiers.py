@@ -55,11 +55,19 @@ def is_fast(value):
 
 
 def worker_only(value):
-    """Completion by a verified worker report, never by a task critic."""
+    """Completion by a verified worker report, never by a task critic.
+
+    A focused attempt carries the roles the engine froze for it (weight and
+    mode, see focused_review.critic_roles); a plan task keeps its declared tier.
+    """
+    if isinstance(value.get("criticRoles"), list):
+        return value["criticRoles"] == ["worker"]
     return value.get("tier") in WORKER_ONLY
 
 
 def roles(attempt):
+    if isinstance(attempt.get("criticRoles"), list):
+        return tuple(attempt["criticRoles"])
     if worker_only(attempt):
         return ("worker",)
     if review_policy.lean(attempt):
@@ -84,7 +92,12 @@ def validate(state, raw, zones, risk, risk_reason):
         require(kind in KINDS, "Лёгкими могут быть только documentation, formatting или presentation")
         require(0 < len(zones) <= 12 and all(safe_zone(z, kind) for z in zones),
                 "Лёгкой задаче нужны конкретные безопасные файлы; код, правила, конфигурация и контракты требуют heavy")
-    if tier == "standard":
+    if tier == "standard" and state.get("policy", {}).get("focusedReview") is True:
+        # The engine computes the weight; a declaration below it is refused by
+        # focused_review.validate_plan with the engine's reason.
+        require(risk in ("low", "normal") and (risk != "low" or nonempty(risk_reason)),
+                "Standard требует риск low или normal; высокий риск требует heavy")
+    elif tier == "standard":
         require(risk in ("low", "normal") and (risk != "low" or nonempty(risk_reason)),
                 "Standard требует риск low или normal; высокий риск требует heavy")
         require(0 < len(zones) <= 24 and all(standard_zone(z) for z in zones),

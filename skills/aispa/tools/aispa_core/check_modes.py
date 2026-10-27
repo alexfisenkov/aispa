@@ -39,7 +39,13 @@ def initialize(state, mode=None):
 
 
 def effective_tier(state, declared):
-    """Fast and max override the plan; balanced keeps the declared class."""
+    """Fast and max override the plan; balanced keeps the declared class.
+
+    Focused runs never turn tasks into fast: the engine computes the weight and
+    the mode decides only how many reviews it gets (focused_review).
+    """
+    if state.get("policy", {}).get("focusedReview") is True:
+        return declared or "heavy"
     mode = current(state)
     if mode == "fast":
         return "fast"
@@ -93,6 +99,8 @@ def skipped_checks(state):
     """Names of the checks the owner's fast mode left out, for the final report."""
     if not enabled(state):
         return []
+    if state.get("policy", {}).get("focusedReview") is True:
+        return _focused_skipped(state)
     from . import test_intent  # resolved at call time: team imports check_modes
     fast_attempts = [attempt for t in state["tasks"]
                      if (attempt := (state.get("taskHistory", {}).get(t["id"]) or [{}])[-1]).get("tier") == "fast"]
@@ -108,6 +116,13 @@ def skipped_checks(state):
     if policy.get("designContract") and is_fast(state):
         rows.append("Подробные сценарии (только main и error)")
     return rows
+
+
+def _focused_skipped(state):
+    """Focused: modes differ only in reviews; RED, scenarios and the branch review stay."""
+    latest = [(state.get("taskHistory", {}).get(t["id"]) or [{}])[-1] for t in state["tasks"]]
+    without = [a for a in latest if a.get("tier") == "heavy" and a.get("criticRoles") == ["worker"]]
+    return ["Проверка тяжёлых задач отдельным критиком"] if without else []
 
 
 def history_view(store, state):

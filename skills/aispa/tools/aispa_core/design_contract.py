@@ -23,6 +23,9 @@ LEAN_REQUIRED = {"strict": ("main", "error"), "balanced": ("main", "empty", "err
 
 def required_dimensions(state, depth=None, mode=None):
     depth = depth or state.get("depth", "balanced")
+    if state.get("policy", {}).get("focusedReview") is True:
+        # Focused: scenarios follow --depth only; check modes differ in reviews.
+        return LEAN_REQUIRED.get(depth, DIMENSIONS)
     if state.get("policy", {}).get("leanControl") is True:
         # The owner's check mode overrides the depth-scaled set; the report depth
         # itself (and strict's ban on initiatives) stays the run's chosen depth.
@@ -159,7 +162,8 @@ def _features(store, state, report, mode=None):
             _text(cell["verification"], name + ": способ проверки", state=state)
             _need(isinstance(cell["counterexample"], str) and (scale.enabled(state) or len(cell["counterexample"]) <= 1600),
                   "контрпример должен быть текстом")
-            if (report["depth"] == "deep" or (mode or check_modes.current(state)) == "max") and cell["status"] == "covered":
+            deep = report["depth"] == "deep" or (not _focused(state) and (mode or check_modes.current(state)) == "max")
+            if deep and cell["status"] == "covered":
                 _text(cell["counterexample"], name + ": контрпример для deep", state=state)
         _need(required <= checked, "сценарии функции неполны")
     _need(seen == set(expected), "не все действующие функции получили сценарии")
@@ -199,8 +203,13 @@ def _saved(store, state, key, history, group):
     return payload["report"]
 
 
+def _focused(state):
+    return state.get("policy", {}).get("focusedReview") is True
+
+
 def record_scenarios(store, state, report):
-    lean = state.get("policy", {}).get("leanControl") is True
+    # Focused scenarios are not tied to a mode: the same depth gives the same set.
+    lean = state.get("policy", {}).get("leanControl") is True and not _focused(state)
     mode = check_modes.current(state) if lean else None
     _features(store, state, report, mode)
     return _save(store, state, report, "featureScenarios", "featureScenarioHistory", "feature-scenarios", mode=mode)

@@ -45,7 +45,7 @@ def template(pipeline, tid, role):
                 "Шаблон worker доступен до критики или для исправления первого FAIL")
         if rounds:
             report.update(previousReport=rounds[0]["report"]["sha256"],
-                          addresses=sorted(review_policy.required_ids(rounds[0])))
+                          addresses=sorted(review_policy.required_ids(rounds[0], review_policy.mode(attempt))))
     elif role == "critic1":
         require(not rounds and attempt["submitted"], "Для critic1 нужна сдача исполнителя до первого раунда")
         require(candidate == attempt["submitted"]["basis"], "Код после сдачи изменён; сначала сдайте исполнение заново")
@@ -63,7 +63,7 @@ def template(pipeline, tid, role):
         report.update(previousReport=first["report"]["sha256"],
                       repairReceipt=repair["report"]["sha256"] if repair else None,
                       resolutions=[{"id": fid, "status": "not_tested", "note": "", "artifact": ""}
-                                   for fid in sorted(review_policy.required_ids(first))])
+                                   for fid in sorted(review_policy.required_ids(first, review_policy.mode(attempt)))])
     else:
         final = acceptance_chain(store, state, tid, attempt)
         require(candidate == final["basis"], "После последнего критика изменён результат")

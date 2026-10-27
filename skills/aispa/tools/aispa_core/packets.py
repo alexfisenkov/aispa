@@ -6,6 +6,7 @@ from .contracts import (active, basis, definition, task_closure, require, artifa
 from .store import common_input, confined, Invalid
 from .portable import match_name, relative_name
 from . import autonomy, docmeta, telemetry, review_policy, task_tiers, scale
+from .focused_review import BLOCKING_CLASSES
 
 MAX_PACKET_BYTES = 16000
 
@@ -69,7 +70,33 @@ def _lean_strong(task, attempt):
     return any(task_tiers.strong_model_path(zone) for zone in task.get("zones", []))
 
 
+ROUTE_RULE = ("Модель и усилие роли берутся из таблицы маршрутов (references/model-routing.md); "
+              "замен нет: если утверждённой модели нет в среде, работа роли блокируется, а не уходит на другую.")
+
+
 def routing(state, task, role, attempt=None, store=None):
+    """Review shape of a role plus its model advice.
+
+    With ``modelRoutes`` the model and effort come only from the route table
+    (model_routes.route); otherwise the host-defined tier advice stays.
+    """
+    value = _review_routing(state, task, role, attempt, store)
+    if state.get("policy", {}).get("modelRoutes") is not True:
+        return value
+    from . import model_routes
+    route = model_routes.route(state, role, task, attempt)
+    for key in ("modelRule", "modelNeed", "hostModelPolicy", "tier"):
+        value.pop(key, None)
+    value.update(routeClass=route["class"], model=route["model"], effort=route["effort"], route=route,
+                 advisory=route["advisory"], selection=ROUTE_RULE, reference="references/model-routing.md")
+    if "agent" in route:
+        value["agent"] = route["agent"]
+    if not task_tiers.worker_only(attempt if attempt is not None else task):
+        value["reason"] = "Класс роли " + route["class"] + " по таблице маршрутов"
+    return value
+
+
+def _review_routing(state, task, role, attempt=None, store=None):
     """Recommend host-defined tiers, never invent a model ID or drop reviews."""
     foundation = any(task["id"] in other["dependsOn"] for other in state["tasks"])
     inherited_retry = False
@@ -99,7 +126,8 @@ def routing(state, task, role, attempt=None, store=None):
                  "hostModelPolicy": model_advice(state.get("runtime"), need)}
         selection_rule = ("Preferences are advisory: verify the actual host selector/catalogue. Sensitive work requires "
                           "a source-bound approved strong route; unavailable required capability blocks the work.")
-    if state.get("runtime") == "codex":
+    routes = state.get("policy", {}).get("modelRoutes") is True
+    if state.get("runtime") == "codex" and not routes:
         extra["modelRule"] = CODEX_MODEL_RULE
         selection_rule = ("Select the latest permitted Terra from the actual host catalogue; "
                           "if unavailable, report the capability gap without a silent Luna fallback. "
@@ -109,10 +137,14 @@ def routing(state, task, role, attempt=None, store=None):
         light = task_tiers.is_light(subject)
         fast = task_tiers.is_fast(subject)
         require(role == "worker", "У light, standard и fast нет роли критика или приёмщика")
+        focused = review_policy.focused(subject) if "reviewPolicy" in subject else False
         return {**extra, "tier": "strong" if strong and (lean or managed or not light) else "standard", "advisory": True,
                 "taskTier": subject["tier"], "tierReason": subject.get("tierReason"),
                 "selection": selection_rule,
-                "reason": ("Owner's fast mode: the task gets no per-task review; tests, the clean-copy check and the final blind acceptance remain" if fast else
+                "reason": ("Check mode: this task gets no separate critic (fast: only money, keys, access, personal data "
+                           "and critical scenarios); the branch review and the final blind acceptance remain"
+                           if focused and subject.get("tier") == "heavy" else
+                           "Owner's fast mode: the task gets no per-task review; tests, the clean-copy check and the final blind acceptance remain" if fast else
                            "Explicit bounded low-risk change; semantic safety still requires final review" if light else
                            "Ordinary non-foundation code; the whole-version review replaces a per-task critic"),
                 "reviewPolicy": "verified_completion", "criticRounds": 0,
@@ -123,7 +155,12 @@ def routing(state, task, role, attempt=None, store=None):
     policy = review_policy.mode(attempt) if attempt is not None else review_policy.selected(state)
     conditional = policy in (review_policy.ADAPTIVE, review_policy.LEAN)
     slots = {review_policy.LEAN: {"minimum": 2, "maximum": 3}, review_policy.ADAPTIVE: {"minimum": 3, "maximum": 4}}
-    rules = {review_policy.LEAN: "First PASS completes the task: the critic also checks closure criteria, constraints and the trace to the owner's words. WARN/BLOCK/FAIL requires repair and one fresh critic2 whose PASS completes the task. No third round, no separate task acceptor.",
+    slots[review_policy.FOCUSED] = {"minimum": 2, "maximum": 3}
+    rules = {review_policy.FOCUSED: "Only the short list blocks (blockingClass: " + ", ".join(_blocking_classes()) + "); "
+             "warnings are collected for the branch review. First PASS completes the task unless the max mode requires "
+             "a second fresh critic of a heavy task. A blocking finding requires repair-plan, repair and a fresh critic2 "
+             "who re-checks the repair diff. No third round, no separate task acceptor.",
+             review_policy.LEAN: "First PASS completes the task: the critic also checks closure criteria, constraints and the trace to the owner's words. WARN/BLOCK/FAIL requires repair and one fresh critic2 whose PASS completes the task. No third round, no separate task acceptor.",
              review_policy.ADAPTIVE: "First PASS goes to a separate acceptor; WARN/BLOCK/FAIL requires repair and one fresh critic2. No third round."}
     reason = (("Independent review, shared foundation, risk or retry" if strong else "Explicitly low-risk isolated implementation") if not lean else
               ("Sensitive zone: security, keys, access, payments or personal data" if strong else "Cheap model by default"))
@@ -131,7 +168,7 @@ def routing(state, task, role, attempt=None, store=None):
         reason = {"complex": "Complex, shared, high-risk or sensitive work; strong model preference",
                   "ordinary": "Ordinary substantive work; provider-specific ordinary model preference",
                   "mechanical": "Bounded mechanical work; economical model preference"}[need]
-    if state.get("runtime") == "codex":
+    if state.get("runtime") == "codex" and not routes:
         reason = "Codex: Terra preference; reasoning follows work complexity and risk"
     return {**extra, "tier": "strong" if strong else "standard", "advisory": True,
             "reason": reason,
@@ -145,6 +182,18 @@ def routing(state, task, role, attempt=None, store=None):
             "taskRoleSlots": slots.get(policy, {"minimum": 4, "maximum": 4}),
             "roleSlotNote": "Base role slots for one attempt, not a native-start cap. Excludes preparation, actor replacements and newly authorized attempts; actual cost requires native usage.",
             "reviewRule": rules.get(policy, "Two independent critics, then a separate acceptor.")}
+
+
+def _blocking_classes():
+    return BLOCKING_CLASSES
+
+
+FOCUSED_CRITIC_READING = ("Focused critic: read the role card, every file in zoneChanges in full (scope attempt: what "
+    "this attempt changed; repair: only the repair diff after repairBaseline; branch: the whole branch of the final "
+    "task), the test intent, expectedChecks and the exact owner quotes in traceRequirements. criteriaFiles are the "
+    "files the criteria rest on: open one when you check a criterion that rests on it, not wholesale. Fields in "
+    "onDemand are reference material. Accepted ancestors appear in expectedChecks only when this attempt changed "
+    "their files. Only blockingClass " + ", ".join(BLOCKING_CLASSES) + " blocks; mark everything else warning: it is collected for the branch review.")
 
 
 LEAN_CRITIC_READING = ("Lean critic: first read the role card, every file in zoneChanges in full (for the final task "
@@ -312,7 +361,9 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
             if state.get("policy", {}).get("errorBoundaryChecks"):
                 from . import failure_checks
                 packet["failureChecksTemplate"] = failure_checks.template(mode="mixed")
-        if role and role.startswith("critic") and review_policy.lean(current):
+        if role and role.startswith("critic") and review_policy.focused(current):
+            _focused_critic(store, state, packet, task, task_id, role, current)
+        elif role and role.startswith("critic") and review_policy.lean(current):
             from . import integration
             # Read what changed first; the rest stays addressable for a finding.
             final = task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview")
@@ -363,6 +414,41 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         ids = {rid for task in selected for rid in task["requirements"]}
         packet["ownerReferences"] = [ref for ref in state["ownerReferences"] if set(ref["requirements"]) & ids]
     return packet
+
+
+ON_DEMAND = ("briefs", "spec", "discovery", "deliveryPlan", "briefMap", "featureScenarios", "interfaceContract",
+             "knowledgeHints", "projectContext", "carryover")
+
+
+def _focused_critic(store, state, packet, task, task_id, role, attempt):
+    """Focused critic packet: the attempt's own diff (or the repair diff), and criteria files on demand."""
+    from . import focused_review, integration
+    final = task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview")
+    repair = attempt.get("repair")
+    if final:
+        # Until the branch reviewers take over, the final critic still reads the whole branch.
+        packet["zoneChanges"] = integration.context(store, state, task_id)["changes"]
+        packet["zoneChangesScope"] = "branch"
+    elif role == "critic2" and repair and attempt.get("secondRound") is not True:
+        packet["zoneChanges"] = focused_review.attempt_changes(store, state, task_id, attempt,
+                                                               attempt.get("repairBaseline"), "ремонта")
+        packet["zoneChangesScope"] = "repair"
+    else:
+        packet["zoneChanges"] = focused_review.attempt_changes(store, state, task_id, attempt, attempt.get("lightBaseline"))
+        packet["zoneChangesScope"] = "attempt"
+        if role == "critic2" and repair and attempt.get("repairBaseline"):
+            # max: the second review sees the whole attempt with the repair diff marked.
+            packet["repairChanges"] = focused_review.attempt_changes(store, state, task_id, attempt,
+                                                                     attempt["repairBaseline"], "ремонта")
+    if role == "critic2" and attempt.get("rounds"):
+        first = attempt["rounds"][0]
+        packet["repairFindingIds"] = sorted(review_policy.required_ids(first, review_policy.mode(attempt)))
+        packet["repairFindings"] = [f for f in first.get("findings", []) if f["id"] in set(packet["repairFindingIds"])]
+    packet["criteriaFiles"] = focused_review.criteria_files(store, state, task)
+    packet["criteriaFilesReading"] = "on-demand"
+    packet["blockingClasses"] = list(focused_review.BLOCKING_CLASSES)
+    packet["onDemand"] = [key for key in ON_DEMAND if key in packet]
+    packet["documentReadingRule"] = FOCUSED_CRITIC_READING
 
 
 def write(store, packet, *, maximum=MAX_PACKET_BYTES):

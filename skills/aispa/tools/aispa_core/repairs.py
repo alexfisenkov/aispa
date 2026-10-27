@@ -3,7 +3,7 @@ import json
 
 from .contracts import artifact_valid, nonempty, require
 from .store import digest
-from .review_policy import required_ids
+from .review_policy import mode as review_mode, required_ids
 
 
 def _lean(state):
@@ -42,7 +42,7 @@ def _validate(state, tid, report):
         require(report["cause"] == "implementation_gap", "Тот же исполнитель подходит для локального дефекта реализации")
     if report["cause"] == "external_blocker":
         require(report["route"] == "blocked", "Внешнее препятствие надо сохранить; ремонт не заменяет недостающий доступ")
-    expected = required_ids(attempt["rounds"][0])
+    expected = required_ids(attempt["rounds"][0], review_mode(attempt))
     rows = report["addresses"]
     require(isinstance(rows, list) and all(isinstance(i, str) for i in rows)
             and len(set(rows)) == len(rows) and set(rows) == expected, "Диагноз должен учитывать все обязательные замечания")
@@ -140,6 +140,11 @@ def record(store, state, tid, report):
     ref = store.artifact("repair-plans", (json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n").encode(), ".json")
     attempt.setdefault("repairPlans", []).append(ref)
     attempt["repairPlan"] = ref
+    if review_mode(attempt) == "focused" and not attempt.get("repairBaseline"):
+        # The repair is re-checked by its own diff: snapshot the tree at the first diagnosis.
+        records = {"records": store.code_records()}
+        attempt["repairBaseline"] = store.artifact(
+            "team-records", (json.dumps(records, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(), ".json")
     return ref
 
 
@@ -197,10 +202,11 @@ def worker_guard(store, state, tid, actor=None):
 
 def view(store, state, tid):
     attempt = _attempt(state, tid)
+    required = required_ids(attempt["rounds"][0], review_mode(attempt))
     return {"basis": basis(state, tid), "task": tid, "attempt": attempt["id"],
             "firstReport": attempt["rounds"][0]["report"],
             "blockingFindings": [f for f in attempt["rounds"][0]["findings"] if f["severity"] == "blocking"],
-            "requiredFindingIds": sorted(required_ids(attempt["rounds"][0])),
-            "requiredFindings": [f for f in attempt["rounds"][0]["findings"] if f["id"] in required_ids(attempt["rounds"][0])],
+            "requiredFindingIds": sorted(required),
+            "requiredFindings": [f for f in attempt["rounds"][0]["findings"] if f["id"] in required],
             "recorded": attempt.get("repairPlan"),
             "rule": "implementation_gap: same or fresh; missing_context/wrong_approach: fresh worker (full context; a strong model only for sensitive zones in lean runs); external_blocker: blocked. No extra critic round."}

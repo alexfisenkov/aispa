@@ -58,6 +58,15 @@ def task_basis(store, state, task_id):
     if state.get("policy", {}).get("projectDocuments"):
         from . import project_documents
         zones = sorted(set(zones) | set(project_documents.required_paths(state)))
+    if attempt.get("reviewPolicy") == "focused":
+        # Focused: freshness follows code, not service receipts. Cards appear on
+        # assignment and a re-signed dependency proof on the same code changes
+        # nothing; reopening a dependency still changes its status.
+        return digest({"run": state["run"], "contract": task_contract(state, task_id),
+                       "attempt": attempt.get("id"), "roleOverrides": attempt.get("roleOverrides"),
+                       "code": store.code(zones, include_common=True), "readSet": zones,
+                       "dependencies": [{"id": t["id"], "status": t["status"]}
+                                        for t in closure if t["id"] != task_id and t["id"] not in skipped]})
     return digest({"run": state["run"], "contract": task_contract(state, task_id),
                    "attempt": attempt.get("id"), "roles": attempt.get("roles", {}),
                    "code": store.code(zones, include_common=True), "readSet": zones,

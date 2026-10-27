@@ -123,8 +123,7 @@ class ReservedCommandTests(RunFixture):
         participant = ["--runtime", "claude-code", "--native-id", "agent-1", "--session", "session-1",
                        "--model", "claude-sonnet-5-5", "--reasoning", "medium"]
         before = (self.run_directory / "events.jsonl").read_bytes()
-        for command, ticket in ((["findings"], "02"), (["findings", "--status", "open"], "02"),
-                                (["final-repair", "open", "--file", str(evidence)], "06"),
+        for command, ticket in ((["final-repair", "open", "--file", str(evidence)], "06"),
                                 (["final-repair", "assign", "--role", "checker", *participant], "06"),
                                 (["task-open", "T01", "--role", "worker", *participant], "10"),
                                 (["task-close", "T01", "--role", "worker", "--file", str(evidence)], "10")):
@@ -135,12 +134,30 @@ class ReservedCommandTests(RunFixture):
                 self.assertNotIn("Traceback", result.stderr)
         self.assertEqual((self.run_directory / "events.jsonl").read_bytes(), before)
 
+    def test_findings_lists_collected_findings_instead_of_the_placeholder(self):
+        # Ticket 02 replaced the placeholder: an empty run lists nothing, read-only.
+        self.init()
+        before = (self.run_directory / "events.jsonl").read_bytes()
+        empty = {"open": 0, "confirmed": 0, "fixed": 0, "remaining": 0}
+        for command, status in ((["findings"], None), (["findings", "--status", "open"], "open")):
+            with self.subTest(command=command):
+                result = run(self.cli, self.root, *command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("задаче 02", result.stderr)
+                output = json.loads(result.stdout)
+                self.assertEqual(output["findings"], [])
+                self.assertEqual(output["count"], 0)
+                self.assertEqual(output["counts"], empty)
+                self.assertEqual(output.get("status"), status)
+        self.assertEqual((self.run_directory / "events.jsonl").read_bytes(), before)
+
     def test_findings_is_read_only_and_task_open_is_a_write(self):
         self.init()
         with (self.run_directory / "runtime/SKILL.md").open("a", encoding="utf-8") as stream:
             stream.write("\nChanged pinned runtime\n")
         read = run(self.cli, self.root, "findings")
-        self.assertIn("задаче 02", read.stderr)
+        self.assertEqual(read.returncode, 0, read.stderr)
+        self.assertEqual(json.loads(read.stdout)["count"], 0)
         self.assertNotIn("Пакет изменён", read.stderr)
         write = run(self.cli, self.root, "task-open", "T01", "--role", "worker", "--runtime", "codex",
                     "--native-id", "a", "--session", "s")

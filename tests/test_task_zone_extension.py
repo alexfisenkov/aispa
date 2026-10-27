@@ -37,6 +37,10 @@ class ZoneExtensionTests(unittest.TestCase):
         if getattr(self, "lean", False):
             self.state["policy"]["leanControl"] = True
             self.state["checkMode"] = "max"
+        if getattr(self, "focused", False):
+            # 0.5.0 focused run: cards appear when a role is assigned.
+            self.state["policy"].update(leanControl=True, focusedReview=True, taskTiers=True)
+            self.state["checkMode"] = "balanced"
         source = self.store.artifact("briefs", b"Set VALUE and EXTRA to one.\n", ".md")
         self.state["briefs"] = [{**source, "id": "B001"}]
         self.state["requirements"] = [{"id": "R01", "text": "Set both values",
@@ -49,6 +53,9 @@ class ZoneExtensionTests(unittest.TestCase):
                {"id": "T02", "title": "Use both values", "requirements": ["R01"],
                 "dependsOn": ["T01"], "zones": ["last.txt"], "readZones": [],
                 "criteria": ["consumer documented"], "risk": "normal", "riskReason": ""}]
+        if getattr(self, "focused", False):
+            for row in raw:
+                row.update(tier="heavy", tierReason="Fixture foundation", changeKind="feature")
         self.state["tasks"] = validate_plan(self.state, raw)
         self.planner = participants.register(self.store, self.state, "coordinator", "fixture",
                                              "synthetic-planner", "synthetic-session")
@@ -74,8 +81,10 @@ class ZoneExtensionTests(unittest.TestCase):
         (self.root / "app.py").write_text("VALUE = 1\n")
         self.green()
         self.team.submit("T01", self.report("worker"))
-        findings = [{"id": "F-EXTRA", "severity": "blocking", "criterion": "both equal one", "text": "EXTRA remains zero"},
+        findings = [{"id": "F-EXTRA", "severity": "blocking", "criterion": "both equal one", "text": "EXTRA remains zero",
+                     **({"blockingClass": "brief_drift"} if getattr(self, "focused", False) else {})},
                     {"id": "W-TEST", "severity": "warning", "criterion": "both equal one", "text": "Cover EXTRA explicitly"}]
+        self.addresses = ["F-EXTRA"] if getattr(self, "focused", False) else ["F-EXTRA", "W-TEST"]
         self.assertFalse(self.team.review("T01", 1, self.report("critic1", verdict="FAIL", findings=findings)))
         self.before = copy.deepcopy(self.state)
         self.prefix = (self.store.run / "events.jsonl").read_bytes()
@@ -129,7 +138,7 @@ class ZoneExtensionTests(unittest.TestCase):
                     "criterion": c, "status": "passed", "note": "Synthetic role checked real command evidence",
                     "artifact": evidence["file"]} for r, c in sorted(self.team.expected_checks("T01", role))]}
         report.update(extra)
-        if self.attempt.get("reviewPolicy") == "lean" and role.startswith("critic"):
+        if self.attempt.get("reviewPolicy") in ("lean", "focused") and role.startswith("critic"):
             report["inheritedProofs"] = []
             report["trace"] = [{"requirement": "R01", "brief": "B001", "quote": "Set VALUE and EXTRA to one.",
                                 "result": "aligned", "note": "Synthetic source trace fixture", "artifact": evidence["file"]}]
@@ -159,12 +168,12 @@ class ZoneExtensionTests(unittest.TestCase):
         diagnosis = repair_plan or {"basis": repairs.basis(self.state, "T01"),
             "cause": "implementation_gap", "diagnosis": "Missing EXTRA behavior and regression", "route": "same",
             "reason": "Local implementation gap", "changes": "Implement EXTRA and run both regressions",
-            "addresses": ["F-EXTRA", "W-TEST"], "context": []}
+            "addresses": list(self.addresses), "context": []}
         if repair_plan is not False:
             repairs.record(self.store, self.state, "T01", diagnosis)
             self.host.save("repair-plan-recorded:T01")
         first = self.attempt["rounds"][0]
-        receipt = self.team.repair("T01", self.report("worker", previousReport=first["report"]["sha256"], addresses=["F-EXTRA", "W-TEST"]))
+        receipt = self.team.repair("T01", self.report("worker", previousReport=first["report"]["sha256"], addresses=list(self.addresses)))
         if stop_after_repair:
             return receipt
         self.team.assign("T01", "critic2", "fixture", "synthetic-fresh-critic2", "synthetic-session")
@@ -172,7 +181,7 @@ class ZoneExtensionTests(unittest.TestCase):
         findings = [{"id": "F-SECOND", "severity": "blocking", "criterion": "both equal one", "text": "Synthetic independent refusal"}] if fail_second else []
         self.assertEqual(not fail_second, self.team.review("T01", 2, self.report("critic2", verdict="FAIL" if fail_second else "PASS", findings=findings,
             previousReport=first["report"]["sha256"], repairReceipt=receipt["report"]["sha256"],
-            resolutions=[{"id": i, "status": "resolved", "note": "Verified both real tests", "artifact": evidence} for i in ("F-EXTRA", "W-TEST")])))
+            resolutions=[{"id": i, "status": "resolved", "note": "Verified both real tests", "artifact": evidence} for i in self.addresses])))
 
     def test_same_attempt_old_fail_new_red_green_and_second_critic(self):
         receipt = self.extend()
@@ -309,6 +318,34 @@ class ZoneExtensionTests(unittest.TestCase):
             fixture.finish_repair()
             self.assertEqual(fixture.host.task("T01")["status"], "completed")
             self.assertEqual(fixture.attempt["rounds"][0], first)
+            self.assertTrue(historical_proof_valid(fixture.store, fixture.state, "T01"))
+        finally:
+            fixture.tearDown()
+
+    def test_focused_second_critic_is_assigned_and_passes_after_zone_extension(self):
+        fixture = ZoneExtensionTests(methodName="test_same_attempt_old_fail_new_red_green_and_second_critic")
+        fixture.focused = True
+        fixture.setUp()
+        try:
+            attempt = fixture.attempt
+            self.assertEqual(attempt["reviewPolicy"], "focused")
+            # Focused: before the extension critic2 has no card yet (cards appear on assignment).
+            self.assertNotIn("critic2", attempt["roles"])
+            first = copy.deepcopy(attempt["rounds"][0])
+            receipt = fixture.extend()
+            # The extension opens the epoch with the critic2 card of the new contract.
+            self.assertIn("critic2", receipt["after"]["roles"])
+            self.assertNotIn("critic2", receipt["before"]["roles"])
+            self.assertEqual(attempt["roles"], receipt["after"]["roles"])
+            card = fixture.store.json(attempt["roles"]["critic2"])
+            self.assertEqual((card["contract"], card["zones"]), (attempt["contract"], fixture.host.task("T01")["zones"]))
+            self.assertTrue(extension.history_valid(fixture.store, fixture.state, "T01", attempt))
+            fixture.finish_repair()
+            self.assertEqual(attempt["actors"]["critic2"], fixture.state["actors"][attempt["actors"]["critic2"]]["id"])
+            self.assertTrue(attempt["rounds"][1]["passed"])
+            self.assertEqual(fixture.host.task("T01")["status"], "completed")
+            self.assertEqual(attempt["rounds"][0], first)
+            self.assertTrue(_history_valid(fixture.store, fixture.state, "T01"))
             self.assertTrue(historical_proof_valid(fixture.store, fixture.state, "T01"))
         finally:
             fixture.tearDown()

@@ -548,6 +548,10 @@ def required(state, attempt):
     """Fast stays worker-only; an explicit new-policy contract still binds its evidence."""
     attempt = attempt or {}
     explicit = state.get("policy", {}).get("mixedEvidence") and attempt.get("testIntent")
+    if attempt.get("reviewPolicy") == "focused":
+        # Focused: RED follows the engine's weight frozen in the attempt
+        # (focused_review.task_weight), never the check mode.
+        return bool(state.get("policy", {}).get("testIntent")) and (attempt.get("tier") == "heavy" or bool(explicit))
     return bool(state.get("policy", {}).get("testIntent")) and (attempt.get("tier") != "fast" or bool(explicit))
 
 
