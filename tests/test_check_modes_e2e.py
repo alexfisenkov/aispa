@@ -71,7 +71,7 @@ class Scenario(unittest.TestCase):
         return state
 
     def participant(self, role):
-        return self.call("participant", "--role", role, "--runtime", "codex",
+        return self.call("participant", "--role", role, "--runtime", "codex", *test_cli.route_args(role),
                          "--native-id", "synthetic-" + role, "--session", "test-session")["receipt"]["actor"]
 
     def write_project(self):
@@ -177,11 +177,12 @@ class Scenario(unittest.TestCase):
         ctx = self.context("task", "--task", tid)
         self.call("start", tid, "--context", ctx["basis"])
         for role in roles:
-            self.call("assign", tid, "--role", role, "--runtime", "codex", "--native-id", "synthetic-%s-%s" % (tid, role),
+            self.call("assign", tid, "--role", role, "--runtime", "codex", *test_cli.route_args(role),
+                      "--native-id", "synthetic-%s-%s" % (tid, role),
                       "--session", "test-session")
 
     def assign(self, tid, role, suffix=""):
-        self.call("assign", tid, "--role", role, "--runtime", "codex",
+        self.call("assign", tid, "--role", role, "--runtime", "codex", *test_cli.route_args(role),
                   "--native-id", "synthetic-%s-%s%s" % (tid, role, suffix), "--session", "test-session")
 
     def intent(self, tid, rid):
@@ -283,7 +284,8 @@ class Scenario(unittest.TestCase):
 
     def record_knowledge(self):
         self.call("finish", expected=2)  # the knowledge of the finished code comes first
-        writer = self.call("knowledge-assign", "--runtime", "codex", "--native-id", "synthetic-knowledge",
+        writer = self.call("knowledge-assign", "--runtime", "codex", *test_cli.route_args("knowledge-writer"),
+                           "--native-id", "synthetic-knowledge",
                            "--session", "fresh-knowledge-session")["receipt"]["actor"]
         learned = self.context("knowledge")
         self.call("knowledge-record", "--file", self.input({"writer": writer["id"], "basis": learned["basis"],

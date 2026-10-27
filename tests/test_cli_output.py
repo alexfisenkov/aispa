@@ -13,7 +13,12 @@ from unittest.mock import patch
 CLI = Path(__file__).resolve().parents[1] / "skills/aispa/tools/aispa.py"
 sys.path.insert(0, str(CLI.parent))
 
+from aispa_core import model_routes
 from aispa_core.cli_output import compact
+
+# brief-analyst is a judge: modelRoutes runs refuse its assignment without the table's model and effort.
+ANALYST_ROUTE = ("--model", model_routes.ROUTES["judge"]["codex"]["model"],
+                 "--reasoning", model_routes.ROUTES["judge"]["codex"]["effort"])
 from aispa_core.store import Invalid, Journal
 
 
@@ -82,7 +87,7 @@ class CliOutputTests(unittest.TestCase):
         before = reader.read_journal()["count"]
         args = candidate_cli.parser().parse_args([
             "--root", str(self.root), *(["--compact"] if compact_mode else ["--full"]),
-            "participant", "--role", "brief-analyst", "--runtime", "codex",
+            "participant", "--role", "brief-analyst", "--runtime", "codex", *ANALYST_ROUTE,
             "--native-id", "actual-saved-fixture", "--session", "fixture-session"])
         stdout, stderr = io.StringIO(), io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr), patch.object(
@@ -244,7 +249,7 @@ class CliOutputTests(unittest.TestCase):
 
     def test_small_mutation_receipt_keeps_required_actor_id(self):
         self.init()
-        receipt = json.loads(self.call("participant", "--role", "brief-analyst", "--runtime", "codex",
+        receipt = json.loads(self.call("participant", "--role", "brief-analyst", "--runtime", "codex", *ANALYST_ROUTE,
                                       "--native-id", "native-аналитик", "--session", "session",
                                       compact_mode=True).stdout)
         full = self.full_response(receipt)

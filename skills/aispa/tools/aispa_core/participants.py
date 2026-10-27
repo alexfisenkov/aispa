@@ -7,6 +7,7 @@ claims that a declared native identity was authenticated by the host.
 import json
 import copy
 
+from . import model_routes
 from .contracts import artifact_valid, require
 from .store import Invalid, digest, timestamp
 
@@ -16,17 +17,23 @@ from .store import Invalid, digest, timestamp
 # incoming family/strong labels and prefix matches never extend this catalogue.
 MODEL_CATALOGUE_DATE = "2026-10-27"
 MODEL_CATALOGUE_SOURCES = {
-    "openai": "native Codex host tool schema (gpt-6-sol/gpt-6.1-sol/gpt-6-luna/gpt-6.1-terra)",
+    "openai": "native Codex host tool schema (gpt-6-sol/gpt-6.1-sol/gpt-6-luna/gpt-6.1-terra/gpt-6-astra)",
     "anthropic": "https://code.claude.com/docs/en/model-config",
     "google": "https://ai.google.dev/gemini-api/docs/models",
 }
+# Astra and Fable are known so that they are named, never so that a subagent may
+# use them: "strong" here means "earns a sensitive subagent route", so both are False.
 MODEL_CATALOGUE = {
     "openai": {"gpt-6-sol": ("sol", True), "gpt-6.1-sol": ("sol", True),
-               "gpt-6-luna": ("luna", False), "gpt-6.1-terra": ("terra", True)},
-    "anthropic": {"claude-opus-5-5": ("opus", True), "claude-sonnet-5-5": ("sonnet", False)},
+               "gpt-6-luna": ("luna", False), "gpt-6.1-terra": ("terra", True),
+               "gpt-6-astra": ("astra", False)},
+    "anthropic": {"claude-opus-5-5": ("opus", True), "claude-sonnet-5-5": ("sonnet", False),
+                  "claude-haiku-5-5": ("haiku", False), "claude-fable-5-1": ("fable", False)},
     "google": {"gemini-4-argon": ("argon", True), "gemini-3.1-pro-preview": ("pro", True),
                "gemini-3.8-flash": ("flash", False)},
 }
+# Known to the catalogue, refused for every subagent (model_routes.check_assignment).
+SUBAGENT_FORBIDDEN_FAMILIES = frozenset({"fable", "astra"})
 HOST_PROVIDERS = {"codex": "openai", "claude-code": "anthropic", "gemini": "google"}
 MULTI_PROVIDER_HOSTS = frozenset({"cursor", "openclaw", "antigravity"})
 
@@ -159,8 +166,21 @@ def model_metadata(store, state, runtime, native_id, session, *, model=None, rea
             "selection": {"mode": "advisory", "status": "planned", "reasoningSupport": "unknown"}}
 
 
-def launch_plan(store, state, *, runtime, session, model=None, reasoning=None, evidence=None, sensitive=False):
+def launch_plan(store, state, *, runtime, session, model=None, reasoning=None, evidence=None, sensitive=False,
+                role=None, task=None, save=None):
     require(isinstance(session, str) and session.strip(), "Model: нужна реальная session")
+    route = {}
+    if model_routes.enabled(state):
+        require(_present(role) and not model_routes.is_coordinator(role),
+                "Бронь агента: укажите --role рабочей роли; координатор — главный чат, не субагент")
+        role = role.strip().casefold()
+        # A reservation names a role of the table; unknown names would only skip the route.
+        require(role in model_routes.ROLE_CLASS,
+                "Бронь агента: Неизвестная роль для таблицы моделей: %s" % role)
+        require(role != "worker" or task is not None,
+                "Бронь агента: для роли worker укажите --task — класс исполнителя задаёт задача")
+        route = model_routes.enforce(store, state, role, runtime, None, session, model, reasoning, evidence,
+                                     task=task, save=save)
     require(model is None or _present(model), "Model: invalid requested ID")
     require(reasoning is None or _present(reasoning), "Model: invalid requested reasoning")
     try:
@@ -175,6 +195,9 @@ def launch_plan(store, state, *, runtime, session, model=None, reasoning=None, e
         require(_strong_model(runtime, value["provider"], value["resolvedRequestedModel"])
                 and value["selection"]["mode"] == "explicit",
                 "BLOCKED_MODEL_CAPABILITY: нет поддержанного явного сильного маршрута до запуска")
+    if route:
+        model_routes.confirm(route, role, runtime, value)
+        value = dict(value, routeClass=route["routeClass"])
     return value
 
 
@@ -325,7 +348,8 @@ def resolve(store, state, actor):
 
 def actor_check(store, state, actor, role):
     resolved = resolve(store, state, actor)
-    if resolved and state.get("policy", {}).get("managedExecution"):
+    free = model_routes.enabled(state) and bool(resolved) and resolved.get("role") == "coordinator"
+    if resolved and state.get("policy", {}).get("managedExecution") and not free:
         from . import task_tiers
         try:
             require_model_route(store, state, resolved, sensitive=task_tiers.sensitive_task(state))
@@ -348,7 +372,7 @@ def list_participants(store, state):
 
 
 def register(store, state, role, runtime, native_id, session, *, model=None,
-             external=False, fresh=True, reasoning=None, model_evidence=None):
+             external=False, fresh=True, reasoning=None, model_evidence=None, save=None):
     """Register one host-reported identity for a non-task phase role.
 
     ``fresh`` is a declaration, not proof of an independent model context.
@@ -370,6 +394,9 @@ def register(store, state, role, runtime, native_id, session, *, model=None,
     require(role not in INDEPENDENT_ROLES or fresh, "Проверяющему нужен свежий контекст")
     require(all(isinstance(v, str) and v.strip() for v in (runtime, native_id, session)),
             "Нужны реальные runtime, native ID и session")
+    # modelRoutes: the table decides before anything is recorded; a coordinator is only one per host session.
+    route = model_routes.enforce(store, state, role, runtime, native_id, session, model, reasoning,
+                                 model_evidence, save=save, external=external)
     require(model is None or isinstance(model, str) and model.strip(), "Неверный ID модели")
     runtime, native_id, session = runtime.strip().casefold(), native_id.strip(), session.strip()
     aid = digest([runtime, native_id, session])
@@ -386,7 +413,11 @@ def register(store, state, role, runtime, native_id, session, *, model=None,
     record.update(model_metadata(store, state, runtime, native_id, session, model=model,
                                  reasoning=reasoning, evidence=model_evidence))
     from . import task_tiers
-    require_model_route(store, state, record, sensitive=task_tiers.sensitive_task(state))
+    if route:
+        model_routes.confirm(route, role, runtime, record)
+        record["routeClass"] = route["routeClass"]
+    if route.get("routeClass") != "coordinator":
+        require_model_route(store, state, record, sensitive=task_tiers.sensitive_task(state))
     record["record"] = store.artifact("participants", (json.dumps(record, ensure_ascii=False,
         sort_keys=True, indent=2) + "\n").encode(), ".json")
     state.setdefault("participants", {})[aid] = record

@@ -49,7 +49,13 @@ class FocusedFixture(unittest.TestCase):
 
     def assign(self, tid, role):
         self.serial += 1
-        return self.team.assign(tid, role, "fixture", "%s-%s-%d" % (tid, role, self.serial), "session")
+        runtime, route = "fixture", {}
+        if self.state.get("policy", {}).get("modelRoutes"):
+            # modelRoutes runs refuse an empty model: the run's runtime and the table's model and effort.
+            runtime = self.state["runtime"]
+            row = model_routes.ROUTES[model_routes.ROLE_CLASS[role]][runtime]
+            route = {"model": row["model"], "reasoning": row["effort"]}
+        return self.team.assign(tid, role, runtime, "%s-%s-%d" % (tid, role, self.serial), "session", **route)
 
     def start(self, tid):
         self.team.start_guard(tid)

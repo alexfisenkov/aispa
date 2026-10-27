@@ -124,11 +124,15 @@ def _actor(store, state, actor):
     return actor
 
 
-def assign(store, state, runtime, native_id, session, fresh=True, model=None, reasoning=None, model_evidence=None):
+def assign(store, state, runtime, native_id, session, fresh=True, model=None, reasoning=None, model_evidence=None,
+           save=None):
     """Bind a fresh native writer. The caller must append before record()."""
     _require(state.get("status") == "running", "назначение возможно только в активном прогоне")
     runtime = _safe_text(runtime, 100).casefold()
     native_id, session = _safe_text(native_id, 300), _safe_text(session, 300)
+    from . import model_routes
+    route = model_routes.enforce(store, state, "knowledge-writer", runtime, native_id, session, model, reasoning,
+                                 model_evidence, save=save)
     _require(not any(c.isspace() for c in native_id) and fresh is True, "нужен новый независимый native ID")
     if model is not None:
         model = _safe_text(model, 100)
@@ -155,6 +159,9 @@ def assign(store, state, runtime, native_id, session, fresh=True, model=None, re
     from . import participants, task_tiers
     actor.update(participants.model_metadata(store, state, runtime, native_id, session,
                  model=model, reasoning=reasoning, evidence=model_evidence))
+    if route:
+        model_routes.confirm(route, "knowledge-writer", runtime, actor)
+        actor["routeClass"] = route["routeClass"]
     participants.require_model_route(store, state, actor, sensitive=task_tiers.sensitive_task(state))
     actor["artifact"] = _artifact(store, actor)
     memory = copy.deepcopy(memory)

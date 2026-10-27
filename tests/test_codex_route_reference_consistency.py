@@ -34,7 +34,13 @@ class CodexRouteReferenceConsistencyTests(unittest.TestCase):
         self.assertEqual(participants.MODEL_CATALOGUE["openai"]["gpt-6-sol"], ("sol", True))
         self.assertEqual(participants.MODEL_CATALOGUE["openai"]["gpt-6-luna"], ("luna", False))
         self.assertEqual(participants.MODEL_CATALOGUE["openai"]["gpt-6.1-terra"], ("terra", True))
-        self.assertFalse(participants._strong_model("codex", "openai", "gpt-7-terra"))
+        # Known but never for subagents, and Haiku only for scripted mechanics: none earns a sensitive route.
+        self.assertEqual(participants.MODEL_CATALOGUE["openai"]["gpt-6-astra"], ("astra", False))
+        self.assertEqual(participants.MODEL_CATALOGUE["anthropic"]["claude-fable-5-1"], ("fable", False))
+        self.assertEqual(participants.MODEL_CATALOGUE["anthropic"]["claude-haiku-5-5"], ("haiku", False))
+        for runtime, provider, future in (("codex", "openai", "gpt-7-terra"), ("claude-code", "anthropic", "claude-opus-6")):
+            self.assertNotIn(future, participants.MODEL_CATALOGUE[provider])
+            self.assertFalse(participants._strong_model(runtime, provider, future))
 
 
 def load_tests(loader, tests, pattern):

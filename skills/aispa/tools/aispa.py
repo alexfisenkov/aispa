@@ -318,7 +318,8 @@ def resources_command(store, state, flow, args):
                 task = flow.task(args.task) if args.task else None
                 evidence = json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None
                 launch = participants.launch_plan(store, state, runtime=state["runtime"], session=ctx["session"],
-                    model=args.model, reasoning=args.reasoning, evidence=evidence, sensitive=task_tiers.sensitive_task(state, task))
+                    model=args.model, reasoning=args.reasoning, evidence=evidence, sensitive=task_tiers.sensitive_task(state, task),
+                    role=args.role, task=task, save=flow.save)
         try:
             if args.operation == "reserve":
                 receipt = resources.reserve(ctx, args.kind)
@@ -616,10 +617,9 @@ def execute(args):
             receipt = knowledge.compact(store, state)
             flow.save("project-knowledge-checkpointed")
         elif action == "knowledge-assign":
-            flow.running()
-            receipt = {"actor": knowledge.assign(store, state, args.runtime, args.native_id, args.session, model=args.model,
-                reasoning=args.reasoning, model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)}
-            flow.save("knowledge-writer-assigned")
+            receipt = controls.knowledge_assign(flow, runtime=args.runtime, native_id=args.native_id, session=args.session,
+                model=args.model, reasoning=args.reasoning,
+                model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)
         elif action == "knowledge-record":
             flow.running()
             receipt = knowledge.record(store, state, json.loads(flow.read_input(args.file)))

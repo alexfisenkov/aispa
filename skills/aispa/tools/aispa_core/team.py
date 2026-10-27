@@ -10,7 +10,7 @@ import json
 import uuid
 
 from . import autonomy, timing, repairs, participants, integration, test_intent, mixed_evidence, review_policy, task_tiers, check_modes, owner_task_attempt
-from . import findings as collected, focused_review
+from . import findings as collected, focused_review, model_routes
 from .packets import routing
 from .contracts import (active, artifact_valid, definition, evidence_rows, nonempty,
                         require, task_basis, task_closure, task_contract, task_verified)
@@ -797,11 +797,16 @@ class TaskPipeline:
         require(aid not in self.s.setdefault("actors", {}), "Этот native actor уже использован в другой роли или попытке")
         if self.s.get("policy", {}).get("allRoleUsage"):
             participants.require_unused_identity(self.s, runtime, native_id)
+        route = model_routes.enforce(self.store, self.s, role, runtime, native_id, session, model, reasoning,
+                                     model_evidence, task=self.host.task(tid), attempt=attempt, save=self.host.save)
         actor = {"id": aid, "runtime": runtime, "nativeId": native_id, "session": session, "fresh": fresh,
                  "task": tid, "attempt": attempt["id"], "role": role,
                  "card": attempt["roles"][role]["sha256"], "model": model, "at": timestamp()}
         actor.update(participants.model_metadata(self.store, self.s, runtime, native_id, session,
                      model=model, reasoning=reasoning, evidence=model_evidence))
+        if route:
+            model_routes.confirm(route, role, runtime, actor)
+            actor["routeClass"] = route["routeClass"]
         participants.require_model_route(self.store, self.s, actor,
                                           sensitive=task_tiers.sensitive_task(self.s, self.host.task(tid)))
         self.s["actors"][aid] = _seal(self.store, actor)
@@ -860,6 +865,7 @@ class TaskPipeline:
         if role != "worker":
             require(report.get("independent") is True, "Проверяющему нужен независимый контекст")
         require(task_verified(self.store, self.s, tid), "Нет успешной адресной проверки текущей задачи")
+        model_routes.require_script_receipt(self.s, self.host.task(tid), attempt)
         if test_intent.required(self.s, attempt) and role != "worker":
             repaired = bool(attempt.get("rounds") and not attempt["rounds"][0]["passed"] and attempt.get("repair"))
             require(test_intent.valid(self.store, self.s, tid, allow_source_changes=repaired),

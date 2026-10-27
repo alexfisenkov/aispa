@@ -1,6 +1,6 @@
 """CLI controls for source-first planning, usage and recovery."""
 import argparse
-from . import participants, preparation, briefmap, design_contract, telemetry, task_reports, packets
+from . import participants, preparation, briefmap, design_contract, telemetry, task_reports, packets, model_routes
 from .contracts import require
 from .project_context import RUNTIMES
 
@@ -102,6 +102,18 @@ def usage_import(flow, path, *, format, participant=None, final=False, includes_
     return value
 
 
+def knowledge_assign(flow, *, runtime, native_id, session, model=None, reasoning=None, model_evidence=None):
+    """Body of `knowledge-assign`: bind a fresh writer; with modelRoutes the receipt carries its routing."""
+    from . import knowledge
+    flow.running()
+    receipt = {"actor": knowledge.assign(flow.store, flow.s, runtime, native_id, session, model=model,
+                                         reasoning=reasoning, model_evidence=model_evidence, save=flow.save)}
+    flow.save("knowledge-writer-assigned")
+    if model_routes.enabled(flow.s):
+        receipt["routing"] = model_routes.routing_block(flow.s, "knowledge-writer")
+    return receipt
+
+
 def execute(store, state, flow, args):
     import json
     action = args.action
@@ -157,8 +169,11 @@ def execute(store, state, flow, args):
             flow.running()
         value = {"actor": participants.register(store, state, args.role, args.runtime, args.native_id,
                                                 args.session, model=args.model, reasoning=args.reasoning,
-                                                model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None)}
+                                                model_evidence=json.loads(flow.read_input(args.model_evidence)) if args.model_evidence else None,
+                                                save=flow.save)}
         flow.save("participant-assigned:" + args.role)
+        if model_routes.enabled(state):
+            value["routing"] = model_routes.routing_block(state, args.role)
         return value
     if action == "usage-import":
         return usage_import(flow, args.file, format=args.format, participant=args.participant, final=args.final,

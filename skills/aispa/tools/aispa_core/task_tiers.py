@@ -7,6 +7,7 @@ For both, the independent whole-version review and final brief acceptance remain
 separate gates.
 """
 import re
+import shlex
 from pathlib import PurePosixPath
 
 from . import review_policy
@@ -77,6 +78,8 @@ def roles(attempt):
 
 def validate(state, raw, zones, risk, risk_reason):
     supplied = any(key in raw for key in FIELDS)
+    require("scriptCheck" not in raw or enabled(state) and state.get("policy", {}).get("modelRoutes") is True,
+            "scriptCheck доступен только в новом init с modelRoutes")
     if not enabled(state):
         require(not supplied, "Классы задач доступны только в новом init с taskTiers")
         return {}
@@ -102,14 +105,37 @@ def validate(state, raw, zones, risk, risk_reason):
                 "Standard требует риск low или normal; высокий риск требует heavy")
         require(0 < len(zones) <= 24 and all(standard_zone(z) for z in zones),
                 "Standard не пишет корень, общие входы, правила агента, секреты, доступ, платежи, миграции, схемы и контракты")
-    return {"tier": tier, "tierReason": reason, "changeKind": kind}
+    value = {"tier": tier, "tierReason": reason, "changeKind": kind}
+    if "scriptCheck" in raw:
+        value["scriptCheck"] = _script_check(state, raw, zones, risk, kind)
+    return value
+
+
+def _script_check(state, raw, zones, risk, kind):
+    """Optional plan command that alone proves mechanical work (model_routes: mechanical_scripted)."""
+    script = raw["scriptCheck"]
+    try:
+        words = shlex.split(script) if isinstance(script, str) else []
+    except ValueError:
+        words = []
+    require(words and len(script) <= 2000, "scriptCheck — непустая строка команды проверки (до 2000 знаков)")
+    # Dependents are unknown here; validate_plan refuses a scriptCheck task that others depend on.
+    candidate = {"id": raw.get("id"), "title": raw.get("title", ""), "requirements": raw.get("requirements", []),
+                 "zones": zones, "risk": risk, "changeKind": kind}
+    require(model_need(dict(state, tasks=[]), candidate) == "mechanical",
+            "scriptCheck допустим только у механической задачи: risk low, changeKind documentation, formatting "
+            "или presentation и только безопасные файлы")
+    return script
 
 
 def validate_plan(tasks, closures):
     """A shared foundation needs its own critic: only the final whole-plan task,
     whose review covers the entire branch, may depend on standard work."""
     standard = {tid for tid, task in tasks.items() if is_standard(task)}
+    scripted = {tid for tid, task in tasks.items() if "scriptCheck" in task}
     for task in tasks.values():
+        require(not set(task["dependsOn"]) & scripted,
+                "scriptCheck допустим только у механической задачи; от неё зависит %s" % task["id"])
         final = {t["id"] for t in closures[task["id"]]} == set(tasks)
         require(final or not set(task["dependsOn"]) & standard,
                 "Задача %s зависит от standard; фундамент других задач должен быть heavy" % task["id"])

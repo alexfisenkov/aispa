@@ -19,6 +19,15 @@ CLI = PACKAGE / "tools/aispa.py"
 sys.path.insert(0, str(PACKAGE / "tools"))
 
 
+def route_args(role, runtime="codex", route_class=None):
+    """--model and --reasoning of a role from the engine's route table (modelRoutes runs refuse empty ones)."""
+    from aispa_core import model_routes
+    if role == "coordinator":
+        return ()
+    row = model_routes.ROUTES[route_class or model_routes.ROLE_CLASS[role]][runtime]
+    return ("--model", row["model"], "--reasoning", row["effort"])
+
+
 class InterviewSettingCliTests(unittest.TestCase):
     def test_new_init_persists_interview_without_changing_auto_or_max(self):
         from aispa_core.store import Journal
@@ -295,7 +304,7 @@ class CliTests(unittest.TestCase):
         from aispa_core.store import file_hash
         owner_brief = "Команда выводит ready. Используй README.md как образец для команды."
         def participant(role):
-            return self.call("participant", "--role", role, "--runtime", "codex",
+            return self.call("participant", "--role", role, "--runtime", "codex", *route_args(role),
                              "--native-id", "synthetic-" + role, "--session", "test-session")["receipt"]["actor"]
 
         coordinator = participant("coordinator")
@@ -374,9 +383,11 @@ class CliTests(unittest.TestCase):
         ctx = self.context("task", "--task", "T01")
         self.call("start", "T01", "--context", ctx["basis"])
         for role in ("worker", "critic1"):
-            self.call("assign", "T01", "--role", role, "--runtime", "codex", "--native-id", "synthetic-" + role, "--session", "test-session")
+            self.call("assign", "T01", "--role", role, "--runtime", "codex", *route_args(role),
+                      "--native-id", "synthetic-" + role, "--session", "test-session")
         # New runs are lean: the passing critic closes the task, no task acceptor.
-        self.call("assign", "T01", "--role", "acceptor", "--runtime", "codex", "--native-id", "synthetic-acceptor",
+        self.call("assign", "T01", "--role", "acceptor", "--runtime", "codex", *route_args("acceptor"),
+                  "--native-id", "synthetic-acceptor",
                   "--session", "test-session", expected=2)
         task_context = self.context("task", "--task", "T01")
         self.call("usage", "--file", self.input({"actor": task_context["actors"]["worker"],
@@ -450,7 +461,7 @@ class CliTests(unittest.TestCase):
 
         self.call("submit", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "worker"))))
         self.call("critic", "T01", "--round", "1", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "critic1"))))
-        self.call("assign", "T01", "--role", "critic2", "--runtime", "codex",
+        self.call("assign", "T01", "--role", "critic2", "--runtime", "codex", *route_args("critic2"),
                   "--native-id", "must-not-run", "--session", "test-session", expected=2)
         task_view = next(t for t in self.call("status")["tasks"] if t["id"] == "T01")
         self.assertEqual((task_view["status"], task_view["completionKind"]), ("completed", "critic_acceptance"))
@@ -492,7 +503,8 @@ class CliTests(unittest.TestCase):
                                     "note": "Read original brief first; synthetic clean clone assertion passed", "artifact": clean["output"]["file"]}]}))
         self.call("acceptance", "--file", self.input(proof("acceptance", "R01")))
         self.call("finish", expected=2)
-        writer = self.call("knowledge-assign", "--runtime", "codex", "--native-id", "synthetic-knowledge",
+        writer = self.call("knowledge-assign", "--runtime", "codex", *route_args("knowledge-writer"),
+                           "--native-id", "synthetic-knowledge",
                            "--session", "fresh-knowledge-session")["receipt"]["actor"]
         learned = self.context("knowledge")
         self.assertNotIn("spec", learned); self.assertNotIn("briefs", learned); self.assertNotIn("tasks", learned)
