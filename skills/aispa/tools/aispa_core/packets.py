@@ -59,6 +59,12 @@ MANAGED_MODEL_RULE = ("Выбирай модель по сложности ра�
     "Класс проверки и режим проверок задаются отдельно.")
 
 
+CODEX_MODEL_RULE = ("Для новых субагентов Codex выбирай последнюю разрешённую Terra из фактического каталога host; "
+    "если она недоступна, сообщи о пробеле возможностей, не переключайся молча на Luna. "
+    "Reasoning: low для механики, medium/high для обычной работы, high/xhigh для критики и безопасности. "
+    "Запрошенная модель не доказывает actual model; без provider metadata она unknown.")
+
+
 def _lean_strong(task, attempt):
     return any(task_tiers.strong_model_path(zone) for zone in task.get("zones", []))
 
@@ -93,6 +99,12 @@ def routing(state, task, role, attempt=None, store=None):
                  "hostModelPolicy": model_advice(state.get("runtime"), need)}
         selection_rule = ("Preferences are advisory: verify the actual host selector/catalogue. Sensitive work requires "
                           "a source-bound approved strong route; unavailable required capability blocks the work.")
+    if state.get("runtime") == "codex":
+        extra["modelRule"] = CODEX_MODEL_RULE
+        selection_rule = ("Select the latest permitted Terra from the actual host catalogue; "
+                          "if unavailable, report the capability gap without a silent Luna fallback. "
+                          "Sensitive work requires a source-bound approved strong route. "
+                          "A requested model is not an observed actual model.")
     if task_tiers.worker_only(subject):
         light = task_tiers.is_light(subject)
         fast = task_tiers.is_fast(subject)
@@ -119,6 +131,8 @@ def routing(state, task, role, attempt=None, store=None):
         reason = {"complex": "Complex, shared, high-risk or sensitive work; strong model preference",
                   "ordinary": "Ordinary substantive work; provider-specific ordinary model preference",
                   "mechanical": "Bounded mechanical work; economical model preference"}[need]
+    if state.get("runtime") == "codex":
+        reason = "Codex: Terra preference; reasoning follows work complexity and risk"
     return {**extra, "tier": "strong" if strong else "standard", "advisory": True,
             "reason": reason,
             "selection": selection_rule,

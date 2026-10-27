@@ -240,7 +240,8 @@ class StorageTests(unittest.TestCase):
             source.symlink_to(first)
         except OSError:
             self.skipTest("Symlink creation requires a Windows privilege")
-        self.assertIn(["app.py", {"link": str(first)}], self.store.code_records())
+        expected_link = os.readlink(source)
+        self.assertIn(["app.py", {"link": expected_link}], self.store.code_records())
         original = os.readlink
 
         def change_link(path, *args, **kwargs):

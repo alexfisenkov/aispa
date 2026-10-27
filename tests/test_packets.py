@@ -45,7 +45,7 @@ class PacketTests(unittest.TestCase):
                 self.assertEqual((route["minimumCriticRounds"], route["maximumCriticRounds"]), (1, 2))
                 self.assertEqual(json.dumps({"state": self.state, "attempt": attempt}, sort_keys=True), before)
 
-    def test_host_mechanical_codex_work_uses_luna_advice_and_sensitive_meaning_overrides_it(self):
+    def test_host_mechanical_codex_work_uses_terra_advice_and_sensitive_meaning_overrides_it(self):
         self.state.update(runtime="codex", policy={"managedExecution": True, "leanControl": True})
         task = {"id": "T01", "title": "Normalize help formatting", "dependsOn": [], "risk": "low",
                 "zones": ["docs/help.md"], "requirements": [], "changeKind": "formatting"}
@@ -54,13 +54,13 @@ class PacketTests(unittest.TestCase):
         route = packets.routing(self.state, task, "worker", attempt)
         self.assertEqual(route.get("modelNeed"), "mechanical")
         self.assertEqual(route.get("hostModelPolicy"), {"runtime": "codex", "provider": "openai",
-            "preferredFamilies": ["luna"], "availability": "unknown"})
+            "preferredFamilies": ["terra"], "availability": "unknown"})
         self.assertEqual(route["reviewPolicy"], "lean")
         task["title"] = "Document payment authorization rules"
         sensitive = packets.routing(self.state, task, "worker", attempt)
         self.assertEqual(sensitive.get("modelNeed"), "complex")
         self.assertEqual(sensitive["tier"], "strong")
-        self.assertEqual(sensitive.get("hostModelPolicy", {}).get("preferredFamilies"), ["sol"])
+        self.assertEqual(sensitive.get("hostModelPolicy", {}).get("preferredFamilies"), ["terra"])
 
     def test_host_multi_provider_advice_does_not_infer_provider_or_available_model(self):
         task = {"id": "T01", "title": "Replace the shared indexing algorithm", "dependsOn": [],

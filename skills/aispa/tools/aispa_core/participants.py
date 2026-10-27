@@ -11,18 +11,18 @@ from .contracts import artifact_valid, require
 from .store import Invalid, digest, timestamp
 
 
-# Approved classification snapshot, 2026-10-26. This is policy, not a claim of
+# Approved classification snapshot, 2026-10-27. This is policy, not a claim of
 # host availability or of which model served a request. New IDs require review;
 # incoming family/strong labels and prefix matches never extend this catalogue.
-MODEL_CATALOGUE_DATE = "2026-10-26"
+MODEL_CATALOGUE_DATE = "2026-10-27"
 MODEL_CATALOGUE_SOURCES = {
-    "openai": "native Codex host tool schema (gpt-6-sol/gpt-6.1-sol/gpt-6-luna)",
+    "openai": "native Codex host tool schema (gpt-6-sol/gpt-6.1-sol/gpt-6-luna/gpt-6.1-terra)",
     "anthropic": "https://code.claude.com/docs/en/model-config",
     "google": "https://ai.google.dev/gemini-api/docs/models",
 }
 MODEL_CATALOGUE = {
     "openai": {"gpt-6-sol": ("sol", True), "gpt-6.1-sol": ("sol", True),
-               "gpt-6-luna": ("luna", False)},
+               "gpt-6-luna": ("luna", False), "gpt-6.1-terra": ("terra", True)},
     "anthropic": {"claude-opus-5-5": ("opus", True), "claude-sonnet-5-5": ("sonnet", False)},
     "google": {"gemini-4-argon": ("argon", True), "gemini-3.1-pro-preview": ("pro", True),
                "gemini-3.8-flash": ("flash", False)},
@@ -44,7 +44,7 @@ def _strong_model(runtime, provider, canonical):
 def model_advice(runtime, need):
     """Provider-specific preference only; a packet has no live host catalogue."""
     provider = HOST_PROVIDERS.get(runtime)
-    families = {"openai": {"complex": ["sol"], "ordinary": ["sol"], "mechanical": ["luna"]},
+    families = {"openai": {"complex": ["terra"], "ordinary": ["terra"], "mechanical": ["terra"]},
                 "anthropic": {"complex": ["opus"], "ordinary": ["sonnet"], "mechanical": ["sonnet"]},
                 "google": {"complex": ["argon", "pro"], "ordinary": ["flash"], "mechanical": ["flash"]}}
     return {"runtime": runtime, "provider": provider,
