@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import uuid
 
-from . import VERSION, SCHEMA
+from . import VERSION, SCHEMA, journal_delta
 from .portable import relative_name, is_link, match_name
 
 COMMON_INPUTS = {"AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "GEMINI.md", ".gitignore", "package.json",
@@ -139,13 +139,16 @@ def file_hash(path, *, budget=None, nofollow=False, metadata=None):
     return hasher.hexdigest()
 
 
-def atomic_json(path, value):
+def atomic_json(path, value, *, compact=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".aispa-write-", dir=path.parent)
     tmp = Path(name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
+            if compact:
+                json.dump(value, stream, ensure_ascii=False, separators=(",", ":"))
+            else:
+                json.dump(value, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -170,7 +173,32 @@ def confined(base, name):
     return result
 
 
+CACHE_NAME = "journal-cache.json"
+CACHE_SCHEMA = 1
+CHECKPOINT_EVENTS = frozenset({"init", "runtime-pinned", "journal-recovered"})
+# A finished run ends in full-state rows: handoff readers take its last line as is.
+TERMINAL_STATUSES = frozenset({"accepted", "delivered_with_remaining", "cancelled"})
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def delta_enabled(state):
+    """Only a new run's own init policy turns on delta rows and the state cache."""
+    policy = state.get("policy") if isinstance(state, dict) else None
+    return isinstance(policy, dict) and policy.get("deltaJournal") is True
+
+
+class _StaleCache(Exception):
+    """The derived cache does not describe the current journal bytes."""
+
+
+class _NoHash:
+    def update(self, _block):
+        pass
+
+
 class Journal:
+    CHECKPOINT_EVERY = 64
+
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.home = self.root / ".aispa"
@@ -178,6 +206,8 @@ class Journal:
             raise Invalid(".aispa не должна быть символической ссылкой")
         self.run = None
         self._verified = None
+        self._lock_held = False
+        self.parsed_rows = 0  # rows decoded by the latest journal scan
 
     @contextmanager
     def lock(self):
@@ -190,8 +220,10 @@ class Journal:
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(str(os.getpid()))
+            self._lock_held = True
             yield
         finally:
+            self._lock_held = False
             lock.unlink(missing_ok=True)
 
     def preflight_create(self, slug):
@@ -250,6 +282,9 @@ class Journal:
         self._require_version(state, handoff_only=handoff_only)
         self._verify_sources(state, budget=budget)
         self._verified = journal
+        if (self._lock_held and delta_enabled(state) and journal.get("_tail") is None
+                and not journal.get("_cacheCurrent")):
+            self._write_cache(journal)
         value = copy.deepcopy(state)
         budget.check(0, path="journal load")
         return value
@@ -369,9 +404,23 @@ class Journal:
                                   ensure_ascii=False, separators=(",", ":"))[:-1]
         decoder, position = json.JSONDecoder(), 0
         known = {"sequence": expected_sequence, "previous": previous_hash}
-        for literal, field in ((prefix + ',"at":', "at"), (',"event":', "event"),
-                               (',"state":', "state"), (',"hash":', "hash")):
+        # After "event" a row is either a checkpoint (state) or, only in a
+        # deltaJournal run, a delta row (delta, stateDigest); both end in hash.
+        bodies = [(',"state":', "state")] + ([(',"delta":', "delta")] if delta_enabled(previous_state) else [])
+        steps = [(prefix + ',"at":', "at"), (',"event":', "event"), None]
+        index = 0
+        while index < len(steps):
             remaining = value[position:]
+            if steps[index] is None:
+                if any(literal.startswith(remaining) for literal, _field in bodies):
+                    return True
+                chosen = next((body for body in bodies if remaining.startswith(body[0])), None)
+                if chosen is None:
+                    return False
+                steps[index:index + 1] = ([chosen] + ([(',"stateDigest":', "stateDigest")]
+                                                      if chosen[1] == "delta" else []) + [(',"hash":', "hash")])
+            literal, field = steps[index]
+            index += 1
             if literal.startswith(remaining):
                 return True  # Interrupted within a known field name/prefix.
             if not remaining.startswith(literal):
@@ -387,6 +436,9 @@ class Journal:
                     return False
                 if not Journal._state_field_prefix(fragment):
                     return False
+            elif field == "delta":
+                if not fragment.startswith("["):
+                    return False
             elif not fragment.startswith('"'):
                 return False
             if field == "hash":
@@ -398,7 +450,7 @@ class Journal:
             try:
                 parsed, end = decoder.raw_decode(value, position)
             except json.JSONDecodeError as exc:
-                if field == "hash":
+                if field in ("hash", "stateDigest"):
                     return bool(re.fullmatch(r'"[0-9a-f]{0,64}', fragment))
                 if field == "at":
                     body = fragment[1:]
@@ -407,6 +459,8 @@ class Journal:
                         ch.isascii() and ch.isdigit() if expected == "d" else ch == expected
                         for ch, expected in zip(body, pattern)) for pattern in formats)
                 if exc.msg == "Unterminated string starting at":
+                    return True
+                if field == "delta" and Journal._torn_scalar(value, position):
                     return True
                 return exc.pos == len(value) and exc.msg in {
                     "Expecting value", "Expecting ',' delimiter", "Expecting ':' delimiter",
@@ -424,12 +478,29 @@ class Journal:
             elif field == "state" and (not isinstance(parsed, dict) or any(
                     parsed.get(k) != previous_state[k] for k in ("schema", "version", "run"))):
                 return False
-            elif field == "hash" and not (isinstance(parsed, str) and re.fullmatch(r"[0-9a-f]{64}", parsed)):
+            elif field == "delta" and not isinstance(parsed, list):
+                return False
+            elif field in ("hash", "stateDigest") and not (isinstance(parsed, str) and _HEX64.fullmatch(parsed)):
                 return False
             position = end
             known[field] = parsed
         # A complete JSON row without its newline is deliberately ambiguous.
         return position == len(value)
+
+    @staticmethod
+    def _torn_scalar(value, position):
+        """A delta array cut inside a JSON literal or number exactly at end of file."""
+        token = re.search(r"[-+.0-9A-Za-z]*\Z", value)
+        rest = token.group()
+        if not rest or not (any(word.startswith(rest) for word in ("true", "false", "null"))
+                            or re.fullmatch(r"-?(\d+(\.\d*)?([eE][+-]?\d*)?)?", rest)):
+            return False
+        head = value[:token.start()]
+        try:
+            json.JSONDecoder().raw_decode(head, position)
+        except json.JSONDecodeError as exc:
+            return exc.pos == len(head) and exc.msg == "Expecting value"
+        return False
 
     @staticmethod
     def _journal_lines(path, budget, hasher):
@@ -468,38 +539,93 @@ class Journal:
             budget.check(0, path=str(path), progress=completed)
 
     def _scan_journal(self, *, include_events=False, allow_incomplete=False, budget=None):
+        """Verify the whole journal; a valid derived cache only spares decoding its prefix."""
         path = confined(self.run, "events.jsonl")
         if budget is None:
             from . import scale
             budget = scale.Budget()
-        previous_hash, last, prior, count, valid_bytes = None, None, None, 0, 0
+        basis = None if include_events or allow_incomplete else self._cache_basis(budget)
+        if basis is not None:
+            try:
+                return self._scan_rows(path, budget, include_events, allow_incomplete, basis)
+            except _StaleCache:
+                pass  # rebuild from the journal itself
+        return self._scan_rows(path, budget, include_events, allow_incomplete, None)
+
+    def _verified_row(self, row, number, previous_hash, last):
+        """One chained row as a full-state row; a delta row replays onto ``last``."""
+        if (not isinstance(row, dict) or type(row.get("sequence")) is not int
+                or row["sequence"] != number or row["previous"] != previous_hash
+                or digest({k: v for k, v in row.items() if k != "hash"}) != row["hash"]):
+            raise ValueError("chain mismatch")
+        if "state" in row:
+            if "delta" in row or "stateDigest" in row or not isinstance(row["state"], dict):
+                raise ValueError("ambiguous row")
+            materialized = row
+        else:
+            if (last is None or not delta_enabled(last["state"]) or not isinstance(row.get("delta"), list)
+                    or not isinstance(row.get("stateDigest"), str)):
+                raise ValueError("delta row without a delta run basis")
+            state = journal_delta.apply(last["state"], row["delta"])
+            if not isinstance(state, dict) or digest(state) != row["stateDigest"]:
+                raise ValueError("restored state does not match stateDigest")
+            materialized = {"sequence": number, "previous": previous_hash, "at": row.get("at"),
+                            "event": row.get("event"), "state": state, "hash": row["hash"]}
+        if materialized["state"].get("run") != self.run.name:
+            raise ValueError("foreign run")
+        return materialized
+
+    def _scan_rows(self, path, budget, include_events, allow_incomplete, basis):
         hasher = hashlib.sha256()
         events = [] if include_events else None
-        event_tail = []
-        receipt_times = {}
-        tail = None
+        tail, parsed, offset, line = None, 0, 0, 0
+        if basis is None:
+            previous_hash, last, prior, count, valid_bytes = None, None, None, 0, 0
+            event_tail, receipt_times, checkpoints, cached = [], {}, [], 0
+        else:
+            previous_hash, last, prior = basis["hash"], basis["last"], basis["previousRow"]
+            count, valid_bytes = basis["sequence"], basis["validBytes"]
+            # The receipt index spans the whole history and cannot be tied to
+            # the bytes without decoding them: receipt_time derives it lazily.
+            event_tail, receipt_times = basis["eventTail"], {}
+            checkpoints, cached = basis["checkpoints"], basis["validBytes"]
         try:
-            for raw in self._journal_lines(path, budget, hasher):
+            # Lines are hashed here, so the full-file digest and the cached
+            # prefix digest come from one streaming pass over every byte.
+            for raw in self._journal_lines(path, budget, _NoHash()):
+                hasher.update(raw)
+                if cached:
+                    offset, line = offset + len(raw), line + 1
+                    # Every cached field a reader gets is checked against the
+                    # bytes of its own row; any mismatch means a full pass.
+                    if (offset > cached or not raw.endswith(b"\n")
+                            or not self._prefix_line_bound(raw, line, basis)):
+                        raise _StaleCache()
+                    if offset < cached:
+                        continue
+                    if (line != basis["sequence"] or hasher.hexdigest() != basis["prefixSha256"]
+                            or not self._cache_bound(raw, basis)):
+                        raise _StaleCache()
+                    cached = 0
+                    continue
                 if not raw.endswith(b"\n"):
                     tail = raw
                     continue
                 number = count + 1
                 try:
                     row = json.loads(raw)
-                    if (not isinstance(row, dict) or type(row.get("sequence")) is not int
-                            or row["sequence"] != number or row["previous"] != previous_hash
-                            or not isinstance(row.get("state"), dict)
-                            or row["state"].get("run") != self.run.name
-                            or digest({k: v for k, v in row.items() if k != "hash"}) != row["hash"]):
-                        raise ValueError("chain mismatch")
-                except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+                    parsed += 1
+                    materialized = self._verified_row(row, number, previous_hash, last)
+                except (KeyError, TypeError, ValueError, UnicodeError, RecursionError) as exc:
                     raise Invalid(f"Повреждён журнал, запись {number}; автоматическое исправление запрещено") from exc
-                previous_hash, prior, last = row["hash"], last, row
+                if "state" in row:
+                    checkpoints.append({"sequence": number, "offset": valid_bytes})
+                previous_hash, prior, last = row["hash"], last, materialized
                 count, valid_bytes = number, valid_bytes + len(raw)
-                event_tail = (event_tail + [{"event": row.get("event", ""), "at": row.get("at")}])[-64:]
-                self._index_receipt_times(row, receipt_times)
+                event_tail = (event_tail + [{"event": materialized.get("event", ""), "at": materialized.get("at")}])[-64:]
+                self._index_receipt_times(materialized, receipt_times)
                 if include_events:
-                    events.append(row)
+                    events.append(materialized)
                 budget.check(0, path=str(path), progress=valid_bytes)
         except Invalid as exc:
             if _journal_generation_error(exc):
@@ -507,6 +633,9 @@ class Journal:
             raise
         except OSError as exc:
             raise Invalid("Не удалось прочитать журнал") from exc
+        if cached:
+            raise _StaleCache()  # the journal is shorter than the cached prefix
+        self.parsed_rows = parsed
         if not count:
             raise Invalid("Пустой журнал не восстанавливается автоматически")
         if tail is not None and (not allow_incomplete or not self._incomplete_json_tail(
@@ -517,11 +646,130 @@ class Journal:
                   "sha256": hasher.hexdigest(), "size": valid_bytes + (len(tail) if tail else 0),
                   "eventTail": event_tail,
                   "validBytes": valid_bytes, "_hasher": hasher, "_tail": tail,
-                  "_receipt_times": receipt_times}
+                  "_receipt_times": receipt_times, "_receiptsDerived": basis is None,
+                  "_checkpoints": checkpoints, "_cacheCurrent": basis is not None and parsed == 0}
         if include_events:
             result["events"] = events
         budget.check(0, path=str(path), progress=valid_bytes)
         return result
+
+    def _cache_basis(self, budget):
+        """A structurally sound cache of this run, or None; never an error for a bad cache."""
+        from .verified_reads import ResourceLimit, physical_read
+        try:
+            path = confined(self.run, CACHE_NAME)
+            info = path.lstat()
+        except (Invalid, OSError):
+            return None
+        if not stat.S_ISREG(info.st_mode) or info.st_size > budget.max_bytes:
+            return None
+        try:
+            value = json.loads(physical_read(path, budget, limit=budget.max_bytes).decode("utf-8"))
+        except ResourceLimit:
+            raise
+        except (Invalid, OSError, ValueError, UnicodeError, RecursionError):
+            return None
+        try:
+            return self._cache_fields(value)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
+
+    def _cache_fields(self, value):
+        def hexed(item):
+            return isinstance(item, str) and _HEX64.fullmatch(item) is not None
+        sequence, state, previous = value["sequence"], value["state"], value["previousRow"]
+        if not (value["schema"] == CACHE_SCHEMA and value["run"] == self.run.name
+                and type(sequence) is int and sequence >= 1 and hexed(value["hash"])
+                and hexed(value["prefixSha256"]) and type(value["validBytes"]) is int and value["validBytes"] > 0
+                and isinstance(state, dict) and delta_enabled(state) and state.get("run") == self.run.name
+                and isinstance(value["at"], str) and isinstance(value["event"], str)
+                and value["stateDigest"] == digest(state)):
+            return None
+        if sequence == 1:
+            if previous is not None or value["previousHash"] is not None:
+                return None
+        elif not (isinstance(previous, dict) and previous["sequence"] == sequence - 1
+                  and hexed(previous["hash"]) and previous["hash"] == value["previousHash"]
+                  and isinstance(previous["state"], dict)):
+            return None
+        else:  # the materialized row shape, bound to its bytes while streaming
+            previous = {key: previous[key] for key in ("sequence", "previous", "at", "event", "state", "hash")}
+        checkpoints, last_sequence = [], 0
+        for item in value["checkpoints"]:
+            if not (type(item["sequence"]) is int and type(item["offset"]) is int
+                    and last_sequence < item["sequence"] <= sequence and 0 <= item["offset"] < value["validBytes"]):
+                return None
+            last_sequence = item["sequence"]
+            checkpoints.append({"sequence": item["sequence"], "offset": item["offset"]})
+        if not checkpoints or checkpoints[0] != {"sequence": 1, "offset": 0}:
+            return None
+        # Exactly the last min(64, sequence) events, each checked against its row's bytes.
+        tail = [{"event": item["event"], "at": item["at"]} for item in value["eventTail"]]
+        if len(tail) != min(64, sequence):
+            return None
+        last = {"sequence": sequence, "previous": value["previousHash"], "at": value["at"],
+                "event": value["event"], "state": state, "hash": value["hash"]}
+        return {"sequence": sequence, "hash": value["hash"], "validBytes": value["validBytes"],
+                "prefixSha256": value["prefixSha256"], "stateDigest": value["stateDigest"],
+                "last": last, "previousRow": previous, "checkpoints": checkpoints, "eventTail": tail}
+
+    @classmethod
+    def _prefix_line_bound(cls, raw, line, basis):
+        """Cached previousRow and eventTail entries match the row bytes they describe."""
+        sequence, tail = basis["sequence"], basis["eventTail"]
+        if line > sequence:
+            return False
+        if line == sequence - 1 and not cls._row_bound(raw, basis["previousRow"]):
+            return False
+        first = sequence - len(tail) + 1
+        return line < first or cls._row_head(raw, line, tail[line - first])
+
+    @staticmethod
+    def _row_head(raw, sequence, item):
+        """Canonical row start: sequence, previous, then exactly this at and event."""
+        match = re.match(rb'\{"sequence":(\d+),"previous":(?:null|"[0-9a-f]{64}"),"at":', raw)
+        if match is None or int(match.group(1)) != sequence:
+            return False
+        rest = (json.dumps(item["at"], ensure_ascii=False) + ',"event":'
+                + json.dumps(item["event"], ensure_ascii=False)).encode("utf-8")
+        body = raw[match.end():]
+        return body.startswith(rest) and body[len(rest):].startswith((b',"state":', b',"delta":'))
+
+    @staticmethod
+    def _row_bound(raw, row, state_digest=None):
+        """A materialized row is tied to the exact bytes of its journal line."""
+        head = json.dumps({k: row[k] for k in ("sequence", "previous", "at", "event")},
+                          ensure_ascii=False, separators=(",", ":"))[:-1] + ',"delta":'
+        if raw.startswith(head.encode("utf-8")):
+            state_digest = state_digest or digest(row["state"])
+            tail = ',"stateDigest":' + json.dumps(state_digest) + ',"hash":' + json.dumps(row["hash"]) + "}\n"
+            return raw.endswith(tail.encode("utf-8"))
+        return raw == (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+    @classmethod
+    def _cache_bound(cls, raw, basis):
+        """The cached last state is tied to the exact bytes of the last verified row."""
+        return cls._row_bound(raw, basis["last"], basis["stateDigest"])
+
+    def _write_cache(self, cursor, state_digest=None):
+        """Derived and rebuildable: a failed write only costs the next command a scan."""
+        last = cursor["last"]
+        if cursor.get("_tail") is not None:
+            return
+        value = {"schema": CACHE_SCHEMA, "run": self.run.name, "sequence": last["sequence"],
+                 "hash": last["hash"], "at": last["at"], "event": last["event"],
+                 "previousHash": last["previous"], "validBytes": cursor["size"],
+                 "prefixSha256": cursor["sha256"], "stateDigest": state_digest or digest(last["state"]),
+                 "state": last["state"], "previousRow": cursor["previous"],
+                 "checkpoints": cursor.get("_checkpoints", []), "eventTail": cursor.get("eventTail", []),
+                 # Informational only: readers never trust it, receipt_time derives from the bytes.
+                 "receiptTimes": sorted([file, sha, at] for (file, sha), at
+                                        in cursor.get("_receipt_times", {}).items())
+                 if cursor.get("_receiptsDerived") is True else None}
+        try:
+            atomic_json(confined(self.run, CACHE_NAME), value, compact=True)
+        except (Invalid, OSError):
+            pass
 
     @staticmethod
     def _receipt_identity(record):
@@ -561,9 +809,47 @@ class Journal:
             if current_scope() is scope:
                 scope.deadline_check("receipt cache")
         cursor = self._verified if self._verified is not None else self._journal_cursor(budget=budget)
+        if cursor.get("_receiptsDerived") is not True:
+            self._derive_receipt_times(cursor, budget)
         value = cursor.get("_receipt_times", {}).get(self._receipt_identity(record))
         budget.check(0, path="receipt time")
         return value
+
+    def _derive_receipt_times(self, cursor, budget):
+        """First appearances from the journal bytes of this cursor's exact generation."""
+        path, hasher, receipts = cursor["path"], hashlib.sha256(), {}
+        number, previous_hash, state = 0, None, None
+        try:
+            for raw in self._journal_lines(path, budget, _NoHash()):
+                hasher.update(raw)
+                if not raw.endswith(b"\n"):
+                    continue
+                number += 1
+                try:
+                    row = json.loads(raw)
+                    if (not isinstance(row, dict) or row.get("sequence") != number
+                            or row.get("previous") != previous_hash
+                            or digest({k: v for k, v in row.items() if k != "hash"}) != row["hash"]):
+                        raise ValueError("chain mismatch")
+                    # The cursor already verified these bytes; replay without
+                    # re-digesting every state only to read taskHistory.
+                    state = row["state"] if "state" in row else journal_delta.apply(state, row["delta"])
+                    if not isinstance(state, dict):
+                        raise ValueError("not a state")
+                except (KeyError, TypeError, ValueError, UnicodeError, RecursionError) as exc:
+                    raise Invalid(f"Повреждён журнал, запись {number}; автоматическое исправление запрещено") from exc
+                previous_hash = row["hash"]
+                self._index_receipt_times({"at": row.get("at"), "state": state}, receipts)
+                budget.check(0, path=str(path), progress=number)
+        except Invalid as exc:
+            if _journal_generation_error(exc):
+                raise Invalid("Журнал изменился после проверки") from exc
+            raise
+        except OSError as exc:
+            raise Invalid("Не удалось прочитать журнал") from exc
+        if hasher.hexdigest() != cursor["sha256"] or number != cursor["count"]:
+            raise Invalid("Журнал изменился после проверки")
+        cursor["_receipt_times"], cursor["_receiptsDerived"] = receipts, True
 
     def _read_budget(self, budget=None):
         if budget is not None:
@@ -651,6 +937,74 @@ class Journal:
 
     def verified_events(self):
         return self.read_journal(include_events=True)["events"]
+
+    def state_at(self, sequence):
+        """Detached full state saved by event ``sequence`` of the verified journal."""
+        if type(sequence) is not int or sequence < 1:
+            raise Invalid("Нужен положительный номер события")
+        budget = self._read_budget()
+        cursor = self._journal_cursor(budget=budget)
+        if sequence > cursor["count"]:
+            raise Invalid("В журнале нет события с таким номером")
+        previous = cursor.get("previous")
+        if sequence == cursor["count"]:
+            value = cursor["last"]["state"]
+        elif previous is not None and previous["sequence"] == sequence:
+            value = previous["state"]
+        elif "events" in cursor:
+            value = cursor["events"][sequence - 1]["state"]
+        else:
+            try:
+                value = self._replay_state(cursor, sequence, budget)
+            except _StaleCache:  # the derived checkpoint index is wrong; verify every row instead
+                value = self._scan_journal(include_events=True, budget=budget)["events"][sequence - 1]["state"]
+        value = copy.deepcopy(value)
+        scope = getattr(self, "_reads", None)
+        if scope is not None:
+            from .verified_reads import current_scope
+            if current_scope() is scope:
+                scope.deadline_check("state at")
+        budget.check(0, path="state at")
+        return value
+
+    def _replay_state(self, cursor, sequence, budget):
+        """Decode only the nearest checkpoint and its deltas; hash every byte as one generation."""
+        anchors = [item for item in cursor.get("_checkpoints", []) if item["sequence"] <= sequence]
+        if not anchors:
+            raise _StaleCache()
+        anchor = anchors[-1]
+        hasher, offset, number, last = hashlib.sha256(), 0, None, None
+        path = cursor["path"]
+        try:
+            for raw in self._journal_lines(path, budget, _NoHash()):
+                hasher.update(raw)
+                start, offset = offset, offset + len(raw)
+                if number is None and start == anchor["offset"]:
+                    number = anchor["sequence"]
+                if number is None or number > sequence or not raw.endswith(b"\n"):
+                    continue
+                try:
+                    row = json.loads(raw)
+                    if number == anchor["sequence"] and (not isinstance(row, dict) or "state" not in row
+                                                         or row.get("sequence") != number):
+                        raise _StaleCache()
+                    last = self._verified_row(row, number, row.get("previous") if last is None else last["hash"],
+                                              last)
+                except (KeyError, TypeError, ValueError, UnicodeError, RecursionError) as exc:
+                    raise Invalid(f"Повреждён журнал, запись {number}; автоматическое исправление запрещено") from exc
+                number += 1
+                budget.check(0, path=str(path), progress=offset)
+        except Invalid as exc:
+            if _journal_generation_error(exc):
+                raise Invalid("Журнал изменился после проверки") from exc
+            raise
+        except OSError as exc:
+            raise Invalid("Не удалось прочитать журнал") from exc
+        if hasher.hexdigest() != cursor["sha256"]:
+            raise Invalid("Журнал изменился после проверки")
+        if last is None or last["sequence"] != sequence:
+            raise _StaleCache()
+        return last["state"]
 
     def _active_run_for_recovery(self, budget=None):
         try:
@@ -798,6 +1152,7 @@ class Journal:
 
     def append(self, state, event):
         history = confined(self.run, "events.jsonl")
+        cursor = None
         if history.exists():
             cursor = self._verified if self._verified and self._verified["path"] == history else None
             if cursor is None:
@@ -812,11 +1167,23 @@ class Journal:
                 raise Invalid("Журнал исчез после проверки; запись запрещена")
             sequence, previous = 1, None
         state["updatedAt"] = timestamp()
-        row = {"sequence": sequence, "previous": previous, "at": state["updatedAt"],
-               "event": event, "state": state}
-        row["hash"] = digest(row)
-        raw = (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
-        row = json.loads(raw)  # The verified cache must never alias mutable caller state.
+        delta_mode = delta_enabled(state)
+        checkpoints = list(cursor.get("_checkpoints", [])) if cursor is not None else []
+        built = None
+        if (delta_mode and cursor is not None and delta_enabled(cursor["last"]["state"])
+                and event not in CHECKPOINT_EVENTS and state.get("status") not in TERMINAL_STATUSES
+                and sequence - (checkpoints[-1]["sequence"] if checkpoints else 0) < self.CHECKPOINT_EVERY):
+            built = self._delta_row(sequence, previous, event, state, cursor["last"]["state"])
+        if built is not None:
+            raw, row, state_digest = built
+        else:
+            row = {"sequence": sequence, "previous": previous, "at": state["updatedAt"],
+                   "event": event, "state": state}
+            row["hash"] = digest(row)
+            raw = (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+            row = json.loads(raw)  # The verified cache must never alias mutable caller state.
+            state_digest = None
+            checkpoints.append({"sequence": sequence, "offset": cursor["size"] if cursor is not None else 0})
         with history.open("ab") as stream:
             stream.write(raw)
             stream.flush()
@@ -830,7 +1197,35 @@ class Journal:
                           "eventTail": ((cursor.get("eventTail", []) if sequence > 1 else []) +
                                         [{"event": event, "at": row["at"]}])[-64:],
                           "sha256": hasher.hexdigest(), "size": (cursor["size"] if sequence > 1 else 0) + len(raw),
-                          "_hasher": hasher, "_receipt_times": receipt_times}
+                          "_hasher": hasher, "_receipt_times": receipt_times,
+                          "_receiptsDerived": sequence == 1 or cursor.get("_receiptsDerived") is True,
+                          "_checkpoints": checkpoints}
+        if delta_mode and self._lock_held:
+            self._write_cache(self._verified, state_digest)
+
+    @staticmethod
+    def _delta_row(sequence, previous, event, state, prior):
+        """A replay-checked delta row, or None when a checkpoint is due (large or unreplayable)."""
+        normalized = json.loads(json.dumps(state, ensure_ascii=False))  # caller state never aliased
+        canonical = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        state_digest = hashlib.sha256(canonical.encode()).hexdigest()
+        encoded = json.dumps(journal_delta.diff(prior, normalized), ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) * 2 > len(canonical):
+            return None
+        ops = json.loads(encoded)
+        try:
+            replayed = journal_delta.apply(prior, ops)
+        except ValueError:
+            return None
+        if not isinstance(replayed, dict) or digest(replayed) != state_digest:
+            return None
+        row = {"sequence": sequence, "previous": previous, "at": normalized["updatedAt"], "event": event,
+               "delta": ops, "stateDigest": state_digest}
+        row["hash"] = digest(row)
+        raw = (json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        materialized = {"sequence": sequence, "previous": previous, "at": row["at"], "event": event,
+                        "state": normalized, "hash": row["hash"]}
+        return raw, materialized, state_digest
 
     def artifact(self, group, data, suffix):
         from . import scale

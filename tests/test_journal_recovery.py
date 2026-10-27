@@ -14,12 +14,29 @@ from aispa_core.verified_reads import ResourceLimit
 
 
 class RecoveryTests(unittest.TestCase):
+    delta = False
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-recovery-")
         self.root = Path(self.temp.name)
         self.store = Journal(self.root)
         self.state = self.store.create("unicode", "Проверка 🌿")
         self.path = self.store.run / "events.jsonl"
+
+    def delta_tail(self):
+        last = json.loads(self.path.read_bytes().splitlines()[-1])
+        prefix = json.dumps({"sequence": last["sequence"] + 1, "previous": last["hash"],
+                             "at": timestamp(), "event": "fixture"},
+                            ensure_ascii=False, separators=(",", ":"))[:-1]
+        return (prefix + ',"delta":[["set",["status"],"pa').encode()
+
+    def test_delta_tail_is_a_candidate_only_in_a_delta_run(self):
+        self.torn(self.delta_tail())
+        if self.delta:
+            self.assertTrue(self.store.inspect_recovery()["recoverable"])
+        else:
+            with self.assertRaises(Invalid):
+                self.store.inspect_recovery()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -30,7 +47,7 @@ class RecoveryTests(unittest.TestCase):
         return self.path.read_bytes()
 
     def partial_state(self):
-        last = json.loads(self.path.read_bytes().splitlines()[-1])
+        last = self.store.read_journal()["last"]  # full state for full and delta rows alike
         prefix = json.dumps({"sequence": last["sequence"] + 1, "previous": last["hash"],
                              "at": timestamp(), "event": "fixture"},
                             ensure_ascii=False, separators=(",", ":"))[:-1]
@@ -273,6 +290,77 @@ class RecoveryTests(unittest.TestCase):
         self.path.write_bytes(prefix + body + wrong.encode())
         with self.assertRaises(Invalid):
             self.store.inspect_recovery()
+
+
+
+class DeltaRecoveryTests(RecoveryTests):
+    """The same recovery contract in a deltaJournal run, plus torn delta rows."""
+    delta = True
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="aispa-delta-recovery-")
+        self.root = Path(self.temp.name)
+        self.store = Journal(self.root)
+        with self.store.lock():  # also leaves a derived cache next to the journal
+            self.state = self.store.create("unicode", "Проверка 🌿",
+                                           initializer=lambda state: state.update(policy={"deltaJournal": True}))
+        self.path = self.store.run / "events.jsonl"
+
+    def delta_row(self):
+        prefix = self.path.read_bytes()
+        self.state["notes"].append("Решение 🌿 «да»")
+        self.state.update(flag=True, ratio=12.5, empty=None, verification={"ok": False})
+        self.state["taskHistory"] = {"T01": [{"id": "A1", "criticBudget": 2}]}
+        self.store.append(self.state, "task-submitted:T01")
+        line = self.path.read_bytes()[len(prefix):]
+        row = json.loads(line)
+        self.assertNotIn("state", row)
+        self.assertIn("delta", row)
+        return prefix, line
+
+    def test_delta_row_torn_at_every_byte_is_recoverable_but_complete_row_is_ambiguous(self):
+        prefix, line = self.delta_row()
+        for cut in range(1, len(line)):
+            with self.subTest(cut=cut):
+                self.path.write_bytes(prefix + line[:cut])
+                if cut == len(line) - 1:
+                    with self.assertRaises(Invalid):
+                        self.store.inspect_recovery()
+                else:
+                    candidate = Journal(self.root).inspect_recovery()
+                    self.assertEqual(candidate["validSequence"], 1)
+                    self.assertEqual(candidate["tailBytes"], cut)
+
+    def test_torn_delta_row_recovers_to_a_checkpoint_and_keeps_prefix(self):
+        self.delta_row()
+        self.store.append(self.state, "kept-delta")
+        kept = self.path.read_bytes()
+        self.torn(self.delta_tail())
+        candidate = self.store.inspect_recovery()
+        self.assertEqual(candidate["validSequence"], 3)
+        self.store.apply_recovery(candidate["journalSha256"], confirmed=True)
+        self.assertTrue(self.path.read_bytes().startswith(kept))
+        last = json.loads(self.path.read_bytes().splitlines()[-1])
+        self.assertEqual(last["event"], "journal-recovered")
+        self.assertIn("state", last)
+        loaded = Journal(self.root)
+        with loaded.lock():
+            state = loaded.load()
+        self.assertTrue(state["journalRecovery"]["pending"])
+        self.assertEqual(state["taskHistory"]["T01"][0]["criticBudget"], 2)
+        self.assertEqual(state["notes"], ["Решение 🌿 «да»"])
+
+    def test_wrong_digest_or_hash_in_torn_delta_row_is_rejected(self):
+        prefix, line = self.delta_row()
+        row = json.loads(line)
+        body = line[:line.index(b',"stateDigest":')]
+        for tail in (body + b',"stateDigest":"XYZ', body + b',"stateDigest":"' + row["stateDigest"].encode()
+                     + b'","hash":"' + (b"0" if row["hash"][0] != "0" else b"1"), body + b',"state":',
+                     body.replace(b',"delta":[', b',"delta":{', 1)):
+            with self.subTest(tail=tail[-24:]):
+                self.path.write_bytes(prefix + tail)
+                with self.assertRaises(Invalid):
+                    self.store.inspect_recovery()
 
 
 if __name__ == "__main__":

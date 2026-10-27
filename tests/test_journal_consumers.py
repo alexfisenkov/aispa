@@ -14,12 +14,18 @@ from aispa_core.store import Invalid, Journal
 from aispa_core.workflow import Workflow
 
 
+def delta_policy(state):
+    state["policy"] = {"deltaJournal": True}
+
+
 class JournalConsumerTests(unittest.TestCase):
+    initializer = None
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aispa-verified-consumers-")
         self.root = Path(self.temp.name).resolve()
         self.store = Journal(self.root)
-        self.state = self.store.create("consumers", "Verified journal consumers")
+        self.state = self.store.create("consumers", "Verified journal consumers", initializer=self.initializer)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -117,6 +123,72 @@ class JournalConsumerTests(unittest.TestCase):
             self.store.event_pair(2)
         with self.assertRaises(Invalid):
             self.store.task_timeline("T01")
+
+
+class DeltaJournalConsumerTests(JournalConsumerTests):
+    """The same consumer guarantees when event rows store deltas."""
+    initializer = staticmethod(delta_policy)
+
+    def test_fixture_really_writes_delta_rows(self):
+        self.append("first")
+        rows = [json.loads(line) for line in (self.store.run / "events.jsonl").read_bytes().splitlines()]
+        self.assertIn("state", rows[0])
+        self.assertIn("delta", rows[1])
+        self.assertNotIn("state", rows[1])
+
+
+VOLATILE = ("updatedAt", "policy", "run", "createdAt", "startedAt", "activeSince")
+
+
+def comparable(row):
+    """An event without fields that differ between two otherwise identical runs."""
+    if row is None:
+        return None
+    state = {k: v for k, v in row["state"].items() if k not in VOLATILE}
+    return {"sequence": row["sequence"], "event": row["event"], "state": state}
+
+
+class CrossFormatConsumerTests(unittest.TestCase):
+    def build(self, initializer):
+        temp = tempfile.TemporaryDirectory(prefix="aispa-journal-format-")
+        self.addCleanup(temp.cleanup)
+        store = Journal(Path(temp.name).resolve())
+        state = store.create("formats", "Одинаковые события", initializer=initializer)
+        state["requirements"] = [{"id": "R01", "text": "Сделать", "decision": {"status": "in", "by": "owner"}}]
+        store.append(state, "brief-recorded")
+        state["taskHistory"] = {"T01": [{"id": "A1", "testIntentHistory": [{"file": "t1", "sha256": "a"}],
+                                         "authorization": {"brief": "B02", "quote": "переделать",
+                                                           "previousAttempt": "A0"}}]}
+        store.append(state, "task-started:T01")
+        for number in range(70):
+            state["notes"].append("шаг %d" % number)
+            state["taskHistory"]["T01"][-1]["testIntentHistory"].append({"file": "t%d" % number, "sha256": "b"})
+            store.append(state, "task-submitted:T01" if number % 3 else "note")
+        state["taskHistory"]["T01"].append({"id": "A2", "testIntentHistory": []})
+        store.append(state, "task-started:T01")
+        return store, state
+
+    def test_event_pair_timeline_and_carryover_match_the_full_state_format(self):
+        old_store, old_state = self.build(None)
+        new_store, new_state = self.build(delta_policy)
+        new_rows = [json.loads(line) for line in (new_store.run / "events.jsonl").read_bytes().splitlines()]
+        self.assertTrue(any("delta" in row for row in new_rows))
+        self.assertTrue(all("state" in row for row in
+                            (json.loads(line) for line in (old_store.run / "events.jsonl").read_bytes().splitlines())))
+        count = old_store.read_journal()["count"]
+        self.assertEqual(new_store.read_journal()["count"], count)
+        for sequence in range(1, count + 1):
+            with self.subTest(sequence=sequence):
+                self.assertEqual([comparable(row) for row in new_store.event_pair(sequence)],
+                                 [comparable(row) for row in old_store.event_pair(sequence)])
+        self.assertEqual(new_store.task_timeline("T01"), old_store.task_timeline("T01"))
+        old_carry = carryover._journal(old_store, old_state)
+        new_carry = carryover._journal(new_store, new_state)
+        self.assertEqual(new_carry["scopes"], old_carry["scopes"])
+        self.assertEqual(new_carry["retries"], old_carry["retries"])
+        self.assertEqual(new_carry["last"]["sequence"], old_carry["last"]["sequence"])
+        self.assertEqual(len(new_carry["scopes"]), 1)
+        self.assertEqual(len(new_carry["retries"]), 1)
 
 
 if __name__ == "__main__":
