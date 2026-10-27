@@ -10,22 +10,42 @@ from aispa_core import participants
 from tests import test_codex_terra_policy as previous_regressions
 
 
+MODEL_ID = re.compile(r"gpt-\d|claude-(?:opus|sonnet|haiku|fable)-\d|\b(?:terra|luna)\b", re.IGNORECASE)
+LINKED = ("runtimes.md", "native-agents.md", "continuity.md", "process.md", "contracts.md")
+
+
+def reference(name):
+    return (ROOT / "skills/aispa/references" / name).read_text(encoding="utf-8")
+
+
 class CodexRouteReferenceConsistencyTests(unittest.TestCase):
-    def test_references_point_to_current_policy_without_claiming_actual_model(self):
-        for name in ("continuity.md", "process.md"):
+    def test_references_point_to_the_route_table_and_name_no_model(self):
+        self.assertTrue((ROOT / "skills/aispa/references/model-routing.md").is_file())
+        for name in LINKED:
             with self.subTest(reference=name):
-                source = (ROOT / "skills/aispa/references" / name).read_text(encoding="utf-8")
-                self.assertIsNone(re.search(r"сильная модель\s*—\s*только", source, re.IGNORECASE),
-                                  f"{name}: unconditional sensitive-only model rule conflicts with Codex")
-                self.assertIsNone(re.search(r"Assign --model (?:записывает фактический ID|сохраняет фактически выбранный ID)", source),
-                                  f"{name}: request is not proof of actual serving model")
-                self.assertRegex(source, r"(?i)codex")
-                self.assertRegex(source, r"(?i)terra")
-                self.assertRegex(source, r"(?i)(unknown|неизвестн)")
+                source = reference(name)
+                self.assertIn("model-routing.md", source, f"{name}: no link to the route table")
+                self.assertIsNone(MODEL_ID.search(source), f"{name}: model IDs live only in model-routing.md")
+                self.assertNotIn("xhigh", source.casefold())
+
+    def test_references_keep_evidence_boundaries_without_silent_fallback(self):
+        for name in ("continuity.md", "process.md", "runtimes.md"):
+            with self.subTest(reference=name):
+                source = reference(name)
                 self.assertRegex(source, r"(?i)(capability gap|пробел возможностей)")
-        continuity = (ROOT / "skills/aispa/references/continuity.md").read_text(encoding="utf-8")
-        self.assertIsNone(re.search(r"сохраняют текущую модель", continuity),
-                          "Unavailable Terra must not silently fall back to current model")
+                self.assertRegex(source, r"(?i)без молчаливой замены")
+        for name in ("continuity.md", "runtimes.md"):
+            self.assertRegex(reference(name), r"(?i)(unknown|неизвестн)")
+        self.assertIsNone(re.search(r"сохраняют текущую модель", reference("continuity.md")))
+        for name in ("continuity.md", "process.md"):
+            self.assertIsNone(re.search(r"Assign --model (?:записывает фактический ID|сохраняет фактически выбранный ID)",
+                                        reference(name)), f"{name}: request is not proof of actual serving model")
+
+    def test_native_agents_describe_claude_agents_fallback_and_codex_parameters(self):
+        source = re.sub(r"\s+", " ", reference("native-agents.md"))
+        for phrase in ("aispa-*", "`.claude/agents/`", "встроенного агента", "усилие не применено",
+                       "reasoningSupport", "reasoning_effort", "при каждом запуске"):
+            self.assertIn(phrase, source)
 
     def test_other_hosts_and_legacy_model_classification_remain_available(self):
         self.assertEqual(participants.model_advice("claude-code", "complex")["preferredFamilies"], ["opus"])

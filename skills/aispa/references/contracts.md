@@ -1146,3 +1146,83 @@ Scalable provenance sealed task replay берётся из проверенно�
 без декодирования как JSON. Новый расчёт перечитывает изменившиеся байты,
 кеш допустим только внутри одного проверенного расчёта. SHA и схема доказывают
 binding/целостность, не реальное действие, модель, доступ или продуктовый PASS.
+
+## Новая политика проверок · 0.5.0
+
+Всё ниже включается только флагами политики нового прогона (`state["policy"]`);
+прогоны без флага идут прежним путём и этих полей не получают. Модель и
+усилие роли — в [таблице маршрутов](model-routing.md), здесь их нет.
+
+### Блокирующий класс и список находок (`focusedReview`)
+
+- В отчёте критика `blocking` обязан нести `blockingClass` из пяти:
+  `brief_drift`, `broken_scenario`, `security`, `data_loss`, `failing_tests`.
+  Без класса или с чужим классом отчёт отклоняется («Блокирует только список…;
+  остальное отметь warning»), ничего не записывается. Отчёт с одними `warning`
+  получает PASS; обязательны к разбору только `blocking`.
+- Каждое `warning` критика задачи копится в `state["collectedFindings"]`:
+  `{id: "W001", source: {kind: "task"|"branch", task, attempt, round, report:
+  {file, sha256}}, criterion, note, status: "open"|"confirmed"|"dismissed"|"fixed"|"remaining",
+  resolution}`. Переходы: `open` → `confirmed`|`dismissed` (проверка ветки, нужна
+  причина); `confirmed` → `fixed`|`remaining` (итог финального ремонта).
+  Read-only команда `findings [--status S]` показывает список. Находки
+  ревьюера ветки подтверждены сразу.
+- Отчёт линзы ревьюера ветки: `basis, reviewer, independent, verdict,
+  branchReview, lens`, при необходимости `findings` и `triage:
+  [{id, status: "confirmed"|"dismissed", note}]`. Ревьюер линзы `behavior`
+  обязан разобрать все открытые находки.
+
+### Пакет критика
+
+`zoneChangesScope` ∈ `attempt` (от снимка начала попытки), `repair` (от
+`attempt["repairBaseline"]`, плюс `repairChanges`, `repairFindingIds`,
+`repairFindings`), `branch`. `criteriaFiles` — существующие файлы, на которые
+опираются критерии задачи: `ownerZone` и `references` интерфейсов, которые
+задача потребляет, `readZones` и пути, дословно названные в критериях;
+`criteriaFilesReading: "on-demand"`. Целиком читается только `zoneChanges`.
+Критерии предков входят в `expectedChecks`, лишь если их файлы менялись в
+этой попытке (`changedAncestors`). Отчёт получает `codeSnapshot`.
+
+### Финальный ремонт и слепая приёмка
+
+`state["finalRepairs"]`: `[{id: "F01", kind: "findings"|"blind", items, zones,
+base, worker, rounds: [{number, submission, checker, check}], status:
+"open"|"submitted"|"passed"|"exhausted"}]`; `state["candidateChain"]` — цепочка
+кандидатов `{source: "branch"|"repair", code, records, ...}`. Не больше двух
+кругов и двух слепых ремонтов. Команды: `final-repair open --file`
+(`{kind, items, zones}`), `assign --role worker|checker`, `submit --file`
+(`{repair, worker, items: [{id, note}]}`), `check --file` (`{repair, checker,
+independent: true, candidate, verdict, items: [{id, status: "fixed"|"not_fixed",
+note}]}`). Ремонт не входит в `state["tasks"]`. Повторная приёмка после
+`blind`-ремонта несёт `recheckOf: {file, sha256}` и `items: [requirementId…]` —
+только расходившиеся пункты; остальные наблюдения берутся из прежней.
+Непройденный обязательный поток не даёт `accepted`: после лимита ремонта он
+идёт в `remaining.checks` как `delivered_with_remaining`.
+
+### Задачи плана и решения
+
+- `scriptCheck` — необязательная строка команды у задачи с `model_need ==
+  "mechanical"`; её закрытие требует квитанцию `verify --task` с этой командой.
+  Для другой задачи поле отклоняется. Тяжесть задачи вычисляет движок
+  (`task_weight`); объявленный tier ниже вычисленного отклоняется.
+- `decision TEXT [--requirement ID]…` пишет в `state["notes"]` элемент `{at,
+  text, requirements?}`; старые заметки без `requirements` остаются валидны.
+- `autonomy.view.interviewBudget`: `{minutes, elapsedMinutes, exceeded}` — от
+  создания прогона до seal (флаг `interviewBudget`).
+- `resume` (флаг `resumeReport`) выводит `codeChanges: {changed, added, removed,
+  total}` относительно `state["lastCodeSnapshot"]` (снимается при `close`,
+  `wait` и общем `verify`); `assignments[].status` может быть `lost` у
+  участника без открытой работы.
+- Поток при `flowDetails`: `placement`, `persistence`, `acceptsInput`,
+  `positiveCase {input, expected}` (обязателен при `acceptsInput: true`);
+  подробнее в [product-development](product-development.md).
+
+### Журнал: строки-дельты (`deltaJournal`)
+
+`events.jsonl` хранит строку-дельту `{sequence, previous, at, event, delta,
+stateDigest, hash}`, где `delta` — список операций `["set", путь, значение]`,
+`["del", путь]`, `["add", путь, элементы]`; каждые 64 события пишется опорная
+строка с полным `state`. Читатель (`read_journal`) всегда отдаёт полные
+состояния. `runs/<run>/journal-cache.json` — кэш для быстрого чтения, он
+сверяется с байтами журнала и при любом расхождении отбрасывается. Руками
+журнал не правят: ни строки, ни хеши, ни кэш.
