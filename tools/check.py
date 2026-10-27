@@ -7,10 +7,12 @@
 Exits non-zero when anything fails or cannot run. Standard library only.
 """
 import argparse
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = "tests/dashboard.test.cjs"
@@ -27,12 +29,17 @@ def node_command(path):
     return None if node is None else [node, "--test", str(path)]
 
 
-def run(name, command, root):
+def private_env(scratch):
+    """Environment of the test processes: calibration goes to a throw-away file, never to ~/.aispa."""
+    return {**os.environ, "AISPA_CALIBRATION_FILE": str(Path(scratch) / "calibration.json")}
+
+
+def run(name, command, root, env=None):
     if command is None:
         print("check: %s не запущен — не найден node" % name, file=sys.stderr)
         return 1
     print("check: %s" % name, flush=True)
-    return 1 if subprocess.run(command, cwd=root).returncode else 0
+    return 1 if subprocess.run(command, cwd=root, env=env).returncode else 0
 
 
 def file_steps(root, name, verbose):
@@ -63,7 +70,9 @@ def main(argv=None):
     else:
         steps = [("unittest", unittest_command(root, verbose=args.verbose)),
                  ("node --test " + DASHBOARD, node_command(root / DASHBOARD))]
-    failed = [name for name, command in steps if run(name, command, root)]
+    with tempfile.TemporaryDirectory(prefix="aispa-check-") as scratch:
+        env = private_env(scratch)
+        failed = [name for name, command in steps if run(name, command, root, env)]
     if failed:
         print("check: FAILED — " + ", ".join(failed), file=sys.stderr)
         return 1

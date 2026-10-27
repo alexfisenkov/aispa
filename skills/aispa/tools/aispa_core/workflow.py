@@ -10,7 +10,7 @@ from .contracts import (active, add_requirements, artifact_valid, basis, definit
                         evidence_rows, gate_valid, plan_basis, report_header, require,
                         validate_plan, verified, task_basis, task_verified, task_closure)
 from .store import Invalid, timestamp
-from . import timing, phase_receipts, execution_obligations
+from . import timing, phase_receipts, execution_obligations, measured_estimate
 from . import autonomy, project_documents, preflight
 from .team import TaskPipeline, _history_valid, historical_proof_valid, task_proof_valid
 from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent, task_tiers, owner_task_attempt
@@ -40,6 +40,8 @@ class Workflow:
         from . import scale
         self.store.scale_enabled = scale.enabled(state)
         self.pipeline = TaskPipeline(self)
+        # Idle marks and calibration samples exist only in runs with measuredTiming.
+        self.tracker = measured_estimate.Tracker(state) if measured_estimate.enabled(state) else None
 
     def save(self, event, at=None):
         at = at or timestamp()
@@ -47,7 +49,10 @@ class Workflow:
         work_progress.sync(self.s, event, at)
         for task in self.s.get("tasks", []):
             timing.sync_phase(task, at, self.s.get("status") == "running" and not timing.waiting(self.s))
+        samples = self.tracker.prepare(self.store, self.s, at) if self.tracker else []
         self.store.append(self.s, event)
+        if samples:
+            self.tracker.commit(samples)
         if self.s.get("projectContext", {}).get("initialized"):
             try:
                 project_context.refresh(self.store, self.s)

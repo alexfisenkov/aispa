@@ -26,6 +26,11 @@ jobs:
           - os: macos-latest
             shard: 1
     steps:
+      # Tests that create runs record calibration; keep it off the runner's real home. The runner context
+      # is not available in the job-level env, so the first step exports the file for every later step.
+      - name: Private calibration file for the tests
+        shell: bash
+        run: echo "AISPA_CALIBRATION_FILE=${{ runner.temp }}/aispa-calibration.json" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
