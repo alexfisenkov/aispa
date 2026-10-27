@@ -12,8 +12,8 @@ from pathlib import Path
 import re
 import tomllib
 
-from .store import Invalid, digest, NATIVE_RULE_INPUTS, native_rule_input
-from .portable import is_link, relative_name
+from .store import Invalid, digest, canonical_zone, NATIVE_RULE_INPUTS, native_rule_input
+from .portable import is_link, match_name, relative_name
 from . import docmeta, scale
 from . import project_documents
 
@@ -190,7 +190,7 @@ def _retain(budget, value, *, path):
     budget.base_memory += size * 4
 
 
-def _scan(store, paths=None, *, cursor=None, scalable=False):
+def _scan(store, paths=None, *, cursor=None, scalable=False, index=False):
     budget = scale.Budget() if scalable else None
     max_sources = scale._positive("AISPA_DISCOVERY_PAGE_SOURCES", MAX_SOURCES) if scalable else MAX_SOURCES
     max_file_bytes = budget.max_bytes if scalable else MAX_FILE_BYTES
@@ -308,7 +308,10 @@ def _scan(store, paths=None, *, cursor=None, scalable=False):
         pagination = {"pagination": {"total": len(candidates), "omitted": len(candidates) - next_position if next_position is not None else 0,
                        "cursor": f"{page_digest}:{next_position}:{next_character}" if next_position is not None else None,
                        "digest": page_digest, "start": position, "character": character}}
-    return {**pagination, "sources": sources, "scanDigest": scan_digest, "limits": limits, "includedPaths": included,
+    # Focused runs keep a short digest per scanned file, so that later checks can leave out the files
+    # the plan's tasks write themselves. Not part of any basis.
+    fingerprint_index = {"fingerprintIndex": {row["path"]: digest(row)[:16] for row in fingerprints}} if index else {}
+    return {**pagination, **fingerprint_index, "sources": sources, "scanDigest": scan_digest, "limits": limits, "includedPaths": included,
             "omitted": {"counts": dict(sorted(counts.items())), "details": omitted,
                         "unlisted": sum(counts.values()) - len(omitted),
                         "unselectedPaths": len(names) - len(candidates)},
@@ -341,14 +344,55 @@ def _collection(store, state):
     return saved
 
 
-def collect(store, state, paths=None, *, metadata_receipt=None, cursor=None):
+def _focused(state):
+    return state.get("policy", {}).get("focusedReview") is True
+
+
+def _plan_zones(state):
+    """Canonical write zones of the tasks of the current plan."""
+    zones = []
+    for task in state.get("tasks", []):
+        for zone in task.get("zones", []):
+            try:
+                zones.append(canonical_zone(zone))
+            except Invalid:
+                continue
+    return zones
+
+
+def _outside(index, zones):
+    return {path: row for path, row in index.items()
+            if not any(zone in ("", ".") or match_name(path) == zone or match_name(path).startswith(zone + "/")
+                       for zone in zones)}
+
+
+def _inputs_unchanged(state, saved, scan):
+    """The study inputs are the same. Focused runs leave out the files the plan's tasks write: that
+    work is the run's own and is covered by the proofs of those tasks, not by a new study."""
+    if saved["limits"] != scan["limits"]:
+        return False
+    if saved["scanDigest"] == scan["scanDigest"]:
+        return True
+    old, new = saved.get("fingerprintIndex"), scan.get("fingerprintIndex")
+    zones = _plan_zones(state) if _focused(state) else []
+    if not zones or not isinstance(old, dict) or not isinstance(new, dict):
+        return False
+    return _outside(old, zones) == _outside(new, zones)
+
+
+def collect(store, state, paths=None, *, metadata_receipt=None, cursor=None, reuse_receipt=None):
     """Save/reuse bounded evidence; paths=None retains prior explicit includes.
 
     An explicit [] clears includes. Mutate state only, never execute or append.
     metadata_receipt, when supplied, receives routing-index registration results;
     those results do not change the saved discovery evidence or its basis.
+    reuse_receipt, when supplied, gets "reused": whether the saved collection was returned because the
+    inputs did not change; the caller then has nothing new to record (no event).
     """
     _require(metadata_receipt is None or isinstance(metadata_receipt, dict), "metadata_receipt должен быть объектом")
+    _require(reuse_receipt is None or isinstance(reuse_receipt, dict), "reuse_receipt должен быть объектом")
+    if reuse_receipt is not None:
+        reuse_receipt["reused"] = False
     def index_documents(sources):
         result = docmeta.collect_sources(store, state, sources)
         if metadata_receipt is not None:
@@ -361,13 +405,18 @@ def collect(store, state, paths=None, *, metadata_receipt=None, cursor=None):
         # catalog. Missing/stale references remain visible in project-documents.
         mapped = project_documents.view(store, state)["roles"].values()
         paths = sorted(set(paths or []) | {row["path"] for row in mapped if row.get("status") in ("fresh", "changed")})
-    scan = _scan(store, paths, cursor=cursor, scalable=scale.enabled(state))
+    scan = _scan(store, paths, cursor=cursor, scalable=scale.enabled(state), index=_focused(state))
     basis = digest({"run": state["run"], "scan": scan["scanDigest"], "limits": scan["limits"], "includedPaths": scan["includedPaths"], **({"pagination": scan["pagination"]} if "pagination" in scan else {})})
     if state.get("discoveryCollection"):
         try:
             previous = _collection(store, state)
-            if previous["basis"] == basis:
+            same_page = (previous.get("includedPaths") == scan["includedPaths"]
+                         and {k: previous.get("pagination", {}).get(k) for k in ("start", "character")}
+                         == {k: scan.get("pagination", {}).get(k) for k in ("start", "character")})
+            if previous["basis"] == basis or same_page and _inputs_unchanged(state, previous, scan):
                 index_documents(previous["sources"])
+                if reuse_receipt is not None:
+                    reuse_receipt["reused"] = True
                 return previous
         except (OSError, ValueError, TypeError):
             pass
@@ -458,6 +507,10 @@ def valid(store, state, *, check_sources=True):
         if not phase_receipts.valid(store, state, "discovery"):
             return False
         if check_sources:
+            if _focused(state) and "fingerprintIndex" in saved:
+                # Per-file digests compare without a page cursor: a page is a view, the digests cover all files.
+                scan = _scan(store, saved.get("includedPaths", []), scalable=scale.enabled(state), index=True)
+                return _inputs_unchanged(state, saved, scan)
             scan = _scan(store, saved.get("includedPaths", []), scalable=scale.enabled(state),
                     cursor=(f"{saved['pagination']['digest']}:{saved['pagination']['start']}:{saved['pagination']['character']}"
                             if saved.get("pagination", {}).get("start") or saved.get("pagination", {}).get("character") else None))

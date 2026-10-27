@@ -301,5 +301,91 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(sources["Makefile"]["commands"], [{"command": "python3 -m unittest", "origin": "recipe"}])
 
 
+class UnchangedInputsTests(unittest.TestCase):
+    """0.5.0: the study is rebuilt only when its inputs change; the files the plan's tasks write are not inputs."""
+    setUp = DiscoveryTests.setUp
+    tearDown = DiscoveryTests.tearDown
+    git = DiscoveryTests.git
+    write = DiscoveryTests.write
+
+    def focus(self, zones=("src/main.py",)):
+        self.state["policy"] = {"focusedReview": True}
+        self.state["tasks"] = [{"id": "T01", "title": "Task", "requirements": [], "dependsOn": [], "zones": list(zones),
+                                "readZones": ["."], "criteria": ["Works"], "wave": 1, "status": "pending"}]
+
+    def study(self):
+        evidence = discovery.collect(self.store, self.state)
+        discovery.record(self.store, self.state, synthetic_report(evidence))
+        return evidence
+
+    def test_unchanged_inputs_report_reuse_and_keep_the_saved_collection(self):
+        for focused in (False, True):
+            with self.subTest(focused=focused):
+                self.state.pop("discoveryCollection", None)
+                if focused:
+                    self.focus()
+                receipt = {}
+                first = discovery.collect(self.store, self.state, reuse_receipt=receipt)
+                self.assertFalse(receipt["reused"])
+                saved = dict(self.state["discoveryCollection"])
+                receipt = {}
+                self.assertEqual(discovery.collect(self.store, self.state, reuse_receipt=receipt), first)
+                self.assertTrue(receipt["reused"])
+                self.assertEqual(self.state["discoveryCollection"], saved)
+                self.write("README.md", "# Changed %s\n" % focused)
+                receipt = {}
+                discovery.collect(self.store, self.state, reuse_receipt=receipt)
+                self.assertFalse(receipt["reused"])
+                self.assertNotEqual(self.state["discoveryCollection"], saved)
+
+    def test_edit_in_a_task_zone_keeps_the_study_fresh_but_an_edit_outside_does_not(self):
+        self.focus(("src/main.py",))
+        self.study()
+        self.write("src/main.py", "def main():\n    return 'built by the task'\n")
+        self.assertTrue(discovery.valid(self.store, self.state))
+        self.assertTrue(discovery.view(self.store, self.state)["fresh"])
+        self.write("src/repository.py", "def load():\n    return ['outside the zones']\n")
+        self.assertFalse(discovery.valid(self.store, self.state))
+        self.assertTrue(discovery.valid(self.store, self.state, check_sources=False))
+
+    def test_a_zone_covers_its_directory_and_new_files_inside_it(self):
+        self.focus(("src",))
+        self.study()
+        self.write("src/repository.py", "def load():\n    return [1]\n")
+        self.write("src/app.py", "print('new file written by a task')\n")
+        self.assertTrue(discovery.valid(self.store, self.state))
+        self.write("README.md", "# Edited outside the zone\n")
+        self.assertFalse(discovery.valid(self.store, self.state))
+
+    def test_runs_without_the_flag_keep_the_previous_check(self):
+        self.state["tasks"] = [{"id": "T01", "zones": ["src/main.py"]}]
+        self.study()
+        self.write("src/main.py", "def main():\n    return 'edited'\n")
+        self.assertFalse(discovery.valid(self.store, self.state))
+
+    def test_rediscovery_after_a_zone_edit_returns_the_saved_collection_and_after_an_outside_edit_a_new_one(self):
+        self.focus(("src/main.py",))
+        first = self.study()
+        saved = dict(self.state["discoveryCollection"])
+        self.write("src/main.py", "def main():\n    return 'built by the task'\n")
+        receipt = {}
+        self.assertEqual(discovery.collect(self.store, self.state, reuse_receipt=receipt), first)
+        self.assertTrue(receipt["reused"])
+        self.assertEqual(self.state["discoveryCollection"], saved)
+        self.write("package.json", json.dumps({"scripts": {"test": "pytest"}}))
+        receipt = {}
+        discovery.collect(self.store, self.state, reuse_receipt=receipt)
+        self.assertFalse(receipt["reused"])
+        self.assertNotEqual(self.state["discoveryCollection"], saved)
+
+    def test_a_new_include_is_never_a_reuse(self):
+        self.focus(("src/main.py",))
+        self.study()
+        receipt = {}
+        evidence = discovery.collect(self.store, self.state, paths=["src/repository.py"], reuse_receipt=receipt)
+        self.assertFalse(receipt["reused"])
+        self.assertEqual(evidence["includedPaths"], ["src/repository.py"])
+
+
 if __name__ == "__main__":
     unittest.main()
