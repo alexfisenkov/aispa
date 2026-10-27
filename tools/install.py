@@ -7,6 +7,7 @@ hashes establish provenance and integrity, not an independent signature.
 """
 import argparse
 import ast
+import functools
 import hashlib
 import importlib
 import importlib.util
@@ -41,6 +42,7 @@ MAX_TIMEOUT_SECONDS = 120
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _CANDIDATE = re.compile(r"aispa-install-[A-Za-z0-9_-]{8,64}\Z")
+_AGENT_FILE = re.compile(r"aispa-[a-z0-9-]{1,60}\.md\Z")
 _RESERVED = re.compile(r"^(?:con|conin\$|conout\$|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)", re.I)
 _SEMVER = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -53,6 +55,9 @@ _RUNTIME_DIRS = {"codex": ".codex", "claude-code": ".claude", "cursor": ".cursor
                  "antigravity": ".gemini/config"}
 _PROJECT_DIRS = {"codex": ".agents", "claude-code": ".claude", "cursor": ".cursor",
                  "openclaw": ".agents", "gemini": ".gemini", "antigravity": ".agents"}
+# Standalone installer: same text as updates.RATE_LIMIT_MESSAGE.
+RATE_LIMIT_MESSAGE = ("GitHub временно ограничил запросы без входа. "
+                      "Аккаунт и токен не нужны — попробуйте через час")
 
 
 def _require_runtime(package, runtime):
@@ -80,6 +85,28 @@ class InstallError(ValueError):
 def _need(ok, message):
     if not ok:
         raise InstallError(message)
+
+
+def _rate_limited(error):
+    # Anonymous GitHub API access is limited per IP; 403/429 there is that limit.
+    if not isinstance(error, urllib.error.HTTPError) or error.code not in (403, 429):
+        return False
+    url = getattr(error, "filename", None) or getattr(error, "url", None)
+    return isinstance(url, str) and urllib.parse.urlsplit(url).hostname == "api.github.com"
+
+
+def _plain_rate_limit(function):
+    """Report the anonymous GitHub limit in plain words, never as a raw HTTP error."""
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except urllib.error.HTTPError as exc:
+            if not _rate_limited(exc):
+                raise
+            exc.close()
+            raise InstallError(RATE_LIMIT_MESSAGE) from exc
+    return wrapper
 
 
 def _valid_timeout(timeout):
@@ -176,6 +203,7 @@ def _semver(version):
     return (int(major), int(minor), int(patch), bool(not pre), suffix)
 
 
+@_plain_rate_limit
 def _releases(timeout):
     deadline = _deadline(timeout)
     rows = []
@@ -227,6 +255,7 @@ def _validate_tag(tag):
     _semver(tag.removeprefix("v"))
 
 
+@_plain_rate_limit
 def _tag_release(tag, timeout):
     # Explicit versions must be published Releases, not just Git refs. Validate
     # before network access and never depend on the global list for this route.
@@ -277,6 +306,7 @@ def _select_release(rows, tag=None):
     return max(eligible, key=lambda item: item[0])[1]
 
 
+@_plain_rate_limit
 def _source_commit(tag, timeout):
     deadline = _deadline(timeout)
     quoted = urllib.parse.quote(tag, safe="")
@@ -478,6 +508,72 @@ def _safe_member(name):
     return name
 
 
+def _agents_directory(target, runtime):
+    """Claude Code agent files go to .claude/agents of the skill's own scope."""
+    if runtime is None:
+        return None, "custom destination"
+    if runtime != "claude-code":
+        return None, "runtime without agent files"
+    _need(target.name == "aispa" and target.parent.name == "skills" and target.parent.parent.name == ".claude",
+          "Навык Claude Code должен лежать в .claude/skills/aispa")
+    return target.parent.parent / "agents", None
+
+
+def _agent_sources(package):
+    source = package / "agents" / "claude-code"
+    if _is_link(source) or not source.is_dir():
+        return {}
+    return {path.name: path.read_bytes() for path in sorted(source.iterdir())
+            if _AGENT_FILE.fullmatch(path.name) and path.is_file() and not _is_link(path)}
+
+
+def _agents_plan(target, runtime, package):
+    directory, reason = _agents_directory(target, runtime)
+    if directory is None:
+        return {"status": "skipped", "reason": reason}
+    files = sorted(_agent_sources(package))
+    if not files:
+        return {"status": "skipped", "reason": "package has no agent files"}
+    return {"status": "planned", "directory": str(directory), "files": files}
+
+
+def _install_agents(target, runtime):
+    """Copy the package's agent files; an existing file with that name is never replaced."""
+    directory, reason = _agents_directory(target, runtime)
+    if directory is None:
+        return {"status": "skipped", "reason": reason}
+    sources = _agent_sources(target)
+    if not sources:
+        return {"status": "skipped", "reason": "package has no agent files"}
+    installed, skipped = [], []
+    try:
+        _need(not _is_link(directory) and not any(_is_link(p) for p in directory.parents),
+              "Ссылка в пути каталога агентов запрещена")
+        if not directory.exists():
+            directory.mkdir(mode=0o755)
+        _need(directory.is_dir() and not _is_link(directory), "Каталог агентов недоступен")
+        for name, data in sources.items():
+            path = directory / name
+            try:
+                with path.open("xb") as stream:
+                    stream.write(data)
+            except FileExistsError:
+                same = path.is_file() and not _is_link(path) and path.read_bytes() == data
+                skipped.append({"file": name, "reason": "identical" if same else "different"})
+                continue
+            installed.append(name)
+    except (InstallError, OSError) as exc:
+        # The verified skill is already installed; report the agent step honestly.
+        return {"status": "failed", "directory": str(directory), "installed": installed,
+                "skipped": skipped, "reason": "Файлы агентов не установлены полностью: " + str(exc)}
+    different = [item["file"] for item in skipped if item["reason"] == "different"]
+    return {"status": "conflict" if different else "installed", "directory": str(directory),
+            "installed": installed, "skipped": skipped,
+            "reason": ("Файлы с теми же именами уже есть и отличаются; они не перезаписаны: "
+                       + ", ".join(different)) if different else None}
+
+
+@_plain_rate_limit
 def preview(*, runtime=None, scope=None, project_root=None, destination=None,
             tag=None, cache_dir=None, home=None, timeout=30):
     """Stage exactly one published release without touching the destination."""
@@ -534,6 +630,7 @@ def preview(*, runtime=None, scope=None, project_root=None, destination=None,
                    "archiveSha256": archive_hash,
                    "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
                    "candidateDigest": candidate_digest, "fileCount": len(records),
+                   "agents": _agents_plan(target, runtime, staged),
                    "requiresConfirmation": True}
         with (candidate / "manifest.json").open("xb") as stream:
             stream.write(manifest_bytes)
@@ -646,6 +743,7 @@ def apply(candidate_id, *, confirmed=False, cache_dir=None):
         _need(installed == before and installed_digest == digest,
               "Установленный пакет не прошёл повторную проверку")
         done = dict(receipt, status="installed", installedDigest=installed_digest,
+                    agents=_install_agents(target, receipt.get("runtime")),
                     requiresConfirmation=False)
         # Retain an audit receipt beside the candidate, never in the package.
         _write_json(candidate / "installed.json", done)

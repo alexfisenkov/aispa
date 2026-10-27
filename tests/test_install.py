@@ -36,7 +36,7 @@ class InstallerTests(unittest.TestCase):
         self.commit = "a" * 40
         self.configure_release("0.1.0-alpha.10")
 
-    def configure_release(self, version, *, modes=None, runtimes=None):
+    def configure_release(self, version, *, modes=None, runtimes=None, extra=None):
         self.tag = "v" + version
         modes = modes or {}
         self.files = {
@@ -44,6 +44,7 @@ class InstallerTests(unittest.TestCase):
             "tools/aispa.py": b"print('synthetic')\n",
             "tools/aispa_core/__init__.py": ('VERSION = "' + version + '"\n').encode(),
             "LICENSE": b"Synthetic license for test fixture.\n",
+            **(extra or {}),
         }
         if runtimes is not None:
             self.files["tools/aispa_core/project_context.py"] = ("RUNTIMES = " + repr(tuple(runtimes)) + "\n").encode()
@@ -357,10 +358,54 @@ class InstallerTests(unittest.TestCase):
                  install.LATEST_RELEASE_URL: latest}), self.assertRaises(install.InstallError):
                 install._releases(5)
 
+    RATE_LIMIT_TEXT = ("GitHub временно ограничил запросы без входа. "
+                       "Аккаунт и токен не нужны — попробуйте через час")
+
+    def rate_limit_error(self, url, code):
+        error = urllib.error.HTTPError(url, code, "rate limited", {}, None)
+        self.addCleanup(error.close)
+        return error
+
+    def test_github_rate_limit_is_named_in_discovery_without_raw_http_error(self):
+        self.configure_release("0.3.4")
+        for url in (install.RELEASES_URL, install.LATEST_RELEASE_URL):
+            for code in (403, 429):
+                responses = {install.RELEASES_URL: [self.release], install.LATEST_RELEASE_URL: self.release}
+                responses[url] = self.rate_limit_error(url, code)
+                with self.subTest(url=url, code=code), self.metadata_network(responses), \
+                     self.assertRaises(install.InstallError) as raised:
+                    install._releases(5)
+                self.assertEqual(str(raised.exception), self.RATE_LIMIT_TEXT)
+        tag_url = install.API + "/releases/tags/" + urllib.parse.quote(self.tag, safe="")
+        with self.metadata_network({tag_url: self.rate_limit_error(tag_url, 429)}), \
+             self.assertRaisesRegex(install.InstallError, "Аккаунт и токен не нужны"):
+            install._tag_release(self.tag, 5)
+
+    def test_preview_cli_reports_rate_limit_from_any_step_in_plain_words(self):
+        # Discovery through the installer's own fetch and asset metadata through
+        # the release verifier both end as one plain message, exit code 1.
+        verifier_error = self.rate_limit_error(
+            f"https://api.github.com/repos/{install.REPOSITORY}/git/ref/tags/{self.tag}", 403)
+        cases = (("discovery", patch.object(install, "_releases",
+                                            side_effect=self.rate_limit_error(install.RELEASES_URL, 429))),
+                 ("verifier", patch.object(updates, "_source_commit", side_effect=verifier_error)))
+        for label, failure in cases:
+            with self.subTest(step=label):
+                stderr = io.StringIO()
+                with self.network(), failure, contextlib.redirect_stderr(stderr), \
+                     self.assertRaises(SystemExit) as exited:
+                    install.main(["preview", "--destination", str(self.destination),
+                                  "--cache-dir", str(self.cache)] + (["--tag", self.tag] if label == "verifier" else []))
+                self.assertEqual(exited.exception.code, 1)
+                self.assertEqual(stderr.getvalue().strip(), self.RATE_LIMIT_TEXT)
+                self.assertNotIn("HTTP Error", stderr.getvalue())
+                self.assertFalse(self.destination.exists())
+                self.assertEqual(list(self.cache.glob("aispa-install-*")), [])
+
     def test_only_latest_404_is_tolerated_other_http_and_network_errors_propagate(self):
         self.configure_release("0.3.4")
         for error in (urllib.error.HTTPError(install.LATEST_RELEASE_URL, code, "failure", {}, None)
-                      for code in (401, 403, 429, 500)):
+                      for code in (401, 500)):
             with self.subTest(code=error.code), self.metadata_network({install.RELEASES_URL: [self.release],
                  install.LATEST_RELEASE_URL: error}), self.assertRaises(urllib.error.HTTPError):
                 install._releases(5)
@@ -658,6 +703,74 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(applied["runtime"], runtime)
                 self.assertEqual(applied["status"], "installed")
                 self.assertEqual((Path(receipt["destination"]) / "SKILL.md").read_bytes(), self.files["SKILL.md"])
+
+    AGENT_FILES = {"agents/claude-code/" + name: ("---\nname: %s\nmodel: sonnet\n---\nbody %s\n" % (name[:-3], name)).encode()
+                   for name in ("aispa-judge.md", "aispa-worker.md", "aispa-researcher.md")}
+
+    def agent_release(self):
+        self.configure_release("0.5.0", extra=self.AGENT_FILES)
+        return {path.rsplit("/", 1)[1]: data for path, data in self.AGENT_FILES.items()}
+
+    def test_claude_code_project_and_global_install_agents_beside_the_skill(self):
+        expected = self.agent_release()
+        project = self.root / "проект"
+        project.mkdir()
+        home = self.root / "home"
+        home.mkdir()
+        for scope, root in (("project", project), ("global", home)):
+            with self.subTest(scope=scope), self.network():
+                kwargs = {"project_root": project} if scope == "project" else {"home": home}
+                receipt = install.preview(runtime="claude-code", scope=scope, tag=self.tag,
+                                          cache_dir=self.cache, **kwargs)
+                agents = root / ".claude" / "agents"
+                self.assertFalse(agents.exists())
+                done = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+                self.assertEqual(done["agents"]["directory"], str(agents.resolve()))
+                self.assertEqual(done["agents"]["installed"], sorted(expected))
+                self.assertEqual(done["agents"]["skipped"], [])
+                self.assertIsNone(done["agents"]["reason"])
+                self.assertEqual({p.name: p.read_bytes() for p in agents.iterdir()}, expected)
+                self.assertEqual((root / ".claude/skills/aispa/agents/claude-code/aispa-judge.md").read_bytes(),
+                                 expected["aispa-judge.md"])
+
+    def test_existing_agent_is_never_overwritten_and_is_named(self):
+        expected = self.agent_release()
+        project = self.root / "project"
+        agents = project / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "aispa-judge.md").write_bytes(expected["aispa-judge.md"])
+        foreign = b"---\nname: aispa-worker\nmodel: opus\n---\nmy own worker\n"
+        (agents / "aispa-worker.md").write_bytes(foreign)
+        (agents / "other.md").write_bytes(b"unrelated\n")
+        with self.network():
+            receipt = install.preview(runtime="claude-code", scope="project", project_root=project,
+                                      tag=self.tag, cache_dir=self.cache)
+            done = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+        self.assertEqual(done["status"], "installed")
+        self.assertEqual(done["agents"]["installed"], ["aispa-researcher.md"])
+        self.assertEqual(done["agents"]["skipped"], [{"file": "aispa-judge.md", "reason": "identical"},
+                                                     {"file": "aispa-worker.md", "reason": "different"}])
+        self.assertIn("aispa-worker.md", done["agents"]["reason"])
+        self.assertEqual((agents / "aispa-worker.md").read_bytes(), foreign)
+        self.assertEqual((agents / "other.md").read_bytes(), b"unrelated\n")
+        self.assertEqual((agents / "aispa-researcher.md").read_bytes(), expected["aispa-researcher.md"])
+
+    def test_custom_destination_and_other_runtimes_install_no_agents(self):
+        self.agent_release()
+        receipt = self.preview()
+        done = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+        self.assertEqual(done["agents"], {"status": "skipped", "reason": "custom destination"})
+        self.assertFalse((self.destination.parent.parent / "agents").exists())
+        project = self.root / "codex project"
+        project.mkdir()
+        with self.network():
+            receipt = install.preview(runtime="codex", scope="project", project_root=project,
+                                      tag=self.tag, cache_dir=self.cache)
+            done = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+        self.assertEqual(done["agents"]["status"], "skipped")
+        self.assertNotIn("installed", done["agents"])
+        self.assertEqual(sorted(p.name for p in (project / ".agents").iterdir()), ["skills"])
+        self.assertFalse((project / ".claude").exists())
 
     def test_pinned_verifier_has_isolated_import_name(self):
         source = self.root / "source"

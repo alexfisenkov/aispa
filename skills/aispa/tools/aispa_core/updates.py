@@ -15,6 +15,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import shutil
 import ssl
 import stat
@@ -46,6 +47,18 @@ _SEMVER = re.compile(
 )
 _HASH = re.compile(r"[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
+RATE_LIMIT_REASON = "github_rate_limit"
+# Anonymous GitHub API access is limited per IP; no account or token is needed.
+RATE_LIMIT_MESSAGE = ("GitHub временно ограничил запросы без входа. "
+                      "Аккаунт и токен не нужны — попробуйте через час")
+
+
+def rate_limited(error):
+    """True for HTTP 403/429 from api.github.com (the anonymous request limit)."""
+    if not isinstance(error, urllib.error.HTTPError) or error.code not in (403, 429):
+        return False
+    url = getattr(error, "filename", None) or getattr(error, "url", None)
+    return isinstance(url, str) and urllib.parse.urlsplit(url).hostname == "api.github.com"
 
 
 def _semver(value):
@@ -386,6 +399,11 @@ def check(package, *, timeout=5):
         release = _release(_published_releases(_deadline(timeout)), _semver(version))
         if release:
             result.update(status="available" if _semver(release["version"]) > _semver(version) else "current", release=release)
+    except urllib.error.HTTPError as exc:
+        if rate_limited(exc):
+            result.update(status="offline", reason=RATE_LIMIT_REASON, message=RATE_LIMIT_MESSAGE)
+        else:
+            result.update(status="offline", message="Проверка недоступна; продолжайте с установленной версией.")
     except (urllib.error.URLError, OSError, TimeoutError, http.client.HTTPException):
         result.update(status="offline", message="Проверка недоступна; продолжайте с установленной версией.")
     except (Invalid, ValueError, TypeError, KeyError, RecursionError):
@@ -502,7 +520,12 @@ def prepare(package, *, timeout=20):
     deadline = _deadline(timeout)
     before, old_digest = _snapshot(target)
     version = _version(target)
-    release = _release(_published_releases(deadline), _semver(version))
+    try:
+        release = _release(_published_releases(deadline), _semver(version))
+    except urllib.error.HTTPError as exc:
+        if rate_limited(exc):
+            raise Invalid(RATE_LIMIT_MESSAGE) from exc
+        raise
     if release is None or _semver(release["version"]) <= _semver(version):
         raise Invalid("Нового опубликованного выпуска нет")
     manifest = _json(_download(release["assets"]["aispa-update.json"], MAX_METADATA_BYTES, deadline))
@@ -566,6 +589,160 @@ def _lock(target):
         path.unlink(missing_ok=True)
 
 
+_AGENT_FILE = re.compile(r"aispa-[a-z0-9-]{1,60}\.md")
+_FOREIGN = object()  # a link or a non-regular file: never ours to change
+
+
+def _agents_directory(package, target):
+    """Claude Code agents live beside the skill: */.claude/skills/aispa -> */.claude/agents."""
+    for path in (Path(package).absolute(), target):
+        if path.name == "aispa" and path.parent.name == "skills" and path.parent.parent.name == ".claude":
+            return path.parent.parent / "agents"
+    return None
+
+
+def _agent_sources(package):
+    source = package / "agents" / "claude-code"
+    if is_link(source) or not source.is_dir():
+        return {}
+    return {path.name: path.read_bytes() for path in sorted(source.iterdir())
+            if _AGENT_FILE.fullmatch(path.name) and not is_link(path) and path.is_file()}
+
+
+def _agent_current(path):
+    if is_link(path):
+        return _FOREIGN
+    if not path.exists():
+        return None
+    return path.read_bytes() if path.is_file() else _FOREIGN
+
+
+def _sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_new(path, data):
+    with path.open("xb") as stream:
+        stream.write(data)
+
+
+def _replace_file(path, data):
+    temporary = path.with_name(".aispa-agent-" + secrets.token_hex(8) + ".tmp")
+    try:
+        _write_new(temporary, data)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _agents_plan(package, target, old_package, new_package):
+    """Which agent files an update may write: missing ones and unchanged copies of the old package."""
+    directory = _agents_directory(package, target)
+    new = _agent_sources(new_package) if directory is not None else {}
+    if not new:
+        return None
+    view = {"directory": str(directory), "installed": [], "skipped": [], "reason": None, "changes": []}
+    if is_link(directory) or (directory.exists() and not directory.is_dir()):
+        return dict(view, status="skipped", reason="Каталог агентов — ссылка или не каталог; агенты не обновлены")
+    old = _agent_sources(old_package)
+    for name, data in new.items():
+        current = _agent_current(directory / name)
+        if current == data:
+            view["skipped"].append({"file": name, "reason": "identical"})
+        elif current is None or (current is not _FOREIGN and current == old.get(name)):
+            view["changes"].append({"file": name, "data": data,
+                                    "previous": current, "previousSha256": current and _sha(current),
+                                    "sha256": _sha(data)})
+        else:
+            view["skipped"].append({"file": name, "reason": "different"})
+    different = [item["file"] for item in view["skipped"] if item["reason"] == "different"]
+    if different:
+        view["reason"] = "Файлы агентов отличаются от прежней версии пакета и не перезаписаны: " + ", ".join(different)
+    return dict(view, status="conflict" if different else "installed")
+
+
+def _apply_agents(plan, backup):
+    directory = Path(plan["directory"])
+    done = []
+    try:
+        for item in plan["changes"]:
+            path = directory / item["file"]
+            if _agent_current(path) != item["previous"]:
+                raise Invalid("Файл агента изменён во время обновления: " + item["file"])
+            if item["previous"] is None:
+                directory.mkdir(mode=0o755, exist_ok=True)
+                _write_new(path, item["data"])
+            else:
+                (backup / "agents").mkdir(exist_ok=True)
+                _write_new(backup / "agents" / item["file"], item["previous"])
+                _replace_file(path, item["data"])
+            done.append(item)
+    except BaseException:
+        for item in reversed(done):
+            path = directory / item["file"]
+            if item["previous"] is None:
+                path.unlink(missing_ok=True)
+            else:
+                _replace_file(path, item["previous"])
+        raise
+    plan["installed"] = [item["file"] for item in done]
+    plan["changes"] = [{key: item[key] for key in ("file", "previousSha256", "sha256")} for item in done]
+    return plan
+
+
+def _agents_rollback_plan(package, target, backup, receipt):
+    agents = receipt.get("agents")
+    if not isinstance(agents, dict) or not agents.get("changes"):
+        return None
+    directory = _agents_directory(package, target)
+    if directory is None or str(directory) != agents.get("directory") or is_link(directory):
+        return {"directory": agents.get("directory"), "restore": [], "skipped": [
+            {"file": item.get("file"), "reason": "directory"} for item in agents["changes"]]}
+    restore, skipped = [], []
+    for item in agents["changes"]:
+        name = item.get("file")
+        if not isinstance(name, str) or not _AGENT_FILE.fullmatch(name):
+            raise Invalid("Некорректная запись агента в резервной копии")
+        current = _agent_current(directory / name)
+        if current is None or current is _FOREIGN or _sha(current) != item.get("sha256"):
+            skipped.append({"file": name, "reason": "changed"})
+            continue
+        previous = None
+        if item.get("previousSha256") is not None:
+            saved = backup / "agents" / name
+            previous = _agent_current(saved)
+            if previous is None or previous is _FOREIGN or _sha(previous) != item["previousSha256"]:
+                raise Invalid("Резервная копия агента изменена: " + name)
+        restore.append({"file": name, "previous": previous})
+    return {"directory": str(directory), "restore": restore, "skipped": skipped}
+
+
+def _rollback_agents(plan, backup):
+    directory = Path(plan["directory"])
+    aside = backup / "replaced-agents"
+    done = []
+    try:
+        for item in plan["restore"]:
+            path, moved = directory / item["file"], aside / item["file"]
+            aside.mkdir(exist_ok=True)
+            if moved.exists() or is_link(moved):
+                raise Invalid("Каталог сохранения агентов уже занят")
+            os.replace(path, moved)
+            done.append((item, False))
+            if item["previous"] is not None:
+                _write_new(path, item["previous"])
+                done[-1] = (item, True)
+    except BaseException:
+        for item, written in reversed(done):
+            path = directory / item["file"]
+            if written:
+                path.unlink(missing_ok=True)
+            os.replace(aside / item["file"], path)
+        raise
+    return {"directory": plan["directory"], "restored": [item["file"] for item in plan["restore"]],
+            "skipped": plan["skipped"]}
+
+
 def _confirmed(confirmed):
     if confirmed is not True:
         raise Invalid("Нужно явное подтверждение пользователя; можно продолжить с текущей версией")
@@ -582,6 +759,7 @@ def apply(package, candidate_id, *, confirmed=False):
     target = _writable_target(package)
     with _lock(target):
         candidate, review = _local_record(target, candidate_id, ".aispa-update-", "candidate.json")
+        agents = None
         if review.get("status") != "prepared":
             raise Invalid("Этот кандидат уже применён или недоступен")
         staged = candidate / "package"
@@ -598,6 +776,7 @@ def apply(package, candidate_id, *, confirmed=False):
             raise Invalid("Установленный пакет изменён; подготовьте обновление заново")
         if _semver(review["version"]) <= _semver(_version(target)):
             raise Invalid("Кандидат не новее установленной версии")
+        agents = _agents_plan(package, target, target, staged)
         backup = Path(tempfile.mkdtemp(prefix=".aispa-backup-", dir=target.parent))
         receipt = {"schema": 1, "status": "installing", "backupId": backup.name,
                    "target": str(target), "version": review["version"],
@@ -615,6 +794,8 @@ def apply(package, candidate_id, *, confirmed=False):
             new_moved = True
             if _snapshot(target)[1] != digest:
                 raise Invalid("Установленный пакет не прошёл проверку")
+            if agents is not None:
+                receipt["agents"] = _apply_agents(agents, backup) if agents["changes"] else agents
             receipt["status"] = "installed"
             atomic_json(backup / "receipt.json", receipt)
         except BaseException:
@@ -647,6 +828,7 @@ def rollback(package, backup_id, *, confirmed=False):
             raise Invalid("Резервная копия изменена")
         if _snapshot(target)[1] != receipt.get("expectedCurrentDigest"):
             raise Invalid("Текущий пакет изменён после обновления; автоматический откат запрещён")
+        agents = _agents_rollback_plan(package, target, backup, receipt)
         displaced = backup / "replaced"
         if displaced.exists() or is_link(displaced):
             raise Invalid("Каталог сохранения текущей версии уже занят")
@@ -660,6 +842,8 @@ def rollback(package, backup_id, *, confirmed=False):
             new_moved = True
             if _snapshot(target)[1] != receipt["backupDigest"]:
                 raise Invalid("Восстановленный пакет не прошёл проверку")
+            if agents is not None:
+                receipt["agentsRollback"] = _rollback_agents(agents, backup)
             receipt["status"] = "rolled_back"
             atomic_json(backup / "receipt.json", receipt)
         except BaseException:

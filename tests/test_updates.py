@@ -279,6 +279,42 @@ class UpdateTests(unittest.TestCase):
                 with self.network([self.release("0.1.0-alpha.1")]):
                     self.assertEqual(updates.check(self.package)["status"], "offline")
 
+    RATE_LIMIT_TEXT = ("GitHub временно ограничил запросы без входа. "
+                       "Аккаунт и токен не нужны — попробуйте через час")
+
+    def test_github_rate_limit_is_named_without_account_or_token(self):
+        for url in (updates.RELEASES_URL, updates.LATEST_RELEASE_URL):
+            for code in (403, 429):
+                with self.subTest(url=url, code=code):
+                    self.assets.clear()
+                    error = urllib.error.HTTPError(url, code, "rate limited", {}, None)
+                    self.addCleanup(error.close)
+                    self.assets[url] = error
+                    with self.network([self.release()]) if url != updates.RELEASES_URL else \
+                            patch.object(updates, "_download", side_effect=error):
+                        result = updates.check(self.package)
+                    self.assertEqual(result["status"], "offline")
+                    self.assertEqual(result["reason"], "github_rate_limit")
+                    self.assertEqual(result["message"], self.RATE_LIMIT_TEXT)
+                    self.assertNotIn("HTTP Error", json.dumps(result, ensure_ascii=False))
+        # Other network failures keep the previous offline result without that reason.
+        for error in (urllib.error.HTTPError(updates.LATEST_RELEASE_URL, 500, "error", {}, None),
+                      urllib.error.HTTPError(updates.LATEST_RELEASE_URL, 401, "error", {}, None),
+                      urllib.error.URLError("offline"), TimeoutError()):
+            with self.subTest(error=error), patch.object(updates, "_download", side_effect=error):
+                result = updates.check(self.package)
+                self.assertEqual(result["status"], "offline")
+                self.assertNotIn("reason", result)
+                self.assertNotEqual(result["message"], self.RATE_LIMIT_TEXT)
+
+    def test_prepare_names_github_rate_limit_instead_of_raw_http_error(self):
+        error = urllib.error.HTTPError(updates.RELEASES_URL, 429, "Too Many Requests", {}, None)
+        self.addCleanup(error.close)
+        with patch.object(updates, "_download", side_effect=error), \
+             self.assertRaisesRegex(Invalid, "Аккаунт и токен не нужны"):
+            updates.prepare(self.package)
+        self.assertEqual(list(self.package.parent.glob(".aispa-update-*")), [])
+
     def test_empty_terminal_page_is_not_retried_and_requests_share_deadline(self):
         row = self.release()
         self.assets[updates.RELEASES_URL + "&page=2"] = b'[]'
@@ -671,6 +707,125 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(restored["status"], "rolled_back")
         self.assertEqual(file_state(self.package), before)
         self.assertEqual(file_state(runtime.parent), pinned_before)
+
+    def agent_bytes(self, name, version):
+        return ("---\nname: %s\nmodel: sonnet\neffort: low\n---\n%s\n" % (name[:-3], version)).encode()
+
+    def claude_install(self, old_agents):
+        """A Claude Code skill install with its sibling agents directory."""
+        self.package = self.root / "проект" / ".claude" / "skills" / "aispa"
+        self.package.mkdir(parents=True)
+        old = dict(self.old, **{"agents/claude-code/" + n: self.agent_bytes(n, "old") for n in old_agents})
+        self.write_package(self.package, old)
+        agents = self.package.parent.parent / "agents"
+        agents.mkdir()
+        (agents / "other.md").write_bytes(b"unrelated agent\n")
+        return agents
+
+    def agents_state(self, agents):
+        return {p.name: p.read_bytes() for p in agents.iterdir()}
+
+    def agent_release(self, names=("aispa-judge.md", "aispa-worker.md")):
+        files = dict(self.package_content("0.1.0-alpha.3"),
+                     **{"agents/claude-code/" + n: self.agent_bytes(n, "new") for n in names})
+        return self.release("0.1.0-alpha.3", files=files)
+
+    def test_apply_updates_own_agents_with_backup_and_rollback_restores_bytes(self):
+        agents = self.claude_install(["aispa-judge.md", "aispa-worker.md"])
+        for name in ("aispa-judge.md", "aispa-worker.md"):
+            (agents / name).write_bytes(self.agent_bytes(name, "old"))
+        before = self.agents_state(agents)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        self.assertEqual(self.agents_state(agents), before)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        backup = self.package.parent / receipt["backupId"]
+        self.assertEqual(receipt["agents"]["directory"], str(agents))
+        self.assertEqual(receipt["agents"]["installed"], ["aispa-judge.md", "aispa-worker.md"])
+        self.assertEqual(receipt["agents"]["skipped"], [])
+        for name in ("aispa-judge.md", "aispa-worker.md"):
+            self.assertEqual((agents / name).read_bytes(), self.agent_bytes(name, "new"))
+            self.assertEqual((backup / "agents" / name).read_bytes(), before[name])
+        self.assertEqual((agents / "other.md").read_bytes(), b"unrelated agent\n")
+        restored = updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual(restored["status"], "rolled_back")
+        self.assertEqual(self.agents_state(agents), before)
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
+
+    def test_apply_adds_missing_agents_and_rollback_moves_them_aside(self):
+        agents = self.claude_install([])
+        before = self.agents_state(agents)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(receipt["agents"]["installed"], ["aispa-judge.md", "aispa-worker.md"])
+        self.assertEqual((agents / "aispa-judge.md").read_bytes(), self.agent_bytes("aispa-judge.md", "new"))
+        updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual(self.agents_state(agents), before)
+        moved = self.package.parent / receipt["backupId"] / "replaced-agents"
+        self.assertEqual((moved / "aispa-judge.md").read_bytes(), self.agent_bytes("aispa-judge.md", "new"))
+
+    def test_foreign_or_edited_agent_is_not_overwritten_or_rolled_back(self):
+        agents = self.claude_install(["aispa-judge.md", "aispa-worker.md"])
+        (agents / "aispa-judge.md").write_bytes(self.agent_bytes("aispa-judge.md", "old"))
+        edited = b"---\nname: aispa-worker\nmodel: opus\n---\nlocal edit\n"
+        (agents / "aispa-worker.md").write_bytes(edited)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(receipt["agents"]["installed"], ["aispa-judge.md"])
+        self.assertEqual(receipt["agents"]["skipped"], [{"file": "aispa-worker.md", "reason": "different"}])
+        self.assertIn("aispa-worker.md", receipt["agents"]["reason"])
+        self.assertEqual((agents / "aispa-worker.md").read_bytes(), edited)
+        updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual((agents / "aispa-worker.md").read_bytes(), edited)
+        self.assertEqual((agents / "aispa-judge.md").read_bytes(), self.agent_bytes("aispa-judge.md", "old"))
+
+    def test_agent_edited_after_update_is_kept_by_rollback_and_named(self):
+        agents = self.claude_install([])
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        (agents / "aispa-worker.md").write_bytes(b"edited after update\n")
+        restored = updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual((agents / "aispa-worker.md").read_bytes(), b"edited after update\n")
+        self.assertFalse((agents / "aispa-judge.md").exists())
+        self.assertEqual(restored["agentsRollback"]["skipped"], [{"file": "aispa-worker.md", "reason": "changed"}])
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
+
+    def test_failed_agent_write_restores_package_and_agents(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        (agents / "aispa-judge.md").write_bytes(self.agent_bytes("aispa-judge.md", "old"))
+        before = self.agents_state(agents)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        original_replace = updates.os.replace
+
+        def replace(source, destination):
+            if Path(destination).name == "aispa-worker.md" or Path(source).name.endswith("aispa-worker.md"):
+                raise OSError("simulated agent write failure")
+            return original_replace(source, destination)
+
+        original_open = Path.open
+        def open_(path, mode="r", *args, **kwargs):
+            if path.name == "aispa-worker.md" and "x" in mode:
+                raise OSError("simulated agent write failure")
+            return original_open(path, mode, *args, **kwargs)
+
+        with patch.object(updates.os, "replace", side_effect=replace), \
+             patch.object(Path, "open", open_), self.assertRaises(OSError):
+            updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
+        self.assertEqual(updates._snapshot(self.package)[1], review["expectedCurrentDigest"])
+        self.assertEqual(self.agents_state(agents), before)
+
+    def test_package_outside_claude_skills_does_not_touch_agents(self):
+        sibling = self.package.parent.parent / "agents"
+        sibling.mkdir()
+        result = self.prepare()
+        receipt = updates.apply(self.package, result["candidateId"], confirmed=True)
+        self.assertNotIn("agents", receipt)
+        self.assertEqual(list(sibling.iterdir()), [])
 
     def test_candidate_for_other_target_and_path_ids_refused(self):
         result = self.prepare()
