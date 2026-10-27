@@ -343,5 +343,89 @@ class BlindReviewTests(unittest.TestCase):
         self.assertEqual([(f["requirement"], f["status"]) for f in failures], [("R01", "not_tested")])
 
 
+class FocusedRecheckTests(unittest.TestCase):
+    """Focused (0.5.0): after a checked repair a fresh acceptor from a new clean clone
+    rechecks only the diverged items; acceptance keeps earlier observations of the rest."""
+    tearDown, git, commit, report = (BlindReviewTests.tearDown, BlindReviewTests.git,
+                                     BlindReviewTests.commit, BlindReviewTests.report)
+
+    def setUp(self):
+        BlindReviewTests.setUp(self)
+        self.state["policy"] = {"focusedReview": True, "leanControl": True, "cleanClone": True}
+
+    def full(self, export="failed"):
+        report = self.report(status=export)
+        report["observations"].append({"brief": "B001", "quote": "Keep data private.", "status": "passed",
+                                       "note": "Observed privacy", "artifact": self.evidence["file"]})
+        return blind.record(self.store, self.state, report)
+
+    def repaired(self, first, status="passed"):
+        (self.root / "app.py").write_text("print('repaired application')\n", encoding="utf-8", newline="\n")
+        self.commit()
+        self.state["cleanroom"] = cleanroom.prepare(self.store, self.state)
+        self.state["cleanrun"] = cleanroom.execute(self.store, self.state, [sys.executable, "app.py"], 5)
+        self.evidence = self.state["cleanrun"]["output"]
+        self.state.setdefault("finalRepairs", []).append(
+            {"id": "F%02d" % (len(self.state["finalRepairs"]) + 1), "kind": "blind", "items": ["R01"], "status": status,
+             "recheckOf": dict(first["report"]), "rounds": []})
+
+    def recheck(self, first, reviewer="native-recheck", quote="Build export.", items=("R01",)):
+        report = self.report(quote=quote)
+        report.update(reviewer=reviewer, recheckOf={"file": first["report"]["file"], "sha256": first["report"]["sha256"]},
+                      items=list(items))
+        return report
+
+    def test_recheck_is_fresh_limited_to_items_and_combined_for_mapping(self):
+        first = self.full()
+        self.repaired(first, status="open")
+        with self.assertRaisesRegex(Invalid, "после проверенного ремонта"):
+            blind.record(self.store, self.state, self.recheck(first))
+        self.state["finalRepairs"][0]["status"] = "passed"
+        from aispa_core import packets
+        packet = packets.build(self.store, self.state, None, "blind")
+        self.assertEqual(packet["recheck"]["items"], ["R01"])
+        self.assertEqual(packet["recheck"]["quotes"], [{"brief": "B001", "quote": "Build export."}])
+        self.assertNotIn("requirements", packet)
+        whole = dict(self.report(), reviewer="native-other")
+        with self.assertRaisesRegex(Invalid, "recheckOf и items"):
+            blind.record(self.store, self.state, whole)
+        with self.assertRaisesRegex(Invalid, "новый итоговый приёмщик"):
+            blind.record(self.store, self.state, self.recheck(first, reviewer="native-final-acceptor"))
+        with self.assertRaisesRegex(Invalid, "только расходившиеся"):
+            blind.record(self.store, self.state, self.recheck(first, quote="Keep data private."))
+        with self.assertRaisesRegex(Invalid, "ровно расходившиеся"):
+            blind.record(self.store, self.state, self.recheck(first, items=("R01", "G01")))
+        self.state["finalRepairs"][0]["worker"] = {"id": "repair-worker", "nativeId": "native-recheck"}
+        with self.assertRaisesRegex(Invalid, "ремонтов"):
+            blind.record(self.store, self.state, self.recheck(first))
+        del self.state["finalRepairs"][0]["worker"]
+        saved = blind.record(self.store, self.state, self.recheck(first))
+        self.assertEqual((saved["items"], saved["repair"]), (["R01"], "F01"))
+        self.assertNotEqual(saved["cleanroom"], first["cleanroom"])
+        self.assertTrue(blind.valid(self.store, self.state))
+        combined = blind.observations(self.store, self.state)
+        self.assertEqual([(row["quote"], row["status"]) for row in combined],
+                         [("Keep data private.", "passed"), ("Build export.", "passed")])
+        final = {"reviewer": "native-recheck", "independent": True, "blindReport": saved["report"]["sha256"],
+                 "unmapped": [], "blindMapping": [{"observation": 0, "requirement": "G01"},
+                                                  {"observation": 1, "requirement": "R01"}]}
+        self.assertEqual(blind.mapping(self.store, self.state, final), [])
+        final["blindMapping"].pop()
+        with self.assertRaises(Invalid):
+            blind.mapping(self.store, self.state, final)
+        with self.assertRaisesRegex(Invalid, "после проверенного ремонта"):
+            blind.record(self.store, self.state, self.recheck(first, reviewer="native-third"))
+
+    def test_divergent_items_name_failed_requirements(self):
+        self.full()
+        final = {"reviewer": "native-final-acceptor", "independent": True,
+                 "blindReport": self.state["blindReview"]["report"]["sha256"], "unmapped": [],
+                 "blindMapping": [{"observation": 0, "requirement": "R01"}, {"observation": 1, "requirement": "G01"}],
+                 "checks": [{"requirement": "G01", "criterion": "Private data stays private", "status": "passed"}]}
+        self.assertEqual(blind.divergent_items(self.store, self.state, final), ["R01"])
+        self.assertEqual(blind.item_quotes(self.store, self.state, ["R01"]),
+                         [{"requirement": "R01", "brief": "B001", "quote": "Build export."}])
+
+
 if __name__ == "__main__":
     unittest.main()

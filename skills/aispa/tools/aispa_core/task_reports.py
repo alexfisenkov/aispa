@@ -75,7 +75,9 @@ def template(pipeline, tid, role):
         if review_policy.lean(attempt):
             # The lean critic also closes the task: same trace as the former acceptor.
             report.update(inheritedProofs=pipeline.inherited_proofs(tid), trace=_trace(pipeline, tid))
-        if state.get("policy", {}).get("integrationReview") and tid == state.get("integrationTask"):
+        # Focused: the lens reviewers read the whole branch; the final critic's form has no branchReview.
+        if (state.get("policy", {}).get("integrationReview") and tid == state.get("integrationTask")
+                and not integration.focused(state)):
             branch = integration.context(store, state, tid)
             report["branchReview"] = {
                 **{key: branch[key] for key in ("basis", "code", "files", "changes")},

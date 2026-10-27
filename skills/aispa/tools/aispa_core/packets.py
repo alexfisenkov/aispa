@@ -268,6 +268,17 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         # Deliberately omit spec, plan, registry, reviews, discovery and memory.
         from . import blind, carryover
         clone = state.get("cleanroom") or {}
+        focused = state.get("policy", {}).get("focusedReview") is True
+        recheck = {}
+        if focused:
+            from . import final_repairs
+            repair = final_repairs.pending_recheck(state)
+            if repair is not None:
+                # Only the brief and the verbatim quotes of diverged items: never the spec or the registry.
+                recheck = {"recheck": {"recheckOf": {k: repair["recheckOf"][k] for k in ("file", "sha256")},
+                                       "items": repair["items"],
+                                       "quotes": [{"brief": row["brief"], "quote": row["quote"]}
+                                                  for row in blind.item_quotes(store, state, repair["items"])]}}
         original_intent = {}
         if state.get("policy", {}).get("projectDocuments"):
             from . import project_documents
@@ -277,7 +288,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
                 **original_intent,
                 "briefs": _brief_packet(store, state),
                 "inheritedBriefs": carryover.brief_sources(store, state),
-                "clone": {k: clone[k] for k in ("path", "head", "tree") if k in clone},
+                "clone": {k: clone[k] for k in ("path", "head", "tree") if k in clone}, **recheck,
                 "instructions": "Read original briefs and run the cloned product first. If projectIntent is present, read its original source as persistent context, not a new task or permission. Do not open the source project's spec, registry, tasks or reviews. Save independent observations before requesting the reconciliation packet."}
     if kind == "knowledge":
         from . import executions
@@ -384,6 +395,10 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         packet.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                       blindReview=state.get("blindReview"), handoff=state.get("handoff"),
                       projectIntegrationReview=state.get("projectIntegrationReview"))
+        if state.get("policy", {}).get("focusedReview") is True and state.get("blindReview"):
+            from . import blind
+            # blindMapping indexes this list: earlier observations of matched items, then the recheck's own.
+            packet["blindObservations"] = blind.observations(store, state)
         if state.get("policy", {}).get("managedExecution"):
             packet["finalReportTemplate"] = {"basis": packet["basis"], "reviewer": "", "independent": True,
                 "unmapped": [], "checks": [{"requirement": r["id"], "criterion": text, "status": "", "note": "", "artifact": ""}
@@ -403,7 +418,13 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
             from . import execution_obligations
             packet["executionObligations"] = execution_obligations.view(store, state)
             packet["executionRule"] = "Map only exact presealed execution quotes/record SHA. Do not rewrite blind status or move product requirements. Future host handoff stays pending, never a product PASS."
-    if kind == "task" and task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview"):
+    if (kind == "task" and task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview")
+            and state.get("policy", {}).get("focusedReview") is True):
+        from . import integration
+        # The whole branch is read once at the end by the lens reviewers, not by this task's critic.
+        packet["projectReviewRole"] = "integration-reviewer"
+        packet["projectReviewLenses"] = integration.lenses(state)
+    elif kind == "task" and task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview"):
         from . import integration
         packet["branchReview"] = integration.context(store, state, task_id)
         packet["branchReviewAxes"] = list(integration.AXES)
@@ -422,14 +443,10 @@ ON_DEMAND = ("briefs", "spec", "discovery", "deliveryPlan", "briefMap", "feature
 
 def _focused_critic(store, state, packet, task, task_id, role, attempt):
     """Focused critic packet: the attempt's own diff (or the repair diff), and criteria files on demand."""
-    from . import focused_review, integration
-    final = task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview")
+    from . import focused_review
     repair = attempt.get("repair")
-    if final:
-        # Until the branch reviewers take over, the final critic still reads the whole branch.
-        packet["zoneChanges"] = integration.context(store, state, task_id)["changes"]
-        packet["zoneChangesScope"] = "branch"
-    elif role == "critic2" and repair and attempt.get("secondRound") is not True:
+    # The final task's critic reads its own attempt too: the branch belongs to the lens reviewers.
+    if role == "critic2" and repair and attempt.get("secondRound") is not True:
         packet["zoneChanges"] = focused_review.attempt_changes(store, state, task_id, attempt,
                                                                attempt.get("repairBaseline"), "ремонта")
         packet["zoneChangesScope"] = "repair"

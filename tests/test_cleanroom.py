@@ -427,5 +427,68 @@ class CleanroomTests(unittest.TestCase):
         self.assertTrue((self.store.run / receipt["output"]["file"]).is_file())
 
 
+class FocusedCleanFailureTests(unittest.TestCase):
+    """Focused runs (0.5.0): a failed clean step is a receipt with a reason and a blocker, never a PASS."""
+    setUp, tearDown, git, commit = CleanroomTests.setUp, CleanroomTests.tearDown, CleanroomTests.git, CleanroomTests.commit
+    execute = CleanroomTests.execute
+
+    def focus(self):
+        self.state["policy"] = {"focusedReview": True, "leanControl": True, "cleanClone": True}
+
+    def blind_record(self):
+        from aispa_core import blind
+        return blind.record(self.store, self.state, {"basis": "x", "reviewer": "fresh-acceptor", "independent": True,
+                                                     "observations": []})
+
+    def test_prepare_failure_is_a_receipt_with_reason_and_blocker(self):
+        self.focus()
+        (self.root / ".gitignore").write_text(".env\n", encoding="utf-8", newline="\n")
+        self.commit()
+        receipt = cleanroom.prepare(self.store, self.state)
+        self.assertFalse(receipt["passed"])
+        self.assertIn(".aispa/", receipt["reason"])
+        self.assertEqual((receipt["blocker"]["code"], receipt["blocker"]["stage"]), ("CLEAN_CLONE_FAILED", "prepare"))
+        self.assertTrue(cleanroom._receipt_valid(self.store, receipt))
+        self.state["cleanroom"] = receipt
+        self.assertFalse(cleanroom.current(self.store, self.state))
+        with self.assertRaisesRegex(Invalid, "успешный clean-run"):
+            self.blind_record()
+        self.assertEqual(self.state.get("finalRepairs", []), [])
+        self.state["policy"] = {}
+        with self.assertRaises(Invalid):
+            cleanroom.prepare(self.store, self.state)
+
+    def test_verify_failures_name_their_reason_and_keep_blind_closed(self):
+        self.focus()
+        self.state["cleanroom"] = cleanroom.prepare(self.store, self.state)
+        failed = self.execute("import sys; sys.exit(3)")
+        self.assertEqual(failed["blocker"]["stage"], "verify")
+        self.assertIn("кодом 3", failed["reason"])
+        self.assertTrue(cleanroom.current(self.store, self.state))
+        with self.assertRaisesRegex(Invalid, "успешный clean-run"):
+            self.blind_record()
+        timed = self.execute("import time; time.sleep(5)", timeout=0.1)
+        self.assertIn("Превышено время", timed["reason"])
+        shutil.rmtree(Path(self.state["cleanroom"]["path"]))
+        missing = self.execute()
+        self.assertFalse(missing["passed"])
+        self.assertIsNone(missing["exitCode"])
+        self.assertEqual(missing["blocker"]["code"], "CLEAN_CLONE_FAILED")
+        self.assertTrue((self.store.run / missing["output"]["file"]).is_file())
+        self.assertFalse(cleanroom.valid(self.store, self.state))
+        self.assertEqual(self.state.get("finalRepairs", []), [])
+
+    def test_successful_run_opens_the_blind_packet(self):
+        self.focus()
+        self.state["briefs"] = [dict(self.store.artifact("briefs", b"Ship it.\n", ".md"), id="B001")]
+        self.state["cleanroom"] = cleanroom.prepare(self.store, self.state)
+        self.execute()
+        self.assertNotIn("blocker", self.state["cleanrun"])
+        from aispa_core import packets
+        packet = packets.build(self.store, self.state, None, "blind")
+        self.assertEqual(packet["kind"], "blind")
+        self.assertNotIn("recheck", packet)
+
+
 if __name__ == "__main__":
     unittest.main()

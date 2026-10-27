@@ -89,7 +89,12 @@ def record_switch(store, state, mode, text):
 
 
 def wave_unchecked(state, number):
-    """Fast mode skips the whole-brief check of a wave opened in it, or any wave while fast is on."""
+    """Fast mode skips the whole-brief check of a wave opened in it, or any wave while fast is on.
+
+    Focused runs check no wave at all: the brief is checked at the start and in the blind acceptance.
+    """
+    if state.get("policy", {}).get("focusedReview") is True:
+        return True
     entry = state.get("waveEntries", {}).get(str(number)) or {}
     marked = {"wave": number, "plan": plan_basis(state)} in state.get("fastWaves", [])
     return is_fast(state) or entry.get("checkMode") == "fast" or marked
@@ -119,10 +124,22 @@ def skipped_checks(state):
 
 
 def _focused_skipped(state):
-    """Focused: modes differ only in reviews; RED, scenarios and the branch review stay."""
+    """Focused: modes differ only in reviews; RED, scenarios, the branch review and the blind acceptance stay.
+
+    Only what this run's mode really left out is named: a task without its own
+    critic (max gives every task one) and the second review of a heavy task.
+    """
     latest = [(state.get("taskHistory", {}).get(t["id"]) or [{}])[-1] for t in state["tasks"]]
-    without = [a for a in latest if a.get("tier") == "heavy" and a.get("criticRoles") == ["worker"]]
-    return ["Проверка тяжёлых задач отдельным критиком"] if without else []
+    latest = [a for a in latest if a.get("criticRoles")]
+    rows = []
+    if any(a.get("tier") == "heavy" and a["criticRoles"] == ["worker"] for a in latest):
+        rows.append("Проверка тяжёлых задач отдельным критиком")
+    if any(a.get("tier") != "heavy" and a["criticRoles"] == ["worker"] for a in latest):
+        rows.append("Проверка задач standard и light отдельным критиком")
+    if any(a.get("tier") == "heavy" and a["criticRoles"] != ["worker"] and a.get("secondRound") is not True
+           for a in latest):
+        rows.append("Второе независимое ревью тяжёлых задач")
+    return rows
 
 
 def history_view(store, state):

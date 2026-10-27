@@ -258,6 +258,25 @@ class TaskReportTests(unittest.TestCase):
             self.assertFalse(branch["evidence"])
             self.assertTrue(self.team.review("T02", number, self.input(self.assessed(draft))))
 
+    def test_focused_final_critic_gets_no_whole_branch_checks_or_form(self):
+        # The lens reviewers read the whole branch; the final task's critic fills only its own attempt.
+        self.state["policy"] = {"integrationReview": True, "focusedReview": True}
+        integration.capture(self.store, self.state)
+        self.state["integrationTask"] = "T02"
+        self.host.task("T02").update(dependsOn=["T01"], readZones=["."], wave=2)
+        self.team.prepare()
+        self.complete()
+        self.start("T02")
+        (self.root / "b.txt").write_text("integrated change", encoding="utf-8")
+        self.verify("T02")
+        self.team.submit("T02", self.report("T02"))
+        draft = self.unchanged(lambda: self.draft("critic1", "T02"))
+        self.assertNotIn("branchReview", draft)
+        self.assertFalse([c for c in draft["checks"] if c["criterion"].startswith("Вся ветка")])
+        card = self.store.json(self.state["taskHistory"]["T02"][-1]["roles"]["critic1"])
+        self.assertFalse([c for c in card["checks"] if c.startswith("Вся ветка")])
+        self.assertTrue(self.team.review("T02", 1, self.input(self.assessed(draft))))
+
     def parser(self):
         parser = argparse.ArgumentParser()
         controls.parsers(parser.add_subparsers(dest="action", required=True))

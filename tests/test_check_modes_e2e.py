@@ -46,6 +46,7 @@ class Scenario(unittest.TestCase):
     discover = test_cli.CliTests.discover
     idea = test_cli.CliTests.idea
     plan_with_review = test_cli.CliTests.plan_with_review
+    branch_review = test_cli.CliTests.branch_review
 
     def verdict(self, *args, ok):
         """Commands that report a refusal (ok false) exit 2 yet still print their JSON result."""
@@ -272,15 +273,10 @@ class Scenario(unittest.TestCase):
         if staged.returncode:  # nothing to commit when the workers changed no file
             self.git(*COMMIT, message)
 
-    def wave(self, number, failed=None):
-        """Wave check against the whole brief; requirements named in failed are reported as not tested."""
-        failed = failed or {}
-        ctx = self.context("wave")
-        report = {"basis": ctx["basis"], "reviewer": "synthetic", "independent": True, "unmapped": [],
-                  "checks": [{"requirement": r, "criterion": CRITERION[r], "status": failed.get(r, "passed"),
-                              "artifact": ctx["verification"]["output"]["file"], "note": "Проверено тестовой командой"}
-                             for r in self.requirements]}
-        return self.call("wave", str(number), "--file", self.input(report, "wave-%d.json" % number))
+    def no_wave_check(self, number):
+        """Focused runs check no wave: the brief is checked at the start and by the blind acceptance."""
+        refused = self.call("wave", str(number), "--file", self.input({}, "wave-%d.json" % number), expected=2)
+        self.assertIn("волны не сверяются; бриф проверяют на входе и в слепой приёмке", refused.stderr)
 
     def record_knowledge(self):
         self.call("finish", expected=2)  # the knowledge of the finished code comes first
@@ -307,8 +303,10 @@ class Scenario(unittest.TestCase):
         self.commit("document blockers")
         self.blocked = blocked
 
-    def finish_delivery(self, failed, blind_status=None, accepted=True, last_wave=None):
-        """Handoff, clean clone, blind observations and acceptance where `failed` maps requirement to status."""
+    def finish_delivery(self, failed, blind_status=None, accepted=True):
+        """Lens reviews of the branch, handoff, clean clone, blind observations and acceptance.
+
+        `failed` maps a requirement to its acceptance status, `blind_status` to its blind observation."""
         blocked = getattr(self, "blocked", ())
         documents = [{"path": "docs/open.md", "sha256": file_hash(self.root / "docs/open.md"),
                       "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
@@ -318,8 +316,9 @@ class Scenario(unittest.TestCase):
         run = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
         check = self.call("verify", "--purpose", "check", "--", sys.executable, "app.py")["receipt"]
         runner = self.runner
-        if last_wave:  # the last wave's check is bound to the verification it follows
-            self.wave(*last_wave)
+        refused = self.call("clean-prepare", expected=2)
+        self.assertIn("проверка всей ветки", refused.stderr)
+        self.branch_review()  # 1, 2 or 3 fresh lens reviewers by the mode, in every mode
         self.call("handoff", "--file", self.input({"schema": 1, "profile": "small",
             "documents": [{"path": "README.md", "sha256": file_hash(self.root / "README.md"),
                            "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
@@ -382,6 +381,11 @@ class FastModeE2E(Scenario):
         self.assertTrue(any(row.get('kind') == 'product-flow' and row['requirement'] == 'R02'
                             for row in state['gates']['acceptance']['failures']))
         self.assertNotIn('remaining', state)
+        self.assertEqual(len(state["projectIntegrationReviewHistory"]), 1)  # fast: one reviewer with every axis
+        # Fast repairs the divergence too: the failed acceptance opens a blind repair of exactly its item.
+        repair = self.call("final-repair", "open", "--file",
+                           self.input({"kind": "blind", "zones": [ZONE["R02"]]}, "repair.json"))["receipt"]["repair"]
+        self.assertEqual((repair["kind"], repair["items"]), ("blind", ["R02"]))
 
 
 class MaxModeE2E(Scenario):
@@ -437,16 +441,15 @@ class MaxModeE2E(Scenario):
         self.commit("T01 attempts")
         self.document_blockers("T01")
         self.call("verify", "--", sys.executable, "tests/check_output.py")
-        # Nothing of wave 1 was delivered, so its undelivered requirements do not fail the wave check.
-        self.assertTrue(self.wave(1, {r: "not_tested" for r in self.requirements})["ok"])
-        # T02 starts and closes on its own criteria, without the deferred T01 criteria.
+        # No wave is checked; T02 starts and closes on its own criteria, without the deferred T01 criteria.
+        self.no_wave_check(1)
         self.complete("T02", "R02")
         self.call("verify", "--", sys.executable, "tests/check_output.py")
-        self.wave(2, {"R01": "not_tested", "R03": "not_tested"})
+        self.no_wave_check(2)
         self.complete("T03", "R03")
         self.commit("tasks")
-        self.finish_delivery({"R01": "not_tested"}, {"R01": "not_tested"}, accepted=False,
-                             last_wave=(3, {"R01": "not_tested"}))
+        self.finish_delivery({"R01": "not_tested"}, {"R01": "not_tested"}, accepted=False)
+        self.assertEqual(len(Journal(self.root).load()["projectIntegrationReviewHistory"]), 3)  # max: three lenses
         self.call('finish', expected=2)
         state = Journal(self.root).load()
         self.assertEqual(state['tasks'][0]['status'], 'blocked')
@@ -469,7 +472,7 @@ class SwitchModeE2E(Scenario):
         self.complete("T01", "R01")
         self.assertEqual(self.attempt("T01")["checkMode"], "balanced")  # the mode its reviews were frozen under
         self.call("verify", "--", sys.executable, "tests/check_output.py")
-        self.wave(1, {"R02": "not_tested"})
+        self.no_wave_check(1)
         words = "Давай теперь максимально строго проверим вторую команду."
         self.call("check-mode", "max", "--file", self.input(words, "owner-words.md"))
         status = self.status()
@@ -495,7 +498,7 @@ class SwitchModeE2E(Scenario):
         # The attempt carries a check-mode authorization without an owner quote; delivery must still work.
         self.assertEqual(self.attempt("T02")["authorization"]["kind"], "check-mode")
         self.commit("tasks")
-        self.finish_delivery({}, last_wave=(2, {}))
+        self.finish_delivery({})
         self.record_knowledge()
         self.assertEqual(self.call("finish")["status"], "accepted")
         self.assertEqual(len(self.status()["checkModeHistory"]), 1)

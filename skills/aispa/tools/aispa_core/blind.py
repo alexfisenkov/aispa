@@ -63,7 +63,10 @@ def _reviewer(state, reviewer):
             used.update(attempt.get("writers", []))
             for replacement in attempt.get("actorHistory", []):
                 used.update(v for v in (replacement.get("previous"), replacement.get("replacement")) if isinstance(v, str))
-    require(reviewer not in used, "Итоговый blind-приёмщик должен отличаться от всех участников задач и их native ID")
+    if state.get("policy", {}).get("focusedReview") is True:
+        from . import final_repairs
+        used |= final_repairs.used_identities(state)
+    require(reviewer not in used, "Итоговый blind-приёмщик должен отличаться от всех участников задач, ремонтов и их native ID")
 
 
 def _positions(text, quote):
@@ -81,16 +84,50 @@ def _overlap(text, left, right):
                for a, b in _positions(text, left) for c, d in _positions(text, right))
 
 
-def _validate_report(store, state, report):
+def _focused(state):
+    return state.get("policy", {}).get("focusedReview") is True
+
+
+def item_quotes(store, state, items):
+    """Exact brief quotes of diverged requirements: all a recheck acceptor is told about them."""
+    requirements = {r["id"]: r for r in state["requirements"]}
+    rows = []
+    for rid in items:
+        require(rid in requirements, "Неизвестный пункт повторной приёмки: " + str(rid))
+        original = _original_requirement(requirements, requirements[rid])
+        require(nonempty(original.get("brief")) and nonempty(original.get("quote")),
+                "У пункта повторной приёмки нет дословной цитаты брифа: " + rid)
+        rows.append({"requirement": rid, "brief": original["brief"], "quote": original["quote"]})
+    return rows
+
+
+def _recheck(store, state, report):
+    """A recheck names the blind report it repeats and exactly the items of the checked repair."""
+    from . import final_repairs
+    require(_focused(state), "Повторная слепая приёмка есть только в прогонах с focusedReview")
+    repair = final_repairs.pending_recheck(state)
+    require(repair is not None, "Повторная слепая приёмка идёт только после проверенного ремонта расхождений")
+    require(report.get("recheckOf") == {key: repair["recheckOf"][key] for key in ("file", "sha256")},
+            "recheckOf должен указывать на blind-отчёт, по которому открыт ремонт " + repair["id"])
+    require(isinstance(report.get("items"), list) and sorted(report["items"]) == repair["items"]
+            and len(set(report["items"])) == len(report["items"]),
+            "Повторная приёмка проверяет ровно расходившиеся пункты: " + ", ".join(repair["items"]))
+    clone = (state.get("cleanroom") or {}).get("id")
+    require(clone and clone not in {saved.get("cleanroom") for saved in _history(store, state)},
+            "Повторная приёмка идёт только из нового чистого клона")
+    return repair, [[row["brief"], row["quote"]] for row in item_quotes(store, state, repair["items"])]
+
+
+def _validate_report(store, state, report, scope=None):
     require(isinstance(report, dict), "Blind-отчёт должен быть объектом JSON")
     require(report.get("basis") == basis(store, state), "Blind-отчёт устарел или относится к другому исходнику")
     _reviewer(state, report.get("reviewer"))
     phase_receipts.report_actor(store, state, "blind", report)
     require(report.get("independent") is True, "Нужен независимый blind-приёмщик")
-    return _observations(store, _sources(store, state), report)
+    return _observations(store, _sources(store, state), report, scope=scope)
 
 
-def _observations(store, sources, report):
+def _observations(store, sources, report, scope=None):
     rows = report.get("observations")
     require(isinstance(rows, list) and rows, "Нет независимых наблюдений по оригинальному брифу")
     seen, covered, artifacts = set(), set(), []
@@ -110,12 +147,19 @@ def _observations(store, sources, report):
                     "Историческое наблюдение выходит за текущие applicableQuotes")
         require(row.get("status") in ("passed", "failed", "not_tested", "blocked"), "Неизвестный статус blind-наблюдения")
         require(nonempty(row.get("note")), "Наблюдению нужно объяснение")
+        if scope is not None:
+            require(any(bid == b and _overlap(source["text"], quote, q) for b, q in scope),
+                    "Повторная приёмка наблюдает только расходившиеся пункты")
         if row["status"] == "passed":
             name = row.get("artifact")
             require(isinstance(name, str) and name.startswith("evidence/"), "Нужен файл доказательства из evidence/")
             path = confined(store.run, name)
             require(path.is_file() and path.stat().st_size > 0, "Нет непустого доказательства blind-наблюдения")
             artifacts.append({"file": name, "sha256": file_hash(path)})
+    if scope is not None:
+        require(all(any(row["brief"] == b and _overlap(sources[b]["text"], row["quote"], q) for row in rows)
+                    for b, q in scope), "Повторная приёмка должна наблюдать каждый расходившийся пункт")
+        return artifacts
     required = {bid for bid, source in sources.items() if source.get("applicableQuotes") is None or source["applicableQuotes"]}
     require(covered == required, "Blind-наблюдения должны охватывать каждый применимый оригинальный бриф")
     for bid, source in sources.items():
@@ -140,7 +184,9 @@ def _sealed_report(store, saved, run):
     _reviewer({}, report.get("reviewer"))
     sources = {source["id"]: source for source in candidate["briefs"]}
     require(len(sources) == len(candidate["briefs"]) and sources, "Повреждены исходные брифы blind-истории")
-    require(_observations(store, sources, report) == saved.get("artifacts") and
+    require(all(saved.get(key) == report.get(key) for key in ("recheckOf", "items")),
+            "Отчёт повторной приёмки не соответствует записи")
+    require(_observations(store, sources, report, scope=saved.get("scope")) == saved.get("artifacts") and
             all(artifact_valid(store, artifact) for artifact in saved["artifacts"]),
             "Изменено доказательство blind-истории")
     return report
@@ -168,16 +214,27 @@ def record(store, state, report):
     """Save the first immutable observation set for this candidate; no append."""
     require(cleanroom.valid(store, state), "Blind-наблюдения требуют актуальный успешный clean-run")
     history = _history(store, state)
-    artifacts = _validate_report(store, state, report)
+    recheck = isinstance(report, dict) and ("recheckOf" in report or "items" in report)
+    repair, scope = _recheck(store, state, report) if recheck else (None, None)
+    artifacts = _validate_report(store, state, report, scope)
     require(report["basis"] not in {saved["basis"] for saved in history},
             "Первичные blind-наблюдения этого кандидата уже зафиксированы; их нельзя заменить после раскрытия реестра")
     require(report["reviewer"] not in {saved["reviewer"] for saved in history},
             "Новому кандидату нужен новый итоговый приёмщик, не видевший прежний реестр")
+    extra = {}
+    if _focused(state):
+        from . import final_repairs
+        require(recheck or final_repairs.pending_recheck(state) is None,
+                "После ремонта расхождений нужна повторная приёмка с recheckOf и items, а не новая полная")
+        extra["cleanroom"] = state["cleanroom"]["id"]
+        if recheck:
+            extra.update(recheckOf=copy.deepcopy(report["recheckOf"]), items=sorted(report["items"]),
+                         scope=scope, repair=repair["id"])
     source = store.artifact("blind-reviews", _json(report), ".json")
     candidate = store.artifact("blind-candidates", _json(_candidate(store, state)), ".json")
     result = {"basis": report["basis"], "reviewer": report["reviewer"], "independent": True,
               "observations": copy.deepcopy(report["observations"]), "artifacts": artifacts,
-              "report": source, "candidate": candidate,
+              "report": source, "candidate": candidate, **extra,
               "previous": history[-1]["record"]["sha256"] if history else None, "at": timestamp()}
     result["record"] = store.artifact("blind-records", _json(result), ".json")
     state["blindHistory"] = copy.deepcopy(history)
@@ -194,7 +251,7 @@ def valid(store, state):
             return False
         _history(store, state)
         report = store.json(saved["report"])
-        return (_validate_report(store, state, report) == saved.get("artifacts")
+        return (_validate_report(store, state, report, saved.get("scope")) == saved.get("artifacts")
                 and phase_receipts.valid(store, state, "blind"))
     except (Invalid, OSError, ValueError, KeyError, TypeError, AttributeError):
         return False
@@ -238,6 +295,28 @@ def _scope_decision(state, target, supplied, sources):
     return decision
 
 
+def observations(store, state, saved=None):
+    """Observations acceptance maps: a recheck keeps the earlier ones of matched items and adds its own."""
+    saved = saved if saved is not None else state["blindReview"]
+    if "recheckOf" not in saved:
+        return copy.deepcopy(saved["observations"])
+    records = {row["report"]["sha256"]: row for row in _history(store, state)}
+    prior = records.get(saved["recheckOf"]["sha256"])
+    require(prior is not None and prior is not saved, "Повторная приёмка потеряла исходный blind-отчёт")
+    sources = _sources(store, state)
+    kept = [row for row in observations(store, state, prior)
+            if not any(row["brief"] == b and _overlap(sources[b]["text"], row["quote"], q) for b, q in saved["scope"])]
+    return kept + copy.deepcopy(saved["observations"])
+
+
+def divergent_items(store, state, report):
+    """Requirement IDs whose criteria or blind observations failed in this final report."""
+    failed = {row.get("requirement") for row in report.get("checks", [])
+              if isinstance(row, dict) and row.get("status") != "passed"}
+    failed |= {row["requirement"] for row in mapping(store, state, report) if row.get("kind") != "execution"}
+    return sorted(rid for rid in failed if isinstance(rid, str))
+
+
 def mapping(store, state, final_report):
     """Reconcile every observation, returning failures that final rows cannot erase."""
     require(valid(store, state), "Нет актуального неизменного blind-отчёта до итоговой сверки")
@@ -245,8 +324,9 @@ def mapping(store, state, final_report):
     require(isinstance(final_report, dict) and final_report.get("reviewer") == saved["reviewer"]
             and final_report.get("independent") is True, "Итоговую сверку должен продолжить тот же отдельный blind-приёмщик")
     require(final_report.get("blindReport") == saved["report"]["sha256"], "Нет ссылки на точный исходный blind-отчёт")
-    rows, observations = final_report.get("blindMapping"), saved["observations"]
-    require(isinstance(rows, list) and len(rows) == len(observations), "blindMapping должен содержать каждое наблюдение ровно один раз")
+    rows = final_report.get("blindMapping")
+    seen_rows = observations(store, state, saved) if _focused(state) else saved["observations"]
+    require(isinstance(rows, list) and len(rows) == len(seen_rows), "blindMapping должен содержать каждое наблюдение ровно один раз")
     unmapped = final_report.get("unmapped")
     require(isinstance(unmapped, list), "Итоговому отчёту нужен список unmapped")
     requirements = {r["id"]: r for r in state["requirements"]}
@@ -256,10 +336,10 @@ def mapping(store, state, final_report):
     for row in rows:
         require(isinstance(row, dict), "Некорректная строка blindMapping")
         index = row.get("observation")
-        require(type(index) is int and 0 <= index < len(observations) and index not in seen,
+        require(type(index) is int and 0 <= index < len(seen_rows) and index not in seen,
                 "Некорректный или повторный индекс наблюдения blindMapping")
         seen.add(index)
-        observation = observations[index]
+        observation = seen_rows[index]
         require("requirement" in row, "blindMapping должен явно назвать requirement или null")
         rid = row["requirement"]
         if "executionObligation" in row:
@@ -312,7 +392,7 @@ def mapping(store, state, final_report):
             for failed_id in sorted(ids):
                 failures.append({"requirement": failed_id, "criterion": "blind:%d" % index,
                                  "status": observation["status"], "note": observation["note"], "observation": index})
-    require(seen == set(range(len(observations))), "Потеряно исходное blind-наблюдение")
+    require(seen == set(range(len(seen_rows))), "Потеряно исходное blind-наблюдение")
     return failures
 
 

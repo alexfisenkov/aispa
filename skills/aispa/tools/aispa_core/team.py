@@ -519,6 +519,12 @@ def proof_provenance(store, state, tid, allowed_task_ids=None):
         return {"kind": "direct", "task": tid, "attempt": attempt["id"], "recordedAt": store.receipt_time(receipt)}
     if not historical_proof_valid(store, state, tid):
         return None
+    from . import final_repairs
+    if final_repairs.chain_proof(store, state, tid):
+        # Focused: after a final repair the proof stands at the branch-reviewed candidate; checked repairs cover the rest.
+        attempt = _latest(state, tid)
+        receipt = attempt.get("verifiedCompletion") if task_tiers.worker_only(attempt) else attempt["acceptance"]
+        return {"kind": "repair-chain", "task": tid, "attempt": attempt["id"], "recordedAt": store.receipt_time(receipt)}
     allowed = set(allowed_task_ids) if allowed_task_ids is not None else {t["id"] for t in state["tasks"]}
     for candidate in state["tasks"]:
         descendant = candidate["id"]
@@ -689,7 +695,9 @@ class TaskPipeline:
                 all_checks.append("Выбор automated/browser/process обоснован; наблюдения и свидетельства каждого способа действительно проверяют критерии")
         if self.s.get("policy", {}).get("errorBoundaryChecks") and role != "worker":
             all_checks.append("Проверены применимые отказные границы failureChecks, сохранность данных и реальные отрицательные сценарии")
-        if self.s.get("policy", {}).get("integrationReview") and tid == self.s.get("integrationTask") and role.startswith("critic"):
+        # Focused: the whole branch belongs to the lens reviewers; the final critic checks its attempt only.
+        if (self.s.get("policy", {}).get("integrationReview") and tid == self.s.get("integrationTask")
+                and role.startswith("critic") and not focused_review.enabled(self.s)):
             all_checks += ["Вся ветка: " + axis for axis in integration.AXES]
         card = {**context, "role": role, "specialization": specialization, "checks": all_checks,
                 "routing": routing(self.s, task, role, attempt, self.store), "discovery": self.s.get("discovery"),

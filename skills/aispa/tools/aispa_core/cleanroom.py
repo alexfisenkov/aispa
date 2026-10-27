@@ -270,9 +270,52 @@ def _remove_owned_clone(owned):
         shutil.rmtree(owned, onerror=retry_generated_file)
 
 
+def _focused(state):
+    return state.get("policy", {}).get("focusedReview") is True
+
+
+BLOCKER = "CLEAN_CLONE_FAILED"
+
+
+def _failure(store, state, stage, error, **fields):
+    """Focused: a failed clean step is a saved receipt with its reason and a blocker, never a silent PASS."""
+    reason = str(error) or type(error).__name__
+    receipt = {"id": uuid.uuid4().hex, "run": state["run"], "stage": stage, "passed": False, "reason": reason,
+               "blocker": {"code": BLOCKER, "stage": stage, "reason": reason,
+                           "next": "Устраните причину и повторите clean-prepare и clean-verify; цикл ремонта не расходуется"},
+               "at": timestamp(), "limitations": LIMITATIONS.copy(), **fields}
+    receipt["artifact"] = _artifact(store, "cleanroom", _json(receipt), ".failed.json")
+    return receipt
+
+
+def _reason(receipt):
+    if receipt["timedOut"]:
+        return "Превышено время clean-run: %s с" % receipt["timeout"]
+    if receipt["exitCode"] not in (0, None):
+        return "Команда clean-run завершилась с кодом %s" % receipt["exitCode"]
+    if receipt["truncated"] or receipt["redacted"]:
+        return "Вывод clean-run усечён или скрыт"
+    return "Исходник или клон изменились во время clean-run"
+
+
 def prepare(store, state):
-    """Clone exact current HEAD without local objects, credentials or working files."""
+    """Clone exact current HEAD without local objects, credentials or working files.
+
+    Focused runs get a failure receipt with the reason instead of an exception.
+    """
     _require(store.run is not None and state.get("run") == store.run.name, "Нет активного прогона")
+    if not _focused(state):
+        return _prepare(store, state)
+    from .verified_reads import ResourceLimit
+    try:
+        return _prepare(store, state)
+    except ResourceLimit:
+        raise
+    except (Invalid, OSError) as error:
+        return _failure(store, state, "prepare", error)
+
+
+def _prepare(store, state):
     source, records = _source(store)
     ident = uuid.uuid4().hex
     owned = store.home / "cleanrooms" / ident
@@ -492,7 +535,21 @@ def execute(store, state, command, timeout=600, *, on_admitted=None):
     joined = " ".join(command)
     _require(not SECRET.search(joined) and not any(v in joined for v in secrets),
              "Секреты нельзя передавать аргументами clean-run")
-    prepared, repo, home = _check_prepared(store, state)
+    if _focused(state):
+        from .verified_reads import ResourceLimit
+        try:
+            prepared, repo, home = _check_prepared(store, state)
+        except ResourceLimit:
+            raise
+        except (Invalid, OSError, KeyError, ValueError, TypeError) as error:
+            note = ("AISpa: clean-run did not start: %s\n" % error).encode()
+            prepared = state.get("cleanroom") if isinstance(state.get("cleanroom"), dict) else {}
+            return _failure(store, state, "verify", error, command=list(command), timeout=timeout, exitCode=None,
+                            timedOut=False, truncated=False, redacted=False, changedSource=False, changedCode=False,
+                            prepared=prepared.get("id"), sourceCode=prepared.get("sourceCode"),
+                            output=_artifact(store, "evidence", note, ".cleanrun.log"))
+    else:
+        prepared, repo, home = _check_prepared(store, state)
     environment = _environment(home)
     execution_command = _execution_command(command, store.root, repo, environment)
     _guard_command(command, store.root, repo, environment)
@@ -525,6 +582,11 @@ def execute(store, state, command, timeout=600, *, on_admitted=None):
                          and clone_current and not source_changed,
                "output": artifact, "durationSeconds": round(time.monotonic() - started, 3),
                "at": timestamp(), "limitations": LIMITATIONS.copy()}
+    if _focused(state) and not receipt["passed"]:
+        reason = _reason(receipt)
+        receipt.update(stage="verify", reason=reason, blocker={
+            "code": BLOCKER, "stage": "verify", "reason": reason,
+            "next": "Устраните причину и повторите clean-verify; цикл ремонта не расходуется"})
     receipt["artifact"] = _artifact(store, "cleanroom", _json(receipt), ".run.json")
     return receipt
 

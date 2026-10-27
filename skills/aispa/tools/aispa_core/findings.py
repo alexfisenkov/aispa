@@ -60,6 +60,28 @@ def collect(state, source, findings):
     return added
 
 
+def collect_branch(state, source, findings, reviewer):
+    """Findings of a branch reviewer: an independent reader of the whole branch confirms them by raising them.
+
+    Warnings and blocking findings (with their class) both wait for the one final repair.
+    """
+    require(enabled(state), "Список находок ведётся только в прогонах с focusedReview")
+    items, origin = _items(state), _source(source)
+    require(origin["kind"] == "branch", "Находки ревьюера ветки требуют источник branch")
+    at, added = timestamp(), []
+    for finding in findings or []:
+        if not isinstance(finding, dict) or finding.get("severity") not in ("warning", "blocking"):
+            continue
+        row = {"id": "W%03d" % (len(items) + 1), "source": copy.deepcopy(origin),
+               "criterion": finding["criterion"], "note": finding["text"], "status": "confirmed",
+               "resolution": {"status": "confirmed", "note": "Найдено проверкой всей ветки", "reviewer": reviewer, "at": at}}
+        if finding["severity"] == "blocking":
+            row.update(severity="blocking", blockingClass=finding["blockingClass"])
+        items.append(row)
+        added.append(row["id"])
+    return added
+
+
 def triage(state, decisions, reviewer):
     """Move findings along their transitions; each decision needs a reason."""
     require(enabled(state), "Список находок ведётся только в прогонах с focusedReview")
@@ -86,6 +108,10 @@ def triage(state, decisions, reviewer):
 
 def open_items(state):
     return [copy.deepcopy(row) for row in state.get("collectedFindings", []) if row.get("status") == "open"]
+
+
+def with_status(state, status):
+    return [copy.deepcopy(row) for row in state.get("collectedFindings", []) if row.get("status") == status]
 
 
 def view(state):

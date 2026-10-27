@@ -14,6 +14,9 @@ from . import timing, phase_receipts, execution_obligations, measured_estimate
 from . import autonomy, project_documents, preflight
 from .team import TaskPipeline, _history_valid, historical_proof_valid, task_proof_valid
 from . import check_modes, project_context, discovery, carryover, cleanroom, blind, process_runner, ideas, planning, knowledge, product, handoff, executions, briefmap, design_contract, participants, integration, test_intent, task_tiers, owner_task_attempt
+from . import final_repairs
+
+WAVES_UNCHECKED = "В этой политике волны не сверяются; бриф проверяют на входе и в слепой приёмке"
 
 
 SECRET = re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -66,6 +69,18 @@ class Workflow:
         if work_progress.begin(self.s, phase, at):
             self.save("work-progress-began:" + phase, at)
         return work_progress.view(self.s, at)
+
+    def focused_stage(self, phase):
+        """Focused runs: the branch review and the blind acceptance start their measured stage by themselves.
+
+        measured_estimate times the stages branchReview and blind by workProgress
+        of the phases integration and blind; the engine begins them at the first
+        branch context or review and at clean-prepare or blind. Idempotent while
+        the phase runs; a waiting or closed run starts nothing.
+        """
+        if not self._focused() or self.s.get("status") != "running" or timing.waiting(self.s):
+            return None
+        return self.progress_begin(phase)
 
     def resource_admitted(self, kind, at=None):
         """Caller holds the journal lock; persist admission before native work."""
@@ -519,6 +534,7 @@ class Workflow:
         return self.pipeline.accept(tid, path)
 
     def wave(self, number, path):
+        require(not self._focused(), WAVES_UNCHECKED)
         self.build_ready()
         require(verified(self.store, self.s), "Нет актуальной общей проверки кода перед сверкой волны")
         require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
@@ -538,8 +554,34 @@ class Workflow:
         self.save("wave-reviewed:" + str(number))
         return passed
 
+    def _focused(self):
+        return self.s.get("policy", {}).get("focusedReview") is True
+
+    def _task_proofs_current(self):
+        """After a final repair, task proofs stand at the branch-reviewed candidate and the chain covers the rest."""
+        if final_repairs.repaired(self.s):
+            return final_repairs.tasks_settled(self.store, self.s)
+        return all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed")
+
+    def _branch_ready(self):
+        """Focused, every mode: lenses recorded, warnings decided, repairs checked up to the current code."""
+        if not self.s.get("policy", {}).get("integrationReview"):
+            return
+        require(integration.branch_reviewed(self.store, self.s),
+                "До сдачи нужна проверка всей ветки: integration-review по каждой линзе режима ("
+                + "; ".join("+".join(lens) for lens in integration.lenses(self.s))
+                + "), ревьюер линзы behavior разбирает все открытые предупреждения")
+        require(final_repairs.findings_settled(self.s),
+                "Подтверждённые находки ветки ещё не исправлены: final-repair open --file (kind findings)")
+        require(final_repairs.chain_current(self.store, self.s),
+                "Цепочка кандидатов не заканчивается текущим кодом: каждое изменение после проверки ветки проверяет final-repair")
+        require(integration.proof_valid(self.store, self.s),
+                "Доказательства задач изменились после проверки ветки")
+
     def handoff_ready(self):
-        if self.s.get("policy", {}).get("integrationReview") and not check_modes.is_fast(self.s):
+        if self._focused():
+            self._branch_ready()
+        elif self.s.get("policy", {}).get("integrationReview") and not check_modes.is_fast(self.s):
             require(integration.proof_valid(self.store, self.s),
                     "До сдачи нужны актуальное полное ревью финальной задачи по её политике и отдельная приёмка")
         if self.s.get("policy", {}).get("deliveryDocs"):
@@ -549,13 +591,14 @@ class Workflow:
     def acceptance(self, path):
         self.build_ready()
         self.handoff_ready()
+        require(final_repairs.chain_current(self.store, self.s),
+                "Цепочка кандидатов не заканчивается текущим кодом: изменения после проверки ветки проверяет final-repair")
         if self.s.get("policy", {}).get("cleanClone"):
             require(cleanroom.valid(self.store, self.s), "Для итоговой приёмки нужен актуальный успешный запуск из чистого клона")
             require(blind.valid(self.store, self.s), "Сначала нужны независимые наблюдения из чистого клона")
         require(verified(self.store, self.s), "Нет успешной проверки текущего кода")
         require(all(t["status"] in ("completed", "blocked") for t in self.s["tasks"]), "Есть незавершённые задачи без результата или блокера")
-        require(all(task_proof_valid(self.store, self.s, t["id"]) for t in self.s["tasks"] if t["status"] == "completed"),
-                "Не все завершённые задачи имеют действительную цепочку приёмки")
+        require(self._task_proofs_current(), "Не все завершённые задачи имеют действительную цепочку приёмки")
         text = self.read_input(path); report = json.loads(text)
         report_header(self.store, self.s, report, "acceptance")
         author = phase_receipts.report_actor(self.store, self.s, "acceptance", report)
@@ -642,9 +685,11 @@ class Workflow:
         if self.s.get("policy", {}).get("projectKnowledge"):
             require(knowledge.valid(self.store, self.s), "До сдачи сохраните проверенные знания о готовом коде: knowledge-record")
         self.store.git("rev-parse", "HEAD")
+        repaired = final_repairs.repaired(self.s)
+        require(not repaired or final_repairs.tasks_settled(self.store, self.s), "Устарела или повреждена цепочка проверки задачи")
         for task in self.s["tasks"]:
             if task["status"] == "completed":
-                require(task_proof_valid(self.store, self.s, task["id"]), "Устарела или повреждена цепочка проверки задачи")
+                require(repaired or task_proof_valid(self.store, self.s, task["id"]), "Устарела или повреждена цепочка проверки задачи")
                 proof = task.get("proof", {})
                 require(artifact_valid(self.store, proof.get("report", {})) and all(
                     artifact_valid(self.store, a) for a in proof.get("artifacts", [])), "Повреждены доказательства задачи")
@@ -656,7 +701,8 @@ class Workflow:
         at = timestamp()
         execution_results = execution_obligations.evaluate(self.store, self.s, at)
         execution_remaining = [row for row in execution_results if row["status"] != "passed"]
-        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited or execution_remaining or inherited_execution else "accepted"
+        leftover = final_repairs.remaining_findings(self.s) if self._focused() else []
+        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited or execution_remaining or inherited_execution or leftover else "accepted"
         self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked,
                                "deferredTasks": sorted(check_modes.deferred_ids(self.s, self.store)),
                                "inherited": [{"id": item["id"], "status": item["status"], "text": item.get("requirement", {}).get("text", "")} for item in inherited]}
@@ -668,9 +714,12 @@ class Workflow:
             self.s.setdefault("executionResultHistory", []).append(ref)
         if inherited_execution:
             self.s["remaining"]["inheritedExecution"] = inherited_execution
+        if self._focused():
+            self.s["remaining"]["findings"] = leftover
         if check_modes.enabled(self.s):
             gate = self.s["gates"]["acceptance"]
-            if check_modes.is_fast(self.s) and not gate.get("passed"):
+            # Focused: a failure after both blind repair cycles is delivered with its list in every mode.
+            if (self._focused() or check_modes.is_fast(self.s)) and not gate.get("passed"):
                 self.s["status"] = "delivered_with_remaining"
                 if gate.get("unmapped"):
                     self.s["remaining"]["unmapped"] = gate["unmapped"]

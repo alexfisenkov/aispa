@@ -123,14 +123,32 @@ class ReservedCommandTests(RunFixture):
         participant = ["--runtime", "claude-code", "--native-id", "agent-1", "--session", "session-1",
                        "--model", "claude-sonnet-5-5", "--reasoning", "medium"]
         before = (self.run_directory / "events.jsonl").read_bytes()
-        for command, ticket in ((["final-repair", "open", "--file", str(evidence)], "06"),
-                                (["final-repair", "assign", "--role", "checker", *participant], "06"),
-                                (["task-open", "T01", "--role", "worker", *participant], "10"),
+        for command, ticket in ((["task-open", "T01", "--role", "worker", *participant], "10"),
                                 (["task-close", "T01", "--role", "worker", "--file", str(evidence)], "10")):
             with self.subTest(command=command):
                 result = run(self.cli, self.root, *command)
                 self.assertEqual(result.returncode, 2, result.stdout)
                 self.assertIn("задаче " + ticket, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual((self.run_directory / "events.jsonl").read_bytes(), before)
+
+    def test_final_repair_is_real_and_refuses_before_the_build_without_writing(self):
+        # Ticket 06 replaced the placeholder: an unsealed run has no build, so every step is refused unwritten.
+        self.init()
+        evidence = self.root / "report.json"
+        evidence.write_text('{"kind": "findings", "zones": ["app.py"]}', encoding="utf-8")
+        participant = ["--runtime", "claude-code", "--native-id", "agent-1", "--session", "session-1",
+                       "--model", "claude-sonnet-5-5", "--reasoning", "medium"]
+        before = (self.run_directory / "events.jsonl").read_bytes()
+        for command in (["final-repair", "open", "--file", str(evidence)],
+                        ["final-repair", "assign", "--role", "checker", *participant],
+                        ["final-repair", "submit", "--file", str(evidence)],
+                        ["final-repair", "check", "--file", str(evidence)]):
+            with self.subTest(command=command):
+                result = run(self.cli, self.root, *command)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertNotIn("задаче 06", result.stderr)
+                self.assertIn("Бриф изменён; нужна повторная фиксация", result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
         self.assertEqual((self.run_directory / "events.jsonl").read_bytes(), before)
 

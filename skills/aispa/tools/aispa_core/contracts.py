@@ -118,7 +118,9 @@ def basis(store, state, kind, task_id=None):
         body["progress"] = [{"id": t["id"], "status": t["status"], "proof": t.get("proof")} for t in state["tasks"]]
     else:
         raise Invalid("Неизвестный вид проверки")
-    body["verification"] = state["verification"]
+    # Focused acceptance: freshness follows the code; verified() checks the general run separately.
+    if not (kind == "acceptance" and state.get("policy", {}).get("focusedReview") is True):
+        body["verification"] = state["verification"]
     if kind == "acceptance":
         body.update(cleanroom=state.get("cleanroom"), cleanrun=state.get("cleanrun"),
                     carryover=state.get("carryover"), blindReview=state.get("blindReview"))
@@ -166,11 +168,22 @@ def gate_current(store, state, name):
 
 def _gate_check(store, state, name, settled=False, *, outcome=True):
     """settled: the owner's fast mode accepts a recorded, current acceptance even when it found failures;
-    max does so only when every failure belongs to a deferred core task (deferredSettled)."""
+    max does so only when every failure belongs to a deferred core task (deferredSettled).
+
+    Focused runs treat a failure the same in every mode: it is settled only
+    after both blind repair cycles were spent and rechecked, or when it has no
+    requirement-bound item to repair (only unmapped or unbound observations),
+    or by max's deferredSettled.
+    """
     gate = state["gates"].get(name)
+    focused = state.get("policy", {}).get("focusedReview") is True
     if settled and name == "acceptance" and gate:
         from . import check_modes
-        settled = check_modes.is_fast(state) or (check_modes.is_max(state) and bool(gate.get("deferredSettled")))
+        if focused:
+            from . import final_repairs
+            settled = final_repairs.blind_settled(state) or (check_modes.is_max(state) and bool(gate.get("deferredSettled")))
+        else:
+            settled = check_modes.is_fast(state) or (check_modes.is_max(state) and bool(gate.get("deferredSettled")))
     else:
         settled = False
     if not gate or outcome and not (gate.get("passed") or settled):
@@ -205,8 +218,9 @@ def _gate_check(store, state, name, settled=False, *, outcome=True):
             return False
     if name == "acceptance" and state.get("policy", {}).get("integrationReview"):
         from . import check_modes, integration
-        # The owner's fast mode skips the whole-project review, as handoff_ready does.
-        if not check_modes.is_fast(state) and not integration.proof_valid(store, state):
+        # The owner's fast mode skips the whole-project review, as handoff_ready does;
+        # focused runs review the branch in every mode (one lens in fast).
+        if (focused or not check_modes.is_fast(state)) and not integration.proof_valid(store, state):
             return False
     if name == "acceptance" and state.get("policy", {}).get("cleanClone"):
         from .cleanroom import valid
@@ -229,7 +243,10 @@ def _gate_check(store, state, name, settled=False, *, outcome=True):
             raise
         except (Invalid, OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
             return False
-        if outcome and flow_failures:
+        # D04: in focused runs a settled failed acceptance (both blind cycles spent, or nothing
+        # to repair) is delivered with its flow failures listed in remaining.checks; the
+        # veto still forbids `accepted`, since the gate itself is recorded as failed.
+        if outcome and flow_failures and not (focused and settled and gate.get("passed") is False):
             return False
     return bool(gate and (not outcome or gate["passed"] or settled) and gate["basis"] == basis(store, state, name)
                 and artifact_valid(store, gate["report"])

@@ -708,5 +708,32 @@ class CheckFlagTests(unittest.TestCase):
 del Lean  # keep the loader from collecting the lean suite a second time
 
 
+
+class FocusedSkippedChecksTests(unittest.TestCase):
+    """Focused (0.5.0): only what the mode really left out is named; waves are never checked."""
+
+    def state(self, mode, attempts):
+        from aispa_core import check_modes
+        tasks = [{"id": "T%02d" % n, "wave": 1} for n in range(1, len(attempts) + 1)]
+        history = {t["id"]: [dict(a, id=t["id"] + "-A01")] for t, a in zip(tasks, attempts)}
+        return {"policy": {"leanControl": True, "focusedReview": True}, "checkMode": mode, "tasks": tasks,
+                "taskHistory": history}
+
+    def test_rows_follow_the_frozen_review_roles(self):
+        from aispa_core import check_modes
+        full = ["worker", "critic1", "critic2"]
+        heavy_alone = {"tier": "heavy", "criticRoles": ["worker"]}
+        standard = {"tier": "standard", "criticRoles": ["worker"]}
+        heavy_once = {"tier": "heavy", "criticRoles": full, "secondRound": False}
+        heavy_twice = {"tier": "heavy", "criticRoles": full, "secondRound": True}
+        self.assertEqual(check_modes.skipped_checks(self.state("fast", [heavy_alone, standard])),
+                         ["Проверка тяжёлых задач отдельным критиком", "Проверка задач standard и light отдельным критиком"])
+        self.assertEqual(check_modes.skipped_checks(self.state("balanced", [heavy_once, standard])),
+                         ["Проверка задач standard и light отдельным критиком", "Второе независимое ревью тяжёлых задач"])
+        self.assertEqual(check_modes.skipped_checks(self.state("max", [heavy_twice, dict(standard, criticRoles=full)])), [])
+        state = self.state("fast", [heavy_twice])
+        self.assertTrue(all(check_modes.wave_unchecked(dict(state, checkMode=m), 1) for m in check_modes.MODES))
+        self.assertNotIn("Сверка волн с полным брифом", check_modes.skipped_checks(state))
+
 if __name__ == "__main__":
     unittest.main()

@@ -294,7 +294,8 @@ class CliTests(unittest.TestCase):
         state = self.call("status", cli=pinned)
         self.assertEqual(state["decisions"][0]["text"], "Новая запись")
 
-    def test_full_cli_scenario(self):
+    def deliver_one_task(self):
+        """Brief to a closed final task T01 through the CLI; returns the report builder and the participant helper."""
         self.command_cwd = Path(self.temp.name) / "посторонний каталог 🙂"
         self.command_cwd.mkdir()
         self.init()
@@ -441,11 +442,15 @@ class CliTests(unittest.TestCase):
             if role in ("critic1", "critic2"):
                 report["findings"] = []
                 self.assertEqual(len(draft["trace"]), len(ctx["traceRequirements"]))
-                self.assertEqual(ctx["zoneChangesScope"], "branch")  # T01 is the final task
+                # Focused: the final task's critic reads its attempt; the whole branch goes to the lens reviewers.
+                self.assertEqual(ctx["zoneChangesScope"], "attempt")
+                self.assertEqual(ctx["projectReviewLenses"], [["behavior", "data_security"],
+                                                              ["integration", "maintainability", "test_quality"]])
+                self.assertNotIn("branchReview", draft)
+                self.assertFalse([c for c in checks if c["criterion"].startswith("Вся ветка")])
                 report.update(inheritedProofs=ctx["inheritedProofs"],
                     trace=[{"requirement": r["id"], "brief": r["brief"], "quote": r["quote"], "result": "aligned",
                             "note": "Сопоставлено с брифом", "artifact": ctx["verification"]["output"]["file"]} for r in ctx["traceRequirements"]])
-                report["branchReview"] = fixtures.branch_review(self.root, "T01", ctx["verification"]["output"]["file"])
             if role == "critic2":
                 report.update(previousReport=ctx["rounds"][0]["report"]["sha256"], repairReceipt=None, resolutions=[])
             if role == "acceptor":
@@ -456,7 +461,9 @@ class CliTests(unittest.TestCase):
                 report['productFlowReview'] = fixtures.final_flows(ctx, self.run, report['checks'])
                 report["cleanrun"] = (ctx.get("cleanrun") or {}).get("artifact", {}).get("sha256")
                 report["blindReport"] = ctx["blindReview"]["report"]["sha256"]
-                report["blindMapping"] = [{"observation": 0, "requirement": "R01"}]
+                # Focused: blindMapping indexes the packet's list (a recheck replaces the diverged item's rows).
+                report["blindMapping"] = [{"observation": index, "requirement": "R01"}
+                                          for index, _row in enumerate(ctx.get("blindObservations") or [None])]
             return report
 
         self.call("submit", "T01", "--file", self.input(proof("task", "T01", ("--task", "T01", "--role", "worker"))))
@@ -465,15 +472,74 @@ class CliTests(unittest.TestCase):
                   "--native-id", "must-not-run", "--session", "test-session", expected=2)
         task_view = next(t for t in self.call("status")["tasks"] if t["id"] == "T01")
         self.assertEqual((task_view["status"], task_view["completionKind"]), ("completed", "critic_acceptance"))
+        return proof, participant, coordinator
+
+    def handoff(self):
+        """Run and check receipts of the current code, then the tracked handoff documents that cite them."""
+        from aispa_core.store import file_hash
+        runner = "python" if os.name == "nt" else "python3"
+        run = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
+        check = self.call("verify", "--purpose", "check", "--", sys.executable, "app.py")["receipt"]
+        self.call("handoff", "--file", self.input({"schema": 1, "profile": "small",
+            "documents": [{"path": "README.md", "sha256": file_hash(self.root / "README.md"),
+                           "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
+                           "covers": {"quickstart": "Quickstart"}}],
+            "notApplicable": {"architecture": "One print statement has no separate architecture.",
+                              "decisions": "No material technical alternative in this synthetic fixture.",
+                              "glossary": "No domain terminology beyond standard output."},
+            "commands": {"check": {"receipt": check, "document": "README.md", "heading": "Quickstart",
+                                  "display": runner + " app.py", "runner": runner},
+                         "run": {"receipt": run, "document": "README.md", "heading": "Quickstart",
+                                 "display": runner + " app.py", "runner": runner},
+                         "install": {"notApplicable": "Python standard library only."},
+                         "singleTest": {"notApplicable": "The whole one-statement program is the check."}},
+            "obligations": []}, "handoff.json"))
+        return run, check
+
+    def branch_review(self, warnings=None):
+        """Focused: every lens of the mode by its own fresh integration reviewer through the CLI.
+
+        warnings maps a lens number to the warning findings its reviewer raises (confirmed at once)."""
+        from aispa_core.store import Journal
+        evidence = Journal(self.root).load()["verification"]["output"]["file"]
+        pending = self.call("integration-review")["pendingLenses"]
+        for number, lens in enumerate(pending, 1):
+            actor = self.call("participant", "--role", "integration-reviewer", "--runtime", "codex",
+                              *route_args("integration-reviewer"), "--native-id", "synthetic-lens-%d" % number,
+                              "--session", "test-session")["receipt"]["actor"]
+            ctx = self.call("integration-review", "--actor", actor)
+            self.assertEqual(ctx["pendingLenses"][0], lens)
+            report = ctx["template"]
+            self.assertEqual((report["lens"], report["reviewer"]), (lens, actor))
+            branch = report["branchReview"]
+            self.assertEqual([row["axis"] for row in branch["axes"]], lens)
+            branch.update(note="Synthetic structural lens review of the whole branch diff.", evidence=evidence,
+                          axes=[dict(row, status="passed", note="Synthetic fixture inspected " + row["axis"],
+                                     evidence=evidence) for row in branch["axes"]])
+            report["findings"] = list((warnings or {}).get(number, []))
+            report["verdict"] = "PASS"
+            if "triage" in report:
+                report["triage"] = [dict(row, status="confirmed", note="Synthetic: a real issue") for row in report["triage"]]
+            self.call("integration-review", "--actor", actor, "--file", self.input(report, "lens-%d.json" % number))
+
+    def test_full_cli_scenario(self):
+        from aispa_core.store import Journal, file_hash
+        proof, participant, coordinator = self.deliver_one_task()
+        runner = "python" if os.name == "nt" else "python3"
         run = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
         check = self.call("verify", "--purpose", "check", "--", sys.executable, "app.py")["receipt"]
         commands = self.call("commands")
         self.assertEqual(commands["count"], 3)
         self.assertEqual(self.call("commands", "--receipt", run["sha256"])["purpose"], "run")
-        # The one final wave is derived only from full independent final acceptance.
+        # No wave is checked: the brief is checked at the start and by the blind acceptance from a clean clone.
+        refused = self.call("wave", "1", "--file", self.input({}), expected=2)
+        self.assertIn("волны не сверяются", refused.stderr)
         self.call("context", "--kind", "acceptance", expected=2)
         self.call("acceptance", "--file", self.input({}), expected=2)
-        self.call("clean-prepare", expected=2)
+        refused = self.call("clean-prepare", expected=2)
+        self.assertIn("проверка всей ветки", refused.stderr)
+        self.branch_review()
+        self.call("clean-prepare", expected=2)  # the handoff documents come first
         self.call("handoff", "--file", self.input({"schema": 1, "profile": "small",
             "documents": [{"path": "README.md", "sha256": file_hash(self.root / "README.md"),
                            "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
@@ -563,6 +629,225 @@ class CliTests(unittest.TestCase):
         self.call("knowledge-compact")
         self.assertEqual(len(self.call("knowledge", "--path", "app.py")["entries"]), 1)
         self.call("finish", expected=2)
+
+    def final_repair(self, kind, tag, change):
+        """One final repair through the CLI: open, fresh worker, change, submit, fresh checker reading the diff."""
+        opened = self.call("final-repair", "open", "--file",
+                           self.input({"kind": kind, "zones": ["USAGE.md"]}, "repair-open-%s.json" % tag))["receipt"]
+        repair = opened["repair"]
+        self.assertEqual(repair["kind"], kind)
+        people = {}
+        for role in ("worker", "checker"):
+            if role == "checker":
+                (self.root / "USAGE.md").write_text(change, encoding="utf-8", newline="\n")
+                self.git("add", "USAGE.md")
+                self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "repair " + tag)
+                submitted = self.call("final-repair", "submit", "--file", self.input({
+                    "repair": repair["id"], "worker": people["worker"]["actor"], "summary": "Synthetic repair " + tag,
+                    "items": [{"id": i, "note": "Synthetic: changed the usage note"} for i in repair["items"]]},
+                    "repair-submit-%s.json" % tag))["receipt"]
+                self.assertEqual(submitted["changes"], ["USAGE.md"])
+            people[role] = self.call("final-repair", "assign", "--role", role, "--runtime", "codex",
+                                     *route_args("worker" if role == "worker" else "integration-reviewer"),
+                                     "--native-id", "synthetic-repair-%s-%s" % (role, tag),
+                                     "--session", "test-session")["receipt"]
+        packet = people["checker"]["packet"]
+        self.assertEqual([row["path"] for row in packet["changes"]], ["USAGE.md"])  # the checker reads the diff only
+        checked = self.call("final-repair", "check", "--file", self.input({
+            "repair": repair["id"], "checker": people["checker"]["actor"], "independent": True,
+            "candidate": packet["candidate"], "verdict": "PASS",
+            "items": [{"id": i, "status": "fixed", "note": "Synthetic: the diff fixes it"} for i in repair["items"]]},
+            "repair-check-%s.json" % tag))["receipt"]
+        self.assertEqual((checked["verdict"], checked["status"]), ("PASS", "passed"))
+        return repair
+
+    def progress(self):
+        from aispa_core.store import Journal
+        return Journal(self.root).load().get("workProgress") or {}
+
+    def test_focused_finale_repairs_findings_and_rechecks_the_blind_divergence(self):
+        """Lenses of the branch, one findings repair, a failed blind acceptance, its repair and a fresh recheck."""
+        from aispa_core.store import Journal, file_hash
+        self.command_env["AISPA_CALIBRATION_FILE"] = str(Path(self.temp.name) / "calibration.json")
+        (self.root / "USAGE.md").write_text("Usage: run app.py\n", encoding="utf-8", newline="\n")
+        self.git("add", "USAGE.md")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "usage note")
+        proof, participant, _coordinator = self.deliver_one_task()
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        # The engine starts the measured branch-review stage at the first branch context.
+        self.assertEqual(self.call("integration-review")["pendingLenses"],
+                         [["behavior", "data_security"], ["integration", "maintainability", "test_quality"]])
+        self.assertEqual((self.progress()["phase"], self.progress().get("finishedAt")), ("integration", None))
+        warning = {"id": "N1", "severity": "warning", "criterion": "Выводит ready",
+                   "text": "The usage note does not say what the command prints"}
+        self.branch_review({1: [warning]})
+        journal = Journal(self.root)
+        journal.load()
+        events = [row["event"] for row in journal.read_journal(include_events=True)["events"]]
+        self.assertEqual(events.count("project-integration-lens-reviewed"), 1)  # the stage outlives the first lens
+        self.assertEqual(events.count("project-integration-reviewed"), 1)
+        self.assertTrue(self.progress()["finishedAt"])
+        # A context call after the last lens neither reopens the closed stage nor writes an event.
+        finished = self.progress()
+        self.assertEqual(self.call("integration-review")["pendingLenses"], [])
+        self.assertEqual(self.progress(), finished)
+        journal.load()
+        self.assertEqual(len(journal.read_journal(include_events=True)["events"]), len(events))
+        self.assertEqual([(row["id"], row["status"]) for row in self.call("findings")["findings"]], [("W001", "confirmed")])
+        refused = self.call("clean-prepare", expected=2)
+        self.assertIn("final-repair", refused.stderr)
+        self.final_repair("findings", "findings", "Usage: run app.py; it prints ready\n")
+        self.assertEqual(self.call("findings", "--status", "fixed")["count"], 1)
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        self.handoff()
+        self.call("clean-prepare")
+        self.assertEqual((self.progress()["phase"], self.progress().get("finishedAt")), ("blind", None))
+        clean = self.call("clean-verify", "--", sys.executable, "-B", "tests/check_output.py")["receipt"]
+        self.blind_actor = participant("blind")
+        blind = self.context("blind")
+        self.assertNotIn("recheck", blind)
+        self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": self.blind_actor, "independent": True,
+                  "observations": [{"brief": "B001", "quote": "Команда выводит ready", "status": "failed",
+                                    "note": "Synthetic: the documented output was not observed"}]}, "blind-1.json"))
+        self.assertTrue(self.progress()["finishedAt"])
+        first_blind = Journal(self.root).load()["blindReview"]["report"]
+        failed = self.call("acceptance", "--file", self.input(proof("acceptance", "R01"), "acceptance-1.json"), expected=2)
+        self.assertFalse(json.loads(failed.stdout)["ok"])
+        refused = self.call("finish", expected=2)  # a repairable divergence is repaired before delivery
+        self.assertIn("Обязательное ядро", refused.stderr)
+        repair = self.final_repair("blind", "blind", "Usage: run app.py; it prints ready to stdout\n")
+        self.assertEqual((repair["items"], repair["recheckOf"]), (["R01"], first_blind))
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        self.handoff()
+        self.call("clean-prepare")
+        clean = self.call("clean-verify", "--", sys.executable, "-B", "tests/check_output.py")["receipt"]
+        recheck_actor = self.call("participant", "--role", "blind", "--runtime", "codex", *route_args("blind"),
+                                  "--native-id", "synthetic-blind-recheck", "--session", "test-session")["receipt"]["actor"]
+        blind = self.context("blind")
+        self.assertEqual((blind["recheck"]["items"], blind["recheck"]["recheckOf"]),
+                         (["R01"], {k: first_blind[k] for k in ("file", "sha256")}))
+        observation = {"brief": "B001", "quote": "Команда выводит ready", "status": "passed",
+                       "note": "Synthetic recheck in a new clean clone", "artifact": clean["output"]["file"]}
+        full = {"basis": blind["basis"], "reviewer": recheck_actor, "independent": True, "observations": [observation]}
+        self.call("blind", "--file", self.input(full, "blind-full.json"), expected=2)  # only a recheck after the repair
+        self.call("blind", "--file", self.input(dict(full, recheckOf=blind["recheck"]["recheckOf"], items=["R01"]),
+                                                "blind-2.json"))
+        self.blind_actor = recheck_actor
+        self.assertTrue(self.call("acceptance", "--file", self.input(proof("acceptance", "R01"), "acceptance-2.json"))["ok"])
+        writer = self.call("knowledge-assign", "--runtime", "codex", *route_args("knowledge-writer"),
+                           "--native-id", "synthetic-knowledge", "--session", "fresh-knowledge-session")["receipt"]["actor"]
+        learned = self.context("knowledge")
+        run_receipt = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
+        self.call("knowledge-record", "--file", self.input({"writer": writer["id"], "basis": learned["basis"],
+            "entries": [{"key": "cli.ready", "kind": "command", "text": "Synthetic: stdout check of this CLI.",
+                         "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
+                         "command": [sys.executable, "app.py"],
+                         "verification": {"kind": "execution", "sha256": run_receipt["sha256"]}}],
+            "uncertainties": {k: "Synthetic fixture did not establish additional knowledge in this category."
+                              for k in ("trap", "decision", "glossary")}}))
+        state = self.call("finish", timeout=60)
+        self.assertEqual(state["status"], "accepted")
+        saved = Journal(self.root).load()
+        self.assertEqual([(r["id"], r["kind"], r["status"]) for r in saved["finalRepairs"]],
+                         [("F01", "findings", "passed"), ("F02", "blind", "passed")])
+        self.assertEqual([row["source"] for row in saved["candidateChain"]], ["branch", "repair", "repair"])
+        self.assertEqual(saved["remaining"]["findings"], [])
+        self.assertEqual(saved["blindReview"]["repair"], "F02")
+        stages = {row["stage"] for row in saved.get("stageSamples", [])}
+        self.assertTrue({"branchReview", "blind", "finalRepair"} <= stages, stages)
+
+    def focused_to_blind(self, status):
+        """Standard 0.5.0 policy through the CLI up to the first blind acceptance with the given status."""
+        (self.root / "USAGE.md").write_text("Usage: run app.py\n", encoding="utf-8", newline="\n")
+        self.git("add", "USAGE.md")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "usage note")
+        proof, participant, _coordinator = self.deliver_one_task()
+        from aispa_core.store import Journal
+        policy = Journal(self.root).load()["policy"]
+        self.assertTrue(policy.get("focusedReview") and policy.get("criticalProductFlows") is True)
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        self.branch_review()
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        self.handoff()
+        self.call("clean-prepare")
+        clean = self.call("clean-verify", "--", sys.executable, "-B", "tests/check_output.py")["receipt"]
+        self.blind_actor = participant("blind")
+        blind = self.context("blind")
+        observation = {"brief": "B001", "quote": "Команда выводит ready", "status": status,
+                       "note": "Synthetic first blind observation"}
+        if status == "passed":
+            observation["artifact"] = clean["output"]["file"]
+        self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": self.blind_actor, "independent": True,
+                  "observations": [observation]}, "blind-1.json"))
+        return proof
+
+    def finish_with_knowledge(self, tag):
+        from aispa_core.store import file_hash
+        writer = self.call("knowledge-assign", "--runtime", "codex", *route_args("knowledge-writer"),
+                           "--native-id", "synthetic-knowledge-" + tag, "--session", "fresh-knowledge-" + tag)["receipt"]["actor"]
+        learned = self.context("knowledge")
+        run_receipt = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
+        self.call("knowledge-record", "--file", self.input({"writer": writer["id"], "basis": learned["basis"],
+            "entries": [{"key": "cli.ready", "kind": "command", "text": "Synthetic: stdout check of this CLI.",
+                         "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
+                         "command": [sys.executable, "app.py"],
+                         "verification": {"kind": "execution", "sha256": run_receipt["sha256"]}}],
+            "uncertainties": {k: "Synthetic fixture did not establish additional knowledge in this category."
+                              for k in ("trap", "decision", "glossary")}}, "knowledge-%s.json" % tag))
+        self.assertEqual(self.call("finish", timeout=60)["status"], "delivered_with_remaining")
+        from aispa_core.store import Journal
+        return Journal(self.root).load()
+
+    def test_focused_unmapped_request_is_delivered_with_the_product_flow_source_in_the_remainder(self):
+        """Standard policy: only an unmapped request fails; nothing to repair, so finish delivers the list."""
+        proof = self.focused_to_blind("passed")
+        report = proof("acceptance", "R01")
+        report["unmapped"] = ["Экспорт в PDF"]
+        failed = self.call("acceptance", "--file", self.input(report, "acceptance-unmapped.json"), expected=2)
+        self.assertFalse(json.loads(failed.stdout)["ok"])
+        refused = self.call("final-repair", "open", "--file",
+                            self.input({"kind": "blind", "zones": ["USAGE.md"]}, "repair-open-none.json"), expected=2)
+        self.assertIn("finish", refused.stderr)
+        state = self.finish_with_knowledge("unmapped")
+        self.assertEqual(state["status"], "delivered_with_remaining")
+        self.assertEqual(state["remaining"]["unmapped"], ["Экспорт в PDF"])
+        self.assertIn(("product-flow-source", "product-flow"),
+                      [(row.get("criterion"), row.get("kind")) for row in state["remaining"]["checks"]])
+
+    def test_focused_flow_failure_after_both_blind_cycles_is_delivered_never_accepted(self):
+        """Standard policy: both blind repair cycles spent, the R01 flow still diverges; finish delivers the remainder."""
+        from aispa_core.store import Journal
+        proof = self.focused_to_blind("failed")
+        for cycle in (1, 2):
+            failed = self.call("acceptance", "--file", self.input(proof("acceptance", "R01"), "acceptance-%d.json" % cycle),
+                               expected=2)
+            self.assertFalse(json.loads(failed.stdout)["ok"])
+            refused = self.call("finish", expected=2)  # a repair cycle is left: repair first
+            self.assertIn("Обязательное ядро", refused.stderr)
+            first_blind = Journal(self.root).load()["blindReview"]["report"]
+            self.final_repair("blind", "blind-%d" % cycle, "Usage: run app.py; attempt %d\n" % cycle)
+            self.call("verify", "--", sys.executable, "tests/check_output.py")
+            self.handoff()
+            self.call("clean-prepare")
+            self.call("clean-verify", "--", sys.executable, "-B", "tests/check_output.py")
+            actor = self.call("participant", "--role", "blind", "--runtime", "codex", *route_args("blind"),
+                              "--native-id", "synthetic-blind-recheck-%d" % cycle, "--session", "test-session")["receipt"]["actor"]
+            blind = self.context("blind")
+            self.assertEqual(blind["recheck"]["recheckOf"], {k: first_blind[k] for k in ("file", "sha256")})
+            self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": actor, "independent": True,
+                      "recheckOf": blind["recheck"]["recheckOf"], "items": ["R01"],
+                      "observations": [{"brief": "B001", "quote": "Команда выводит ready", "status": "failed",
+                                        "note": "Synthetic recheck: still not observed"}]}, "blind-recheck-%d.json" % cycle))
+            self.blind_actor = actor
+        failed = self.call("acceptance", "--file", self.input(proof("acceptance", "R01"), "acceptance-3.json"), expected=2)
+        self.assertFalse(json.loads(failed.stdout)["ok"])
+        refused = self.call("final-repair", "open", "--file",
+                            self.input({"kind": "blind", "zones": ["USAGE.md"]}, "repair-open-third.json"), expected=2)
+        self.assertIn("третий не открывается", refused.stderr)
+        state = self.finish_with_knowledge("exhausted")
+        self.assertEqual(state["status"], "delivered_with_remaining")
+        flows = [row for row in state["remaining"]["checks"] if row.get("kind") == "product-flow"]
+        self.assertTrue(flows and all(row["requirement"] == "R01" for row in flows), state["remaining"]["checks"])
 
     def test_local_dashboard_serves_real_projection(self):
         self.init()

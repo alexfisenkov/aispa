@@ -523,7 +523,10 @@ def execute(args):
                      or args.action in controls.READS
                      or args.action == "test-intent" and not args.file
                      or args.action == "task-zone-extension" and not args.apply
-                     or (args.action in ("idea", "repair-plan", "integration-review") and not args.file)
+                     or (args.action in ("idea", "repair-plan") and not args.file)
+                     # Focused: the first branch context starts the measured branch-review stage, so it writes.
+                     or (args.action == "integration-review" and not args.file
+                         and not integration.focused(state))
                      or (args.action == "documents" and not args.refresh)
                      or (args.action == "project-documents" and not any((args.role, args.path, args.sha256, args.reason))))
         if not read_only and state.get("runtimeDigest") != runtime_digest():
@@ -687,12 +690,14 @@ def execute(args):
         elif action == "clean-prepare":
             flow.running()
             flow.handoff_ready()
+            flow.focused_stage("blind")
             state["cleanroom"] = cleanroom.prepare(store, state)
             state.pop("cleanrun", None)
             receipt = state["cleanroom"]
             flow.save("clean-clone-prepared")
         elif action == "blind":
             flow.running()
+            flow.focused_stage("blind")
             receipt = blind.record(store, state, json.loads(flow.read_input(args.file)))
             flow.save("blind-observations-recorded")
         elif action == "clean-verify":
@@ -809,11 +814,18 @@ def execute(args):
         elif action == "integration-review":
             if args.file:
                 flow.build_ready()
+                flow.focused_stage("integration")
                 receipt = integration.project_review(store, state, json.loads(flow.read_input(args.file)), actor=args.actor)
-                flow.save("project-integration-reviewed")
+                # Focused: the stage (and its completion event) ends with the last lens of the mode.
+                flow.save("project-integration-reviewed" if integration.lenses_complete(store, state)
+                          else "project-integration-lens-reviewed")
                 ok = receipt["passed"]
             else:
-                print(json.dumps(integration.project_context(store, state, actor=args.actor), ensure_ascii=False, indent=2))
+                review_context = integration.project_context(store, state, actor=args.actor)
+                # Focused: once every lens of the current candidate is recorded, the context call reopens nothing.
+                if review_context.get("pendingLenses") != []:
+                    flow.focused_stage("integration")
+                print(json.dumps(review_context, ensure_ascii=False, indent=2))
                 return 0
         elif action == "start":
             flow.start(args.id, args.context)
