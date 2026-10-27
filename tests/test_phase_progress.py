@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
+from aispa_core import dashboard_host
 from aispa_core.contracts import basis
 from aispa_core.display import project
 from aispa_core.store import Invalid
@@ -204,6 +205,29 @@ class PhaseProgressTests(unittest.TestCase):
         self.assertEqual(fx.flow.task("T01")["status"], "pending")
         self.assertIsNone(self.task_view()["phaseTiming"])
         self.assertNotIn("phaseTiming", fx.store.load()["tasks"][0])
+
+
+class OpenOnceTests(unittest.TestCase):
+    """init and resume start the service; one open action comes from the start answer."""
+
+    SERVICE = {"running": True, "port": 4321, "url": "http://127.0.0.1:4321/dashboard.html", "unverified": False}
+
+    def test_start_request_only_starts_and_points_at_the_single_open_action(self):
+        for managed in (False, True):
+            with self.subTest(managed=managed):
+                action, = dashboard_host.start_request(managed=managed)
+                self.assertEqual(action["action"], "start-dashboard")
+                self.assertEqual(action["cliArguments"], ["dashboard", "start"])
+                self.assertNotIn("surface", action)
+                self.assertNotIn("url", action)
+                self.assertIn("open-dashboard", action["instruction"])
+                self.assertEqual("resourceContract" in action, managed)
+
+    def test_exactly_one_open_action_with_the_verified_url_comes_from_the_start_answer(self):
+        actions = dashboard_host.open_request(self.SERVICE)
+        self.assertEqual([a["action"] for a in actions], ["open-dashboard"])
+        self.assertEqual(actions[0]["url"], self.SERVICE["url"])
+        self.assertEqual(actions[0]["verification"], "required")
 
 
 if __name__ == "__main__":

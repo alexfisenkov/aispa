@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from . import VERSION, resources, timing
 from .display import project
 from .dashboard_reader import DisplayJournal, SnapshotJournal
-from .dashboard_snapshot import SnapshotCoordinator, calculate
+from .dashboard_snapshot import SnapshotCoordinator, calculate, source_key
 from .portable import is_link
 from .store import Invalid, Journal, atomic_json, digest, file_hash, timestamp
 
@@ -572,7 +572,8 @@ def serve(store, *, port=0, instance=None, token=None, managed=False, announce=T
     token = token or secrets.token_urlsafe(48)
     root_hash = _root_hash(store)
     snapshots = SnapshotCoordinator(lambda: calculate(
-        store.root, reader_class, loaded, pinned_digest, lambda: _asset_bytes(store), project))
+        store.root, reader_class, loaded, pinned_digest, lambda: _asset_bytes(store), project),
+        fingerprint=lambda: source_key(store.home))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, _format, *_args):

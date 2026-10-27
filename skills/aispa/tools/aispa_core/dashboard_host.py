@@ -3,6 +3,10 @@
 The CLI can start a verified loopback service. Only the native host can open a
 visible embedded browser and check the rendered page; these actions stay pending
 in its returned instructions. This module neither launches a process nor opens UI.
+
+Opening is one action: `init` and `resume` ask only to start the service
+(`start-dashboard`); the single `open-dashboard` comes back in the answer to
+`dashboard start`, with the exact verified URL.
 """
 from .store import Invalid
 
@@ -17,9 +21,10 @@ def _resource_contract():
 
 
 def start_request(*, managed=False):
-    return [{"action": "start-and-open-dashboard", "runner": "pinned-aispa-cli",
-             "cliArguments": ["dashboard", "start"], "surface": "embedded",
-             "visible": True, "verification": "required",
+    """Start the service only; the open request is in the answer to `dashboard start`."""
+    return [{"action": "start-dashboard", "runner": "pinned-aispa-cli",
+             "cliArguments": ["dashboard", "start"], "verification": "required",
+             "instruction": "Запусти службу командой dashboard start и открой панель одним действием open-dashboard из её ответа; отдельного открытия по этому запросу нет.",
              **({"resourceContract": _resource_contract()} if managed else {})}]
 
 

@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 from aispa_core import dashboard_server as dashboard
+from aispa_core import dashboard_snapshot
 from aispa_core.dashboard_reader import DisplayJournal, SUPPORTED_VERSIONS
 from aispa_core.store import Invalid, Journal, atomic_json
 from aispa_core.verified_reads import current_scope
@@ -105,9 +106,14 @@ class DashboardServerTests(unittest.TestCase):
             self.temp.cleanup()
 
     @contextmanager
-    def inline_server(self, projection):
-        """A real HTTP fixture with an addressable deterministic writer race."""
-        with patch.object(dashboard, "project", side_effect=projection):
+    def inline_server(self, projection, *, reuse=False):
+        """A real HTTP fixture with an addressable deterministic writer race.
+
+        Snapshot reuse over unchanged files is off unless `reuse=True`: these fixtures
+        change what a projection sees without writing the journal.
+        """
+        with patch.object(dashboard, "project", side_effect=projection), \
+                patch.object(dashboard_snapshot, "REUSE_SECONDS", dashboard_snapshot.REUSE_SECONDS if reuse else 0):
             thread = threading.Thread(target=dashboard.serve, args=(self.store,),
                                       kwargs={"managed": True, "announce": False}, daemon=True)
             thread.start()

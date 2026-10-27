@@ -176,6 +176,10 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
 .history-list{display:grid;gap:0;margin-top:8px}
 .history-event{display:grid;grid-template-columns:minmax(100px,150px) minmax(0,1fr);gap:8px 16px;padding:12px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.45;overflow-wrap:anywhere}
 .history-event time{color:var(--faint);font-family:var(--mono);font-size:12px}
+#etaRows{white-space:pre-line}
+.time-summary .work-split{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px 24px;padding-top:2px}.work-split>div{display:grid;gap:3px;min-width:0}.work-split b{font-size:15px;font-weight:600}
+.model-row{display:grid;gap:3px;padding:12px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.45;overflow-wrap:anywhere}.model-row small{color:var(--faint);font-size:12px}
+.dec-group{padding-top:14px;position:relative}
 .history-event b{font-weight:600}.history-event span{color:var(--muted)}
 :root[data-theme="dark"]{--paper:#121316;--white:#202226;--ink:#F1F2F4;--muted:#C1C3C8;--faint:#9FA2A9;--line:#414349;--silver-light:#303238;--sh:0 20px 60px rgba(0,0,0,.24)}
 :root[data-theme="dark"] body{background:radial-gradient(1200px 600px at 80% -10%,#25272B,transparent 70%),var(--paper)}
@@ -287,12 +291,14 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
       <div class="time-summary" aria-label="Время работы" data-aria-i18n="activityAria">
         <div><span class="sub" data-i18n="runTime">Время прогона · без отмеченных пауз</span><strong id="runElapsed">—</strong></div>
         <div><span class="sub" data-i18n="estimate">Примерно до завершения</span><strong id="eta">Пока нет оценки</strong><span class="note" id="etaQualifier"></span></div>
+        <div class="work-split" id="workSplit" hidden></div>
       </div>
     </div>
     <details class="run-context">
       <summary data-i18n="runContext">Данные прогона</summary>
       <div class="note" id="runExplanation"></div>
       <div class="note" id="etaNote"></div>
+      <div class="note" id="etaRows"></div>
       <div class="meta">
         <div><span data-i18n="updated">Последняя запись агента</span><b class="mono" id="updatedAt">—</b></div>
         <div><span data-i18n="observed">Актуальность проверена</span><b class="mono" id="observedAt">—</b></div>
@@ -349,6 +355,11 @@ footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;paddin
     <div id="decisions" style="position:relative"></div>
   </div>
 </section>
+
+<details class="card history" id="modelsPanel" hidden>
+  <summary><h2 data-i18n="models">Участники и модели</h2><span class="note" id="modelsCount"></span></summary>
+  <div class="history-list" id="models"></div>
+</details>
 
 <details class="card history" id="modeChangesPanel" hidden>
   <summary><h2 data-i18n="modeChanges">Смены режима проверки</h2><span class="note" id="modeChangesCount"></span></summary>
@@ -416,8 +427,9 @@ var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['
  decisions:['Решения агента','Agent decisions'],decisionsNote:['Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.','If you disagree with a decision, run AISpa again and state what to change.'],
  footer:['Экран только отображает результат. Право назвать работу готовой определяет движок.','This view only displays the result. The engine determines when work is complete.'],
  gateNote:['Изменение брифа, плана или кода делает связанные проверки устаревшими.','Changing the brief, plan or code makes related checks stale.'],
- runContext:['Данные прогона','Run details'],overviewAria:['Сводка задач','Task overview'],activityAria:['Время работы','Work time'],wavesAria:['Задачи по волнам','Tasks by wave']};
+ models:['Участники и модели','Participants and models'],runContext:['Данные прогона','Run details'],overviewAria:['Сводка задач','Task overview'],activityAria:['Время работы','Work time'],wavesAria:['Задачи по волнам','Tasks by wave']};
 var EN={
+ 'По замерам прогона':'From this run\'s timings','По прошлым прогонам':'From earlier runs','По замерам и прошлым прогонам':'From this run and earlier runs',
  'Ориентир по плану':'Plan-based estimate','По замерам и плану':'Based on timings and plan','По завершённым задачам':'Based on completed tasks','Ожидание блокеров не учтено':'Blocker waiting time excluded',
  'Проверка кода':'Code verification','Детали':'Details','Детали задачи':'Task details','Реализовано задач':'Implemented tasks','Блокеры задач':'Blocked tasks',
  'Проверку обновить':'Refresh verification',
@@ -566,7 +578,7 @@ Object.assign(EN,{
  'Исключено из текущей работы':'Excluded from current scope','Пройдено':'Passed','Есть замечания':'Findings remain',
  'Выполняется':'In progress','Не требуется':'Not required','Задачи волны выполнены':'Completed tasks in this wave'
 });
-Object.assign(EN,{'Снимок рассчитывается':'Snapshot is calculating','Ошибка источника':'Source error','Нет связи':'Disconnected',
+Object.assign(EN,{'Снимок считается':'Snapshot is calculating','Ошибка источника':'Source error','Нет связи':'Disconnected',
  'Снимок проверен: ':'Snapshot verified: ','Последний снимок: ':'Last snapshot: ','Историческая проверка':'Historical check',
  'Результат подтверждён последующей задачей':'Result confirmed by a later task',
  'Расчёт начат. Подтверждённого снимка пока нет.':'Calculation started. No verified snapshot is available yet.',
@@ -575,6 +587,12 @@ Object.assign(EN,{'Снимок рассчитывается':'Snapshot is calcu
  'Новый снимок рассчитывается. Ниже последний подтверждённый снимок; текущая готовность ещё не подтверждена.':'A new snapshot is calculating. The last verified snapshot is shown below; current readiness is not yet confirmed.',
  'Оценка обновится после завершения расчёта.':'The estimate will update after calculation finishes.',
  'Оценка обновится после успешной проверки источника.':'The estimate will update after the source is successfully verified.'});
+Object.assign(EN,{'Сколько осталось — скажу после первой готовой задачи':'Time remaining: I will tell after the first finished task',
+ 'Замеры этого прогона и прошлых прогонов на этом компьютере пока не накоплены.':'There are no timings yet from this run or from earlier runs on this computer.',
+ 'Идёт дольше обычного':'Taking longer than usual','идёт дольше обычного':'taking longer than usual',
+ 'Работа':'Work','Простой и ожидание':'Idle and waiting','Ожидание ответа':'Waiting for an answer',
+ 'Задачи':'Tasks','Проверка ветки':'Branch review','Финальный ремонт':'Final repair','Слепая приёмка':'Blind acceptance',
+ 'Замечаний накоплено':'Findings collected'});
 var locale='ru',theme='system';
 function tr(value){return locale==='en'&&EN[value]?EN[value]:value}
 function stored(key){try{return localStorage.getItem(key)}catch(error){return null}}
@@ -583,7 +601,7 @@ var params=new URLSearchParams(location.search),archiveData=typeof window!=='und
 var archiveMode=!!(archiveData&&archiveData.archive===true),demoMode=params.has('demo')&&!archiveMode;
 var previewStatus=demoMode?params.get('status'):null;
 var filter='all',last=null,lastCapturedAt=null,pendingCalculation=null,source='loading',receivedAt=0,inFlight=false,tabButtons={},taskExpanded={},renderedRun;
-var refreshTimer=null,pendingDelay=250,errorDelay=1000;
+var refreshTimer=null,pendingDelay=250,errorDelay=1000,tickTimer=null,httpAt=0,OFFLINE_MS=20000;
 function $(id){return document.getElementById(id)}
 function h(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e}
 function applyTheme(){var mode=theme;
@@ -616,8 +634,8 @@ function finalStatus(s){return s==='accepted'||s==='delivered_with_remaining'}
 function ownerWaiting(d){var w=d.waiting;return !!(w&&typeof w==='object'&&/^(owner_question|question|owner)$/.test(w.kind)&&typeof w.note==='string'&&w.note.trim());}
 function viewStatus(d){if(!connected())return 'unavailable';var status=previewStatus&&LABELS[previewStatus]?previewStatus:d.status;
  return ownerWaiting(d)&&(status==='running'||finalStatus(status))?'paused':status;}
-function delta(){if(last&&ownerWaiting(last))return 0;
- return source==='live'||source==='demo'?Math.max(0,(performance.now()-receivedAt)/1000):0}
+function rawDelta(){return source==='live'||source==='demo'?Math.max(0,(performance.now()-receivedAt)/1000):0}
+function delta(){if(last&&ownerWaiting(last))return 0;return rawDelta()}
 function sourceSuffix(){return source==='archive'?' · '+tr('на дату снимка'):
  unavailableSource()?' · '+tr('последний снимок'):source==='demo'?' · '+tr('пример'):''}
 function taskLabel(t,d){
@@ -628,8 +646,10 @@ function taskLabel(t,d){
   t.status==='running'&&phaseName(t)?phaseName(t):
   t.status==='pending'&&t.assignment?tr('Исполнитель назначен'):
   tr(TASK[t.status]||UNKNOWN);
- return label+sourceSuffix();
+ return label+sourceSuffix()+(overrunning(t,d)?' · '+tr('идёт дольше обычного'):'');
 }
+function overrunning(t,d){var e=d&&d.estimate;
+ return !!(connected()&&source!=='archive'&&t.status==='running'&&e&&Array.isArray(e.overrunning)&&e.overrunning.indexOf(t.id)>=0)}
 function verificationNote(t){if(t.status!=='completed')return null;
  if(unavailableSource())return tr('Актуальность проверки не подтверждена');
  if(t.proofCurrent!==true&&(t.phaseStale||t.proofCurrent===false))return tr('Проверку нужно обновить');
@@ -669,29 +689,87 @@ function renderSource(){
  archive:['#8A8D92','Архивный снимок'],
  'archive-invalid':['#55585E','Архивный снимок недоступен'],
  offline:['#55585E','Нет актуальных данных — последний снимок'],disconnected:['#55585E','Нет связи'],
- calculating:['#8A8D92','Снимок рассчитывается'],source_error:['#55585E','Ошибка источника'],none:['#55585E','Состояние недоступно']}[source];
+ calculating:['#8A8D92','Снимок считается'],source_error:['#55585E','Ошибка источника'],none:['#55585E','Состояние недоступно']}[source];
  if(lastCapturedAt&&!archiveMode&&!demoMode)$('refreshText').textContent=tr(source==='live'?'Снимок проверен: ':'Последний снимок: ')+fmt(lastCapturedAt);
  $('sourceDot').style.background=m[0];$('sourceLabel').textContent=tr(m[1])+(source==='archive'?' · '+fmt(last.archivedAt):'');
 }
 function renderEmpty(){
- $('title').textContent='AISpa';$('label').textContent=tr(source==='calculating'?'Снимок рассчитывается':source==='source_error'?'Ошибка источника':'Состояние недоступно');
+ $('title').textContent='AISpa';$('label').textContent=tr(source==='calculating'?'Снимок считается':source==='source_error'?'Ошибка источника':'Состояние недоступно');
  $('hint').textContent=tr(source==='calculating'?'Расчёт начат. Подтверждённого снимка пока нет.':source==='source_error'?'Не удалось проверить источник. Дождитесь нового проверенного снимка.':source==='archive-invalid'?'Встроенный архивный снимок повреждён или неполон.':'Запустите локальный сервер AISpa командой serve. Отсутствие данных не означает готовность.');
  $('statusShort').textContent=tr('Нет данных');$('statusDot').style.background='transparent';$('statusDot').style.border='2px dashed #C7C9CC';
  $('currentActivity').replaceChildren(h('div','note',tr('Жду подтверждённое состояние прогона.')));
  $('overviewCounts').replaceChildren();
  $('runElapsed').textContent='—';$('eta').textContent=tr('Нет данных');$('etaNote').textContent=tr('Оценка появится после начала работы.');
 }
+function pluralRu(n,one,few,many){var a=Math.abs(n)%100,b=a%10;return a>10&&a<20?many:b>1&&b<5?few:b===1?one:many}
+function numText(n){return locale==='en'?String(n):String(n).replace('.',',')}
+function minutesWord(){return locale==='en'?'minutes':'минут'}
+function hoursWord(n){return locale==='en'?(n===1?'hour':'hours'):n%1!==0?'часа':pluralRu(n,'час','часа','часов')}
+function hoursGen(n){return locale==='en'?(n===1?'hour':'hours'):n%1!==0||n%10===1&&n%100!==11?'часа':'часов'}
+function hoursOf(seconds,round){return Math.max(0.5,Math[round](seconds/1800)/2)}
+function minutesOf(seconds,round){return Math.max(0,Math[round](seconds/300)*5)}
+/* Remaining time in words: under an hour in 5-minute steps, from an hour in half-hour steps. */
+function remainingWords(low,high,single){
+ var en=locale==='en',about=en?'about ':'примерно ',m,h;
+ if(high===null){var open=en?'upper bound not known yet':'верхняя граница пока неизвестна';
+  if(low<3600){m=Math.max(5,minutesOf(low,'floor'));
+   return en?'at least about '+m+' minutes ('+open+')':'примерно от '+m+' минут ('+open+')';}
+  h=hoursOf(low,'floor');return en?'at least about '+numText(h)+' '+hoursWord(h)+' ('+open+')':'примерно от '+numText(h)+' '+hoursGen(h)+' ('+open+')';}
+ if(single){
+  if(high<3600){m=Math.max(5,minutesOf(high,'round'));return en?'usually around '+m+' minutes (from one task)':'обычно около '+m+' минут (по одной задаче)';}
+  h=hoursOf(high,'round');return en?'usually around '+numText(h)+' '+hoursWord(h)+' (from one task)':'обычно около '+numText(h)+' '+hoursGen(h)+' (по одной задаче)';}
+ if(high<=300)return en?'less than 5 minutes':'меньше 5 минут';
+ if(high<=3600){var lo=minutesOf(low,'floor'),hi=minutesOf(high,'ceil');
+  if(lo===hi)return about+hi+' '+minutesWord();
+  if(lo===0)return en?'up to about '+hi+' minutes':'примерно до '+hi+' минут';
+  return about+lo+'–'+hi+' '+minutesWord();}
+ var top=hoursOf(high,'ceil');
+ if(low<3600){var from=minutesOf(low,'floor');
+  if(from===0)return en?'up to about '+numText(top)+' '+hoursWord(top):'примерно до '+numText(top)+' '+hoursGen(top);
+  return about+from+' '+(en?'minutes':'минут')+' – '+numText(top)+' '+hoursWord(top);}
+ var bottom=hoursOf(low,'floor');
+ return bottom===top?about+numText(top)+' '+hoursWord(top):about+numText(bottom)+'–'+numText(top)+' '+hoursWord(top);
+}
+function measuredLeft(e,spent){
+ var low=Math.max(0,e.lowerSeconds-spent),high=e.upperSeconds==null?null:Math.max(low,e.upperSeconds-spent);
+ return [low,high];}
+function measuredEta(d,e){
+ var left=measuredLeft(e,delta()),low=left[0],high=left[1],en=locale==='en',main,note;
+ if(e.afterOverrun===true&&low===0&&high===0)main=tr('Идёт дольше обычного');
+ else{main=remainingWords(low,high,e.sampleCount===1&&high===low);
+  if(e.afterOverrun===true)main=en?'after this task '+main+' more':'после этой задачи ещё '+main;}
+ note=e.basis==='calibration'?(en?'From earlier runs on this computer.':'По прошлым прогонам на этом компьютере.'):
+  e.basis==='mixed'?(en?'From this run and from earlier runs on this computer.':'По замерам этого прогона и прошлым прогонам на этом компьютере.'):
+  (en?'From timings of this run ('+e.sampleCount+').':'По замерам этого прогона ('+e.sampleCount+').');
+ if(Array.isArray(e.overrunning)&&e.overrunning.length)note+=en?' Taking longer than usual: '+e.overrunning.join(', ')+'. The rest is counted after '+(e.overrunning.length>1?'them':'it')+'.':
+  ' Идёт дольше обычного: '+e.overrunning.join(', ')+'. Остаток считается после '+(e.overrunning.length>1?'них':'неё')+'.';
+ if(e.waitingForBlockers){main+=' '+tr('работы + ожидание');note+=' '+tr('Время ожидания снятия блокеров неизвестно и в оценку не входит.');}
+ return [main,note];
+}
+var ROW_LABEL={tasks:'Задачи',branchReview:'Проверка ветки',finalRepair:'Финальный ремонт',blind:'Слепая приёмка'};
+function etaRowsText(d){
+ var e=d.estimate;if(source==='archive'||!connected()||!object(e)||!Array.isArray(e.rows)||ownerWaiting(d))return '';
+ var en=locale==='en',unknown=en?'not known yet':'пока не знаю';
+ return e.rows.filter(function(r){return object(r)&&ROW_LABEL[r.kind]&&r.status!=='done'}).map(function(r){
+  var label=tr(ROW_LABEL[r.kind])+': ',conditional=r.status==='conditional';
+  if(!Number.isFinite(r.lowerSeconds))return label+(conditional?(en?'if needed — ':'если понадобится — ')+unknown:
+   (en?'how long it takes is not known yet':'сколько займёт — пока не знаю'));
+  var left=measuredLeft(r,r.status==='running'?delta():0),words=remainingWords(left[0],left[1],r.sampleCount===1&&left[1]===left[0]);
+  return label+(conditional?(en?'if needed — ':'если понадобится — ')+words:words)}).join('\n');
+}
 function etaText(d){
  if(source==='archive')return [tr(finalStatus(d.status)?'На дату снимка завершён':'Исторический снимок'),tr('Оценка не обновляется.')];
  if(!connected())return [tr('Не подтверждено'),tr(source==='calculating'?'Оценка обновится после завершения расчёта.':source==='source_error'?'Оценка обновится после успешной проверки источника.':'Оценка обновится после восстановления связи.')];
  if(ownerWaiting(d))return [tr('Ожидает ответа владельца'),tr('Пока нет оценки')];
  if(finalStatus(d.status))return [tr('Прогон завершён'),tr(d.status==='delivered_with_remaining'?'Остатки перечислены отдельно.':'Все действующие требования приняты.')];
- var e=d.estimate||{},reason=e.reason;
+ var e=d.estimate||{},reason=e.reason,isMeasured=Array.isArray(e.rows);
+ if(isMeasured&&reason==='insufficient_data')return [tr('Сколько осталось — скажу после первой готовой задачи'),tr('Замеры этого прогона и прошлых прогонов на этом компьютере пока не накоплены.')];
  var messages={paused:['После возобновления','Прогон на паузе.'],blocked:['Зависит от блокеров','Срок неизвестен до устранения препятствий.'],
  cancelled:['Прогон отменён','Оценка больше не рассчитывается.'],stale:['Нужна новая проверка','Прежняя приёмка устарела.'],
  no_plan:['После подготовки плана','Ещё нет задач для оценки.'],insufficient_data:['Пока мало данных',(e.sampleCount===1?'Завершена одна задача; оценка появится после второй.':'Оценка появится после двух завершённых задач.')],
  final_review:['Осталась итоговая проверка','Задачи реализованы; длительность приёмки пока неизвестна.']};
  if(messages[reason])return messages[reason].map(tr);
+ if(isMeasured&&reason==='estimate'&&Number.isFinite(e.lowerSeconds)&&(e.upperSeconds===null||Number.isFinite(e.upperSeconds)))return measuredEta(d,e);
  if(reason!=='estimate'||!Number.isFinite(e.lowerSeconds)||!Number.isFinite(e.upperSeconds))return [tr('Пока нет оценки'),tr('Движок ещё не накопил данные.')];
  var low=Math.max(1,Math.ceil((e.lowerSeconds-delta())/60)),high=Math.max(low,Math.ceil((e.upperSeconds-delta())/60));
  var range='≈ '+low+'–'+high+' '+(locale==='en'?'min':'мин');
@@ -701,9 +779,23 @@ function etaText(d){
  if(e.waitingForBlockers){range+=' '+tr('работы + ожидание');note+=' '+tr('Время ожидания снятия блокеров неизвестно и в оценку не входит.');}
  return [range,note];
 }
+function renderWorkSplit(d){
+ var box=$('workSplit'),e=d.estimate,w=object(e)?e.work:null,show=connected()&&source!=='archive'&&object(w);
+ box.hidden=!show;box.replaceChildren();if(!show)return;
+ [['Работа','workTime'],['Простой и ожидание','idleTime'],['Ожидание ответа','ownerWaitTime']].forEach(function(row){
+  var item=h('div'),value=h('b','mono');value.id=row[1];item.append(h('span','sub',tr(row[0])),value);box.append(item)});
+}
+function tickWorkSplit(d){
+ var box=$('workSplit'),e=d.estimate,w=object(e)?e.work:null;if(!box||box.hidden||!object(w))return;
+ var waiting=ownerWaiting(d),raw=rawDelta();
+ $('workTime').textContent=duration(w.workSeconds==null?null:w.workSeconds+(d.status==='running'&&!waiting?raw:0));
+ $('idleTime').textContent=duration(w.idleSeconds);
+ $('ownerWaitTime').textContent=duration(Number.isFinite(w.ownerWaitSeconds)?w.ownerWaitSeconds+(waiting?raw:0):null);
+}
 function tick(){
  if(!last)return;
- if(source==='live'&&performance.now()-receivedAt>15000){source='offline';renderSource();render(last);return;}
+ if(tabHidden())return;
+ if(source==='live'&&performance.now()-httpAt>OFFLINE_MS){source='offline';renderSource();render(last);return;}
  var d=last;
  $('runElapsed').textContent=duration(d.elapsedSeconds==null?null:d.elapsedSeconds+(d.status==='running'?delta():0));
  d.tasks.forEach(function(t){var time=document.getElementById('time-'+t.id);if(time)time.textContent=
@@ -716,11 +808,13 @@ function tick(){
  var wp=document.getElementById('work-progress-time');if(wp&&d.workProgress){var work=d.workProgress;
   wp.textContent=duration(work.elapsedSeconds+(work.activeSince&&d.status==='running'?delta():0));}
  var la=document.getElementById('last-action'),agoNow=lastActionText(d);if(la&&agoNow)la.textContent=agoNow;
- var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];
- var e=d.estimate||{};$('etaQualifier').textContent=connected()&&source!=='archive'&&viewStatus(d)==='running'&&e.reason==='estimate'?tr(e.waitingForBlockers?'Ожидание блокеров не учтено':e.basis==='plan_assumption'?'Ориентир по плану':e.basis==='mixed'?'По замерам и плану':'По завершённым задачам'):'';journalNotice(d);
+ var eta=etaText(d);$('eta').textContent=eta[0];$('etaNote').textContent=eta[1];$('etaRows').textContent=etaRowsText(d);tickWorkSplit(d);
+ var e=d.estimate||{},isMeasured=Array.isArray(e.rows);$('etaQualifier').textContent=connected()&&source!=='archive'&&viewStatus(d)==='running'&&e.reason==='estimate'?tr(e.waitingForBlockers?'Ожидание блокеров не учтено':
+  isMeasured?(e.basis==='calibration'?'По прошлым прогонам':e.basis==='mixed'?'По замерам и прошлым прогонам':'По замерам прогона'):
+  e.basis==='plan_assumption'?'Ориентир по плану':e.basis==='mixed'?'По замерам и плану':'По завершённым задачам'):'';journalNotice(d);
 }
 function assignmentText(t){var a=t.assignment;if(!a||typeof a.roleLabel!=='string')return null;
- return tr(source==='archive'||unavailableSource()?'Назначение на момент снимка: ':'Назначен: ')+tr(a.roleLabel)+(a.runtime?' · '+a.runtime:'')+(a.model?' · '+a.model:'');}
+ return tr(source==='archive'||unavailableSource()?'Назначение на момент снимка: ':'Назначен: ')+tr(a.roleLabel)+(a.runtime?' · '+a.runtime:'')+(a.model?' · '+a.model:'')+(a.reasoning?' · '+a.reasoning:'');}
 function wholeTaskLabel(t){return tr(t.attemptNumber>1?'Всего по всем попыткам':'Вся задача')}
 function agoText(seconds){seconds=Math.max(0,Math.floor(seconds));
  if(seconds<10)return tr('только что');if(seconds<60)return seconds+' '+tr('с назад');
@@ -767,6 +861,8 @@ function renderOverview(d){
  }else{[['implementation','Реализация'],['review','На проверке'],['repair','На ремонте']].forEach(function(entry){if(counts[entry[0]])add(entry[0],entry[1],counts[entry[0]]);});}
  add('blocked','Блокеры задач',counts.blocked);if(counts.queued)add('queued','В очереди',counts.queued);
  if(needsCheck)add('repair','Проверку обновить',needsCheck);if(counts.unknown)add('queued',UNKNOWN,counts.unknown);
+ if(object(d.findings)&&Number.isFinite(d.findings.open)){var found=h('span','overview-count queued');found.append(h('b',null,d.findings.open),h('span',null,tr('Замечаний накоплено')));
+  found.setAttribute('title',(locale==='en'?'confirmed ':'подтверждено ')+(d.findings.confirmed||0)+' · '+(locale==='en'?'fixed ':'исправлено ')+(d.findings.fixed||0)+' · '+(locale==='en'?'left over ':'осталось ')+(d.findings.remaining||0));box.append(found);}
  if(historical)box.append(h('span','overview-count',tr(source==='archive'?'На дату снимка':'Данные последнего снимка')));
 }
 function renderWaiting(d){
@@ -794,6 +890,26 @@ function renderModeChanges(d){
   row.append(time,body);box.append(row)});
 }
 var MODE_NAMES={fast:'Быстро',balanced:'Сбалансированно',max:'Максимум'};
+function modelLines(m){
+ var en=locale==='en',support=m.reasoningSupport==='unsupported',
+  model=typeof m.requestedModel==='string'&&m.requestedModel?m.requestedModel:(en?'model not named':'модель не названа'),
+  effort=support?(en?'effort not applied':'усилие не применено'):typeof m.requestedReasoning==='string'&&m.requestedReasoning?m.requestedReasoning:null,
+  lines=[h('b',null,model+(effort?' · '+effort:''))],
+  known=typeof m.actualModel==='string'&&m.actualModel&&(m.actualModelStatus==='observed'||m.actualModelStatus==='mismatch');
+ lines.push(h('small',null,known?(en?'actual: ':'фактически: ')+m.actualModel+(m.actualModelStatus==='mismatch'?(en?' · differs from the requested one':' · не совпадает с запрошенной'):''):
+  (en?'actual model unknown':'фактическая модель неизвестна')));
+ var u=object(m.usage)&&Number.isFinite(m.usage.inputTokens)&&Number.isFinite(m.usage.outputTokens)?m.usage:null;
+ lines.push(h('small',null,u?(en?'usage: '+u.inputTokens+' in / '+u.outputTokens+' out tokens':'расход: '+u.inputTokens+' вх. / '+u.outputTokens+' исх. токенов'):
+  (en?'usage: unknown':'расход: неизвестно')));
+ return lines;
+}
+function renderModels(d){
+ var panel=$('modelsPanel'),box=$('models'),rows=Array.isArray(d.models)?d.models.filter(object):[];
+ panel.hidden=!rows.length;box.replaceChildren();$('modelsCount').textContent=rows.length?String(rows.length):'';
+ rows.forEach(function(m){var row=h('div','model-row');if(m.routeClass)row.setAttribute('title',String(m.routeClass));
+  row.append(h('small',null,tr(typeof m.roleLabel==='string'&&m.roleLabel?m.roleLabel:String(m.role||''))+(m.id?' · '+m.id:'')));
+  modelLines(m).forEach(function(line){row.append(line)});box.append(row)});
+}
 function renderEvents(d){
  var panel=$('historyPanel'),box=$('events'),rows=Array.isArray(d.events)?d.events.slice(-16).reverse():[];
  panel.hidden=!rows.length;box.replaceChildren();
@@ -896,7 +1012,7 @@ function render(d){
  var status=viewStatus(d),reqs=d.requirements,tasks=d.tasks,rem=d.remaining||{};
  $('title').textContent=d.title||tr('Без названия');$('version').textContent=versionLabel(d.dashboardVersion||d.version);
  if(d.dashboardVersion&&d.dashboardVersion!==d.version)$('version').textContent+=' · '+tr('проект')+' '+d.version;
- $('label').textContent=source==='calculating'?tr('Снимок рассчитывается'):source==='source_error'?tr('Ошибка источника'):source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
+ $('label').textContent=source==='calculating'?tr('Снимок считается'):source==='source_error'?tr('Ошибка источника'):source==='archive'&&status==='accepted'?tr('Принято на дату снимка'):
   tr(LABELS[status]||UNKNOWN)+(source==='archive'||source==='demo'?sourceSuffix():'');
  $('hint').textContent=source==='calculating'?tr('Новый снимок рассчитывается. Ниже последний подтверждённый снимок; текущая готовность ещё не подтверждена.'):source==='source_error'?tr('Не удалось проверить источник. Дождитесь нового проверенного снимка.'):source==='archive'?tr('Это историческое состояние. Текущий статус проекта здесь не проверяется.'):
   tr(HINT[status]||'Обновите состояние или проверьте совместимость версии.');
@@ -922,7 +1038,7 @@ function render(d){
  var stages=$('stages');stages.replaceChildren();
  STAGES.forEach(function(x,i){var past=i<idx||(done&&i===idx),cur=i===idx&&!done,c=h('div','stage'+(cur?' cur':past?' past':''));
   c.append(h('i'));var t=h('div');t.append(h('small',null,pad(i+1)),h('b',null,tr(x[1])));c.append(t);stages.append(c)});
- renderActivity(d,status);renderOverview(d);renderWaiting(d);renderModeChanges(d);renderEvents(d);
+ renderActivity(d,status);renderOverview(d);renderWaiting(d);renderModels(d);renderModeChanges(d);renderEvents(d);renderWorkSplit(d);
  var waveNums=Array.from(new Set(tasks.map(function(t){return t.wave}))).sort(function(a,b){return a-b});
  Object.keys(FILTERS).forEach(function(k){var b=tabButtons[k];if(!b){b=h('button','tab');b.type='button';
    b.addEventListener('click',function(){filter=k;render(last)});tabButtons[k]=b;$('tabs').append(b)}
@@ -961,7 +1077,13 @@ function render(d){
    connected()?'Итоги ещё не подведены.':'Актуальные остатки не подтверждены.')));rb.append(cl)}
  var db=$('decisions');db.replaceChildren();
  if(!d.decisions.length)db.append(h('div','sub',tr('Самостоятельные решения пока не записаны.')));
- d.decisions.forEach(function(x,i){var r=h('div','dec');r.append(h('span','mono',pad(i+1)),h('b',null,typeof x==='string'?x:x.text||tr('Описание не указано')));db.append(r)});
+ function decisionRow(x,i){var r=h('div','dec');r.append(h('span','mono',pad(i+1)),h('b',null,typeof x==='string'?x:x.text||tr('Описание не указано')));return r}
+ var linked={},order=[];
+ d.decisions.forEach(function(x,i){var ids=object(x)&&Array.isArray(x.requirements)?x.requirements:[];
+  if(!ids.length){db.append(decisionRow(x,i));return;}
+  ids.forEach(function(id){if(!linked[id]){linked[id]=[];order.push(id)}linked[id].push([x,i])})});
+ order.forEach(function(id){var req=reqs.find(function(r){return r.id===id});
+  db.append(h('div','sub dec-group',id+(req?' · '+req.text:'')));linked[id].forEach(function(pair){db.append(decisionRow(pair[0],pair[1]))})});
  renderedRun=d.run;
  if(focusId){var restored=$(focusId);if(restored&&restored.focus)restored.focus({preventScroll:true});}
  if(d===last)tick();
@@ -981,7 +1103,8 @@ function valid(d){return object(d)&&typeof d.status==='string'&&Array.isArray(d.
   (t.phaseSteps===undefined||Array.isArray(t.phaseSteps)&&t.phaseSteps.every(function(p){return object(p)&&typeof p.id==='string'&&typeof p.status==='string'}))&&
   (t.requirementsDetails===undefined||Array.isArray(t.requirementsDetails)&&t.requirementsDetails.every(goodRequirement))&&
   (t.criteriaDetails===undefined||Array.isArray(t.criteriaDetails)&&t.criteriaDetails.every(function(c){return object(c)&&typeof c.text==='string'&&typeof c.status==='string'}));})&&
- Array.isArray(d.decisions)&&d.decisions.every(function(x){return typeof x==='string'||object(x)&&typeof x.text==='string'})&&
+ Array.isArray(d.decisions)&&d.decisions.every(function(x){return typeof x==='string'||object(x)&&typeof x.text==='string'&&(x.requirements===undefined||strings(x.requirements))})&&
+ (d.models===undefined||Array.isArray(d.models)&&d.models.every(object))&&optionalObject(d.findings)&&
  optionalObject(d.gates)&&optionalObject(d.gateDetails)&&(!d.gateDetails||Object.values(d.gateDetails).every(function(g){return object(g)&&typeof g.status==='string'}))&&
  optionalObject(d.currentWork)&&optionalObject(d.workProgress)&&optionalObject(d.autonomy)&&optionalObject(d.activity)&&optionalObject(d.estimate)&&optionalObject(d.remaining)&&
  (!d.remaining||Object.values(d.remaining).every(function(rows){return !Array.isArray(rows)||rows.every(function(x){return typeof x==='string'||object(x)})}))&&
@@ -1031,8 +1154,12 @@ function validArchive(d){
     ['checks','blockedTasks','excluded','unmapped','inherited','execution','inheritedExecution'].some(function(k){return (d.remaining[k]||[]).length})))return false;
  return true;
 }
+function tabHidden(){return !!(typeof document!=='undefined'&&document.hidden)}
+function startTick(){if(archiveMode||tickTimer!==null)return;tickTimer=setInterval(tick,1000)}
+function stopTick(){if(tickTimer!==null){clearInterval(tickTimer);tickTimer=null}}
 function scheduleRefresh(delay){
- if(refreshTimer!==null)clearTimeout(refreshTimer);
+ if(refreshTimer!==null){clearTimeout(refreshTimer);refreshTimer=null}
+ if(tabHidden())return; /* A hidden tab does not poll; coming back asks at once. */
  refreshTimer=setTimeout(function(){refreshTimer=null;refresh()},delay);
 }
 function sourceErrorDelay(){var delay=errorDelay;errorDelay=Math.min(errorDelay*2,10000);return delay;}
@@ -1048,6 +1175,7 @@ async function refresh(){
  inFlight=true;var nextDelay=REFRESH_SECONDS*1000,controller=new AbortController(),timer=setTimeout(function(){controller.abort()},10000);
  try{var endpoint='status.json'+(pendingCalculation?'?calculation='+encodeURIComponent(pendingCalculation):'');
   var response=await fetch(endpoint,{cache:'no-store',signal:controller.signal}),d=await response.json();
+  httpAt=performance.now(); /* Any HTTP reply, even "still calculating", proves the server is there. */
   if(object(d)&&object(d.calculation)&&['calculating','source_error'].includes(d.calculation.state)){
    if(typeof d.calculation.id!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(d.calculation.id))throw new Error('generation');
    var retained=d.lastSnapshot;
@@ -1064,7 +1192,9 @@ async function refresh(){
   if(d.calculation&&d.calculation.state!=='ready')throw new Error('generation');
   if(d.snapshot&&(!object(d.snapshot)||d.snapshot.freshness!=='current'||!archiveDate(d.snapshot.capturedAt)))throw new Error('snapshot');
   pendingCalculation=null;pendingDelay=250;errorDelay=1000;source='live';lastCapturedAt=d.snapshot?d.snapshot.capturedAt:d.observedAt||d.updatedAt;
-  render(d);last=d;receivedAt=performance.now();renderSource();tick();
+  /* A snapshot the server served again is as old as it says; the running clocks start from that age. */
+  var age=d.snapshot&&Number.isFinite(d.snapshot.ageSeconds)&&d.snapshot.ageSeconds>0?Math.min(d.snapshot.ageSeconds,3600):0;
+  receivedAt=performance.now()-age*1000;render(d);last=d;renderSource();tick();
  }catch(error){nextDelay=sourceErrorDelay();source='disconnected';renderSource();if(last)render(last);else renderEmpty();}
  finally{clearTimeout(timer);inFlight=false;scheduleRefresh(nextDelay);}
 }
@@ -1134,7 +1264,11 @@ try{if(window.matchMedia){var scheme=window.matchMedia('(prefers-color-scheme: d
  if(scheme.addEventListener)scheme.addEventListener('change',onScheme);else if(scheme.addListener)scheme.addListener(onScheme)}}catch(error){}
 $('refresh').addEventListener('click',refresh);
 if(archiveMode)$('refresh').hidden=true;
-refresh();if(!archiveMode)setInterval(tick,1000);
+if(!archiveMode&&!demoMode&&typeof document.addEventListener==='function')document.addEventListener('visibilitychange',function(){
+ if(tabHidden()){stopTick();if(refreshTimer!==null){clearTimeout(refreshTimer);refreshTimer=null}return;}
+ httpAt=performance.now();startTick();refresh();
+});
+httpAt=performance.now();refresh();startTick();
 })();
 </script>
 </body>

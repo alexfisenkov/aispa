@@ -7,6 +7,7 @@ from .progress import display_stage, estimate
 from .timing import TASK_PHASES, elapsed, phase_view
 from .team import _record_valid, _actor_valid, _role_data, task_proof_valid, proof_provenance
 from . import display_details, display_feed, carryover, check_modes, review_policy, execution_obligations, phase_receipts, task_tiers, work_progress
+from . import measured_estimate
 
 PHASES = {"implementation": "Реализация", "critic_1": "Критик · круг 1", "repair": "Исправление",
           "critic_2": "Критик · круг 2", "task_acceptance": "Приёмщик задачи",
@@ -95,6 +96,7 @@ def _assignment(store, state, task, phase_stale):
             status = "inactive"
         return {"role": role, "roleLabel": display_feed.ROLE_LABELS[role],
                 "runtime": _public_actor_text(actor.get("runtime")), "model": _public_actor_text(actor.get("model")),
+                **({"reasoning": reasoning} if (reasoning := _public_actor_text(actor.get("requestedReasoning"))) else {}),
                 "assignedAt": assigned_at, "status": status}
     except (Invalid, KeyError, OSError, TypeError, ValueError, AttributeError):
         # Legacy records and malformed/missing actor proofs never gain a live badge.
@@ -273,7 +275,9 @@ def project(store, state):
             "executionPolicy": execution_obligations.enabled(state),
             "phaseAuthorship": phase_receipts.summary(store, state),
             "elapsedSeconds": elapsed(state, observed), "finishedAt": state.get("finishedAt"),
-            "estimate": estimate(estimate_tasks, status, observed, projected=True), "activity": state.get("activity"),
+            "estimate": (measured_estimate.for_state(store, state, observed) if measured_estimate.enabled(state)
+                         else estimate(estimate_tasks, status, observed, projected=True)),
+            "activity": state.get("activity"),
             "waiting": state.get("waiting"), "events": display_feed.events(feed),
             "currentWork": display_feed.current_work(state, stage_now, feed),
             "workProgress": work_progress.view(state, observed),
@@ -291,9 +295,16 @@ def project(store, state):
             "authority": "source-bound host report; purpose-scoped adoption is not full capability approval"}
         view["resourceScope"] = {"scope": "project", "profile": state.get("resourceProfile"),
             "unmanagedLaunches": "outside guarantee", "hostWideLimit": "unknown"}
-        view["models"] = [{k: row.get(k) for k in ("id", "role", "requestedModel", "requestedReasoning",
-            "actualModel", "actualReasoning", "actualModelStatus", "selection")}
+        usage = display_details.usage_by_participant(state)
+        view["models"] = [{**{k: row.get(k) for k in ("id", "role", "requestedModel", "requestedReasoning",
+            "actualModel", "actualReasoning", "actualModelStatus", "selection", "routeClass")},
+            "roleLabel": display_feed.ROLE_LABELS.get(row.get("role")),
+            "reasoningSupport": (row.get("selection") or {}).get("reasoningSupport"),
+            "usage": usage.get(row.get("id"))}
             for row in participants.list_participants(store, state)]
+    from . import findings, focused_review
+    if "collectedFindings" in state or focused_review.enabled(state):
+        view["findings"] = findings.view(state)
     from . import product_flows
     flow_view = product_flows.view(store, state)
     if flow_view is not None:

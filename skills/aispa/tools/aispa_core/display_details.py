@@ -16,6 +16,31 @@ GATE_LABELS = {"pending": "Ожидает проверки", "running": "Про�
                "passed": "Подтверждено", "failed": "Есть замечания", "stale": "Нужна повторная проверка"}
 
 
+def _count(value):
+    return type(value) is int and value >= 0
+
+
+def usage_by_participant(state):
+    """Measured tokens per participant, from `usage-import` rows only.
+
+    A participant with no row, or with any malformed row, is absent: "unknown" is
+    never turned into zero or into a guess from file sizes, roles or percentages.
+    """
+    totals, broken = {}, set()
+    for row in state.get("usage") or []:
+        actor = row.get("actor") if isinstance(row, dict) else None
+        if not isinstance(actor, str) or not actor:
+            continue
+        if not _count(row.get("inputTokens")) or not _count(row.get("outputTokens")):
+            broken.add(actor)
+            continue
+        entry = totals.setdefault(actor, {"inputTokens": 0, "outputTokens": 0, "measuredCalls": 0})
+        entry["inputTokens"] += row["inputTokens"]
+        entry["outputTokens"] += row["outputTokens"]
+        entry["measuredCalls"] += 1
+    return {actor: entry for actor, entry in totals.items() if actor not in broken}
+
+
 def _read_report(store, ref):
     try:
         if not artifact_valid(store, ref):

@@ -70,10 +70,13 @@ class DashboardHostTests(unittest.TestCase):
         action, = result["requiredHostActions"]
         plain = {k: v for k, v in action.items() if k != "resourceContract"}
         self.assertEqual(plain, {
-            "action": "start-and-open-dashboard", "runner": "pinned-aispa-cli",
-            "cliArguments": ["dashboard", "start"], "surface": "embedded",
-            "visible": True, "verification": "required",
+            "action": "start-dashboard", "runner": "pinned-aispa-cli",
+            "cliArguments": ["dashboard", "start"], "verification": "required",
+            "instruction": plain["instruction"],
         })
+        self.assertNotIn("surface", action)
+        self.assertNotIn("visible", action)
+        self.assertIn("open-dashboard", plain["instruction"])
         self.assertEqual(action["resourceContract"]["kind"], "browsers")
         self.assertEqual(action["resourceContract"]["scope"], "project")
         self.assertIn("reserve", action["resourceContract"]["steps"])

@@ -1,15 +1,17 @@
 """Receipt-backed progress and live HTTP regression; no model invocations."""
 import copy
 import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import unittest
 from urllib.request import urlopen
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
-from aispa_core import dashboard_server, display_details
+from aispa_core import dashboard_server, display_details, display_feed, measured_estimate
 from aispa_core.contracts import basis
 from aispa_core.display import project
 from tests import test_workflow as workflow_tests
@@ -313,6 +315,109 @@ class DetailsTests(unittest.TestCase):
             self.assertEqual(view["requirements"][0]["progress"]["total"], 3)
         finally:
             dashboard_server.stop(fx.store)
+
+
+class PanelFieldsTests(unittest.TestCase):
+    """What the new-policy panel shows: measured time, who runs on which model, findings, decisions."""
+
+    def setUp(self):
+        self.fx = workflow_tests.WorkflowTests("test_empty_run_cannot_finish")
+        self.fx.setUp()
+        self.temp = tempfile.TemporaryDirectory(prefix="aispa-panel-fields-")
+        self.environment = patch.dict(os.environ, {"AISPA_CALIBRATION_FILE": str(Path(self.temp.name) / "absent.json")})
+        self.environment.start()
+
+    def tearDown(self):
+        self.environment.stop()
+        self.temp.cleanup()
+        self.fx.tearDown()
+
+    def view(self):
+        return project(self.fx.store, self.fx.state)
+
+    def participants(self, rows):
+        from aispa_core import participants
+        self.fx.state.setdefault("policy", {})["managedExecution"] = True
+        return patch.object(participants, "list_participants", return_value=rows)
+
+    def test_estimate_is_the_measured_output_only_with_measured_timing(self):
+        fx = self.fx
+        fx.prepare()
+        legacy = self.view()["estimate"]
+        self.assertNotIn("rows", legacy)
+        self.assertNotIn("work", legacy)
+        fx.state.setdefault("policy", {})["measuredTiming"] = True
+        view = self.view()
+        self.assertEqual(view["estimate"]["reason"], "insufficient_data")
+        self.assertEqual([row["kind"] for row in view["estimate"]["rows"]],
+                         ["tasks", "branchReview", "finalRepair", "blind"])
+        self.assertEqual(set(view["estimate"]["work"]), {"workSeconds", "idleSeconds", "ownerWaitSeconds"})
+        expected = measured_estimate.estimate(fx.state, view["observedAt"], calibration=None)
+        self.assertEqual(view["estimate"]["reason"], expected["reason"])
+        self.assertEqual(view["estimate"]["basis"], expected["basis"])
+
+    def test_participant_rows_carry_route_class_effort_support_and_only_measured_usage(self):
+        usage = [{"actor": "w1", "callId": "c1", "source": "s", "inputTokens": 120, "outputTokens": 30,
+                  "cachedInputTokens": 20},
+                 {"actor": "w1", "callId": "c2", "source": "s", "inputTokens": 80, "outputTokens": 10,
+                  "cachedInputTokens": 0}]
+        self.fx.state["usage"] = usage
+        rows = [{"id": "w1", "role": "worker", "requestedModel": "claude-sonnet-5-5", "requestedReasoning": "medium",
+                 "actualModel": None, "actualReasoning": None, "actualModelStatus": "unknown",
+                 "selection": {"reasoningSupport": "unsupported"}, "routeClass": "worker"},
+                {"id": "c1", "role": "critic1", "requestedModel": "claude-opus-5-5", "requestedReasoning": "high",
+                 "actualModel": "claude-opus-5-5", "actualReasoning": "high", "actualModelStatus": "observed",
+                 "selection": {"reasoningSupport": "supported"}, "routeClass": "judge"}]
+        with self.participants(rows):
+            models = {row["id"]: row for row in self.view()["models"]}
+        self.assertEqual(models["w1"]["routeClass"], "worker")
+        self.assertEqual(models["w1"]["reasoningSupport"], "unsupported")
+        self.assertEqual(models["w1"]["roleLabel"], "Исполнитель")
+        self.assertEqual(models["w1"]["usage"], {"inputTokens": 200, "outputTokens": 40, "measuredCalls": 2})
+        self.assertIsNone(models["c1"]["usage"], "A participant without usage-import must stay unknown, not zero")
+        self.assertEqual(models["c1"]["reasoningSupport"], "supported")
+        self.assertEqual(models["c1"]["requestedReasoning"], "high")
+
+    def test_task_assignment_names_the_requested_effort_only_when_one_was_requested(self):
+        fx = self.fx
+        fx.prepare()
+        fx.flow.pipeline.assign("T01", "worker", "codex", "native-effort", "session-effort",
+                                model="gpt-6.1-sol", reasoning="medium")
+        self.assertEqual(self.view()["tasks"][0]["assignment"]["reasoning"], "medium")
+
+    def test_usage_is_never_estimated_from_other_rows(self):
+        self.fx.state["usage"] = [{"actor": "w1", "callId": "c1", "source": "s", "inputTokens": True, "outputTokens": 3,
+                                   "cachedInputTokens": 0}]
+        rows = [{"id": "w1", "role": "worker", "requestedModel": None, "requestedReasoning": None,
+                 "actualModelStatus": "unknown", "selection": {}}]
+        with self.participants(rows):
+            self.assertIsNone(self.view()["models"][0]["usage"])
+
+    def test_findings_count_is_shown_only_for_runs_that_collect_findings(self):
+        self.fx.prepare()
+        self.assertNotIn("findings", self.view())
+        self.fx.state["collectedFindings"] = [
+            {"id": "W001", "status": "open"}, {"id": "W002", "status": "open"},
+            {"id": "W003", "status": "confirmed"}, {"id": "W004", "status": "dismissed"}]
+        self.assertEqual(self.view()["findings"], {"open": 2, "confirmed": 1, "fixed": 0, "remaining": 0})
+        self.fx.state.pop("collectedFindings")
+        self.fx.state.setdefault("policy", {})["focusedReview"] = True
+        self.assertEqual(self.view()["findings"], {"open": 0, "confirmed": 0, "fixed": 0, "remaining": 0})
+
+    def test_decisions_keep_their_requirements_and_old_decisions_stay_plain(self):
+        self.fx.state["notes"] = [{"at": "2026-10-28T10:00:00+00:00", "text": "Старое решение"},
+                                  {"at": "2026-10-28T10:01:00+00:00", "text": "Решение по требованию",
+                                   "requirements": ["R01"]}]
+        decisions = self.view()["decisions"]
+        self.assertNotIn("requirements", decisions[0])
+        self.assertEqual(decisions[1]["requirements"], ["R01"])
+
+    def test_the_branch_lens_event_has_a_human_label_not_the_raw_event_name(self):
+        text = display_feed.events([{"name": "project-integration-lens-reviewed", "target": "",
+                                     "at": "2026-10-28T10:00:00+00:00"}])[0]["text"]
+        self.assertNotIn("project-integration-lens-reviewed", text)
+        self.assertNotIn("Событие", text)
+        self.assertIn("линз", text)
 
 
 if __name__ == "__main__":

@@ -29,11 +29,13 @@ async function fixture(search='',data=sample(),options={}){
  }
  const responseStatus=data=>data?.calculation?.state==='calculating'?202:data?.calculation?.state==='source_error'?409:200;
  const intervals=[],timeouts=new Map(),requests=[];let response=data,error=null,clock=0,calls=0,timerId=0,status=responseStatus(data),holdNext=false,release=null,activeRequests=0,maxActiveRequests=0;
+ const listeners={};
  const document={getElementById(id){return elements[id]||Object.values(elements).map(e=>descend(e,id)).find(Boolean)||null;},
   createElement(tag){const el=new Element(tag);el.ownerDocument=document;return el;},createTextNode(text){return new Element('#text',String(text));},
-  documentElement:new Element('html'),querySelectorAll(selector){return selector==='[data-i18n]'?staticEls:[];}};
+  documentElement:new Element('html'),hidden:false,addEventListener(name,fn){(listeners[name]=listeners[name]||[]).push(fn);},
+  querySelectorAll(selector){return selector==='[data-i18n]'?staticEls:[];}};
  const context={document,location:{search},URLSearchParams,Date,Set,Array,Number,AbortController,
-  performance:{now:()=>clock},setInterval:(fn,delay)=>{intervals.push(fn);fn.delay=delay;return intervals.length;},
+  performance:{now:()=>clock},setInterval:(fn,delay)=>{intervals.push({fn,name:fn.name,delay,cleared:false});return intervals.length;},
   clearInterval:id=>{if(intervals[id-1])intervals[id-1].cleared=true;},
   setTimeout:(fn,delay)=>{const id=++timerId;timeouts.set(id,{fn,delay,due:clock+delay});return id;},clearTimeout:id=>timeouts.delete(id),
   window:{AISPA_ARCHIVE:options.archive,matchMedia:()=>({matches:!!options.systemDark,addEventListener(){}})},
@@ -49,13 +51,15 @@ async function fixture(search='',data=sample(),options={}){
   htmlElement:document.documentElement,activeElement:()=>document.activeElement,
   async update(data){response=data;error=null;status=responseStatus(data);await elements.refresh.click();await settle();},
   async fail(){error=true;await elements.refresh.click();await settle();},
-  advance(ms){clock+=ms;intervals.forEach(fn=>{if(fn.name==='tick')fn();});},
-  fetchCount:()=>calls,intervalCount:()=>intervals.filter(fn=>!fn.cleared).length,
+  advance(ms){clock+=ms;intervals.forEach(entry=>{if(entry.name==='tick'&&!entry.cleared)entry.fn();});},
+  async setHidden(value){document.hidden=value;(listeners.visibilitychange||[]).forEach(fn=>fn());await settle();},
+  fetchCount:()=>calls,intervalCount:()=>intervals.filter(entry=>!entry.cleared).length,
   requests:()=>requests.slice(),maxActiveRequests:()=>maxActiveRequests,activeRequests:()=>activeRequests,
   reply(data,code=200){response=data;status=code;error=null;},holdNext(){holdNext=true;},
   disconnect(){error=true;},async release(){assert.ok(release,'No held request to release');release();release=null;await settle();},
   timerDelays:()=>[...timeouts.values()].map(timer=>timer.delay),timerCount:()=>timeouts.size,
-  refreshIntervals:()=>intervals.filter(fn=>!fn.cleared&&fn.name!=='tick').length,
+  refreshIntervals:()=>intervals.filter(entry=>!entry.cleared&&entry.name!=='tick').length,
+  tickIntervals:()=>intervals.filter(entry=>!entry.cleared&&entry.name==='tick').length,
   async nextTimer(){const next=[...timeouts.entries()].sort((a,b)=>a[1].due-b[1].due)[0];
    assert.ok(next,'Pending generation must schedule an addressed fast poll');timeouts.delete(next[0]);clock=next[1].due;next[1].fn();await settle();},
   settle};
@@ -168,7 +172,7 @@ test('ETA keeps normal word boundaries at narrow widths in the delivered CSS',()
 });
 test('first calculation is observable without fabricated snapshot or PASS',async()=>{
  const f=await fixture('',pendingSnapshot());
- assert.match(f.text('sourceLabel'),/рассчитывается/i);
+ assert.match(f.text('sourceLabel'),/считается/i);
  assert.doesNotMatch(f.text('label'),/приняты|готов/i);
  assert.equal(f.text('runElapsed'),'—');assert.doesNotMatch(f.text('gates'),/✓/);
  f.el('language').change('en');assert.match(f.text('sourceLabel'),/calculating/i);
@@ -177,7 +181,7 @@ test('calculating retains a historical snapshot without current acceptance or ti
  const d=sample('accepted'),f=await fixture('',d);
  assert.match(f.text('label'),/приняты/);
  await f.update(pendingSnapshot(d));
- assert.match(f.text('sourceLabel'),/рассчитывается/i);
+ assert.match(f.text('sourceLabel'),/считается/i);
  assert.equal(f.text('title'),d.title);assert.doesNotMatch(f.text('label'),/приняты/);
  assert.doesNotMatch(f.text('gates'),/✓/);
  const before=f.text('time-T01');f.advance(6000);assert.equal(f.text('time-T01'),before);
@@ -307,7 +311,8 @@ test('connection failure revokes accepted header and gate badges, even after fil
  assert.equal(f.text('eta'),'Не подтверждено');
 });
 test('stale connection freezes clocks instead of running forever',async()=>{
- const f=await fixture();f.advance(16000);assert.equal(f.text('label'),'Состояние не подтверждено');assert.equal(f.text('time-T01'),'30 с');
+ const f=await fixture();f.advance(19000);assert.notEqual(f.text('label'),'Состояние не подтверждено','Offline came before 20 seconds without a reply');
+ f.advance(2000);assert.equal(f.text('label'),'Состояние не подтверждено');assert.equal(f.text('time-T01'),'30 с');
 });
 test('filter buttons survive a refresh and keep the selected filter',async()=>{
  const f=await fixture();const button=f.el('tabs').children[2];button.click();await f.update(sample());
@@ -974,4 +979,158 @@ test('malformed evidence summaries cannot replace a known dashboard snapshot',as
   {mode:'mixed',counts:{automated:2,browser:0,process:0},routes:[{criterion:'x',kind:'automated'}]}];
  for(const summary of cases){const f=await fixture(),d=sample();d.title='BAD MIXED';d.tasks[0].evidenceSummary=summary;await f.update(d);
   assert.equal(f.text('title'),'Тестовый проект');assert.equal(f.text('label'),'Состояние не подтверждено');}
+});
+
+// ---- Ticket 11: honest time, participants, calm polling --------------------------------------
+function measured(extra={}){
+ return {reason:'estimate',basis:'run',sampleCount:3,lowerSeconds:1260,upperSeconds:2330,overrunning:[],afterOverrun:false,
+  unmeasuredTasks:[],waitIncluded:false,waitingForBlockers:false,notes:[],
+  work:{workSeconds:3600,idleSeconds:600,ownerWaitSeconds:120},
+  rows:[{kind:'tasks',lowerSeconds:1260,upperSeconds:2330,basis:'run',sampleCount:3,status:'running'},
+   {kind:'branchReview',status:'pending',lowerSeconds:null,upperSeconds:null,basis:null,sampleCount:0},
+   {kind:'finalRepair',status:'conditional',lowerSeconds:null,upperSeconds:null,basis:null,sampleCount:0},
+   {kind:'blind',status:'pending',lowerSeconds:null,upperSeconds:null,basis:null,sampleCount:0}],...extra};
+}
+async function etaFor(estimate,language){
+ const d=sample();d.estimate=estimate;const f=await fixture('',d);if(language==='en')f.el('language').change('en');return f;
+}
+test('remaining time under an hour is words in 5-minute steps, from an hour in half-hour steps',async()=>{
+ let f=await etaFor(measured());assert.equal(f.text('eta'),'примерно 20–40 минут');
+ f=await etaFor(measured({lowerSeconds:14460,upperSeconds:25140}));assert.equal(f.text('eta'),'примерно 4–7 часов');
+ f=await etaFor(measured({lowerSeconds:5400,upperSeconds:9000}));assert.equal(f.text('eta'),'примерно 1,5–2,5 часа');
+ f=await etaFor(measured({lowerSeconds:2400,upperSeconds:5400}));assert.equal(f.text('eta'),'примерно 40 минут – 1,5 часа');
+ f=await etaFor(measured({lowerSeconds:60,upperSeconds:200}));assert.equal(f.text('eta'),'меньше 5 минут');
+ f=await etaFor(measured(),'en');assert.equal(f.text('eta'),'about 20–40 minutes');
+ f=await etaFor(measured({lowerSeconds:14460,upperSeconds:25140}),'en');assert.equal(f.text('eta'),'about 4–7 hours');
+});
+test('one measurement is "usually around" and an unmeasured upper bound is not invented',async()=>{
+ let f=await etaFor(measured({sampleCount:1,lowerSeconds:1500,upperSeconds:1500}));
+ assert.equal(f.text('eta'),'обычно около 25 минут (по одной задаче)');
+ f=await etaFor(measured({sampleCount:1,lowerSeconds:1500,upperSeconds:1500}),'en');assert.equal(f.text('eta'),'usually around 25 minutes (from one task)');
+ f=await etaFor(measured({upperSeconds:null}));assert.match(f.text('eta'),/^примерно от 20 минут/);assert.match(f.text('eta'),/верхняя граница пока неизвестна/);
+ assert.doesNotMatch(f.text('eta'),/–/);
+});
+test('without measurements the panel says it does not know yet, in both languages',async()=>{
+ const none=measured({reason:'insufficient_data',basis:null,lowerSeconds:null,upperSeconds:null,sampleCount:0});
+ let f=await etaFor(none);assert.equal(f.text('eta'),'Сколько осталось — скажу после первой готовой задачи');
+ assert.doesNotMatch(f.text('eta'),/\d/);
+ f=await etaFor(none,'en');assert.match(f.text('eta'),/first finished task/);
+ f=await etaFor(none);assert.match(f.text('etaRows'),/Проверка ветки: сколько займёт — пока не знаю/);
+});
+test('stages outside tasks get their own lines and a conditional repair says so',async()=>{
+ const f=await etaFor(measured());const rows=f.text('etaRows');
+ assert.match(rows,/Задачи: примерно 20–40 минут/);assert.match(rows,/Финальный ремонт: если понадобится — пока не знаю/);
+ assert.match(rows,/Слепая приёмка: сколько займёт — пока не знаю/);
+ f.el('language').change('en');assert.match(f.text('etaRows'),/Branch review: how long it takes is not known yet/);
+});
+test('a task that outlasts its class is "taking longer than usual" and the rest is counted after it',async()=>{
+ const d=sample();d.estimate=measured({overrunning:['T01'],afterOverrun:true,lowerSeconds:1260,upperSeconds:2330});
+ const f=await fixture('',d);
+ assert.equal(f.text('eta'),'после этой задачи ещё примерно 20–40 минут');
+ assert.match(f.text('waves'),/идёт дольше обычного/);assert.doesNotMatch(f.text('eta'),/осталась 1/);
+ assert.match(f.text('etaNote'),/T01/);
+ f.el('language').change('en');assert.match(f.text('waves'),/taking longer than usual/);
+ assert.equal(f.text('eta'),'after this task about 20–40 minutes more');
+ const alone=sample();alone.estimate=measured({overrunning:['T01'],afterOverrun:true,lowerSeconds:0,upperSeconds:0});
+ const g=await fixture('',alone);assert.equal(g.text('eta'),'Идёт дольше обычного');
+});
+test('work is shown apart from idle and the owner wait has its own counter, and they tick',async()=>{
+ const f=await etaFor(measured({work:{workSeconds:3590,idleSeconds:600,ownerWaitSeconds:120}}));
+ assert.equal(f.el('workSplit').hidden,false);
+ assert.match(f.text('workSplit'),/Работа/);assert.match(f.text('workSplit'),/Простой и ожидание/);assert.match(f.text('workSplit'),/Ожидание ответа/);
+ assert.equal(f.text('workTime'),'59 мин 50 с');assert.equal(f.text('idleTime'),'10 мин 00 с');assert.equal(f.text('ownerWaitTime'),'2 мин 00 с');
+ f.advance(5000);assert.equal(f.text('workTime'),'59 мин 55 с');
+ f.advance(10000);assert.equal(f.text('workTime'),'1 ч 00 мин');assert.equal(f.text('idleTime'),'10 мин 00 с');assert.equal(f.text('ownerWaitTime'),'2 мин 00 с');
+ f.el('language').change('en');assert.match(f.text('workSplit'),/Work/);assert.match(f.text('workSplit'),/Idle and waiting/);assert.match(f.text('workSplit'),/Waiting for an answer/);
+});
+test('while the owner is asked the work clock stops and the answer-wait counter runs',async()=>{
+ const d=sample();d.estimate=measured();d.waiting={kind:'owner_question',note:'Нужно решение'};
+ const f=await fixture('',d);f.advance(15000);
+ assert.equal(f.text('workTime'),'1 ч 00 мин');assert.equal(f.text('ownerWaitTime'),'2 мин 15 с');
+});
+test('the work block is absent for older estimates and when the source is not live',async()=>{
+ const old=await fixture();assert.equal(old.el('workSplit').hidden,true);
+ const f=await etaFor(measured());await f.fail();assert.equal(f.el('workSplit').hidden,true);
+});
+test('a reused snapshot is as old as the server says, so the clocks catch up',async()=>{
+ const d=sample();
+ const f=await fixture('',{...d,calculation:{id:'x',state:'ready',startedAt:'2026-10-19T12:00:00Z'},
+  snapshot:{capturedAt:'2026-10-19T12:00:00Z',freshness:'current',ageSeconds:120}});
+ assert.equal(f.text('runElapsed'),'4 мин 00 с');assert.equal(f.text('time-T01'),'2 мин 30 с');
+ assert.match(f.text('sourceLabel'),/Живые данные/,'An old reused snapshot must not read as lost connection');
+ f.advance(1000);assert.match(f.text('sourceLabel'),/Живые данные/);
+});
+function modelRow(extra={}){
+ return {id:'w1',role:'worker',roleLabel:'Исполнитель',routeClass:'worker',requestedModel:'claude-sonnet-5-5',requestedReasoning:'medium',
+  actualModel:null,actualReasoning:null,actualModelStatus:'unknown',reasoningSupport:'supported',usage:null,selection:{},...extra};
+}
+test('each participant shows requested model and effort, honest unknowns and only measured usage',async()=>{
+ const d=sample();d.models=[modelRow(),
+  modelRow({id:'c1',role:'critic1',roleLabel:'Критик · круг 1',requestedModel:'claude-opus-5-5',requestedReasoning:'high',
+   actualModel:'claude-opus-5-5',actualReasoning:'high',actualModelStatus:'observed',usage:{inputTokens:2000,outputTokens:300,measuredCalls:2}}),
+  modelRow({id:'m1',role:'worker',roleLabel:'Исполнитель',requestedModel:'gpt-6-sol',requestedReasoning:'low',reasoningSupport:'unsupported'})];
+ const f=await fixture('',d);const text=f.text('models');
+ assert.equal(f.el('modelsPanel').hidden,false);
+ assert.match(text,/claude-sonnet-5-5 · medium/);assert.match(text,/фактическая модель неизвестна/);
+ assert.match(text,/claude-opus-5-5 · high/);assert.match(text,/фактически: claude-opus-5-5/);
+ assert.match(text,/расход: неизвестно/);assert.match(text,/расход: 2000 вх\. \/ 300 исх\. токенов/);
+ assert.match(text,/gpt-6-sol · усилие не применено/);assert.doesNotMatch(text,/gpt-6-sol · low/);
+ f.el('language').change('en');
+ assert.match(f.text('models'),/actual model unknown/);assert.match(f.text('models'),/effort not applied/);assert.match(f.text('models'),/usage: unknown/);
+});
+test('a model that differs from the request is flagged and an old run has no participants panel',async()=>{
+ const d=sample();d.models=[modelRow({actualModel:'claude-haiku-5-5',actualModelStatus:'mismatch'})];
+ const f=await fixture('',d);assert.match(f.text('models'),/не совпадает с запрошенной/);
+ const old=await fixture();assert.equal(old.el('modelsPanel').hidden,true);
+});
+test('malformed participant rows cannot replace the last good snapshot',async()=>{
+ const f=await fixture();const bad=sample();bad.title='Подмена';bad.models='not-a-list';
+ await f.update(bad);assert.notEqual(f.text('title'),'Подмена');assert.match(f.text('sourceLabel'),/Нет связи/);
+});
+test('the number of collected findings is visible and old runs show none',async()=>{
+ const d=sample();d.findings={open:3,confirmed:1,fixed:2,remaining:0};
+ const f=await fixture('',d);assert.match(f.text('overviewCounts'),/Замечаний накоплено/);assert.match(f.text('overviewCounts'),/3/);
+ f.el('language').change('en');assert.match(f.text('overviewCounts'),/Findings collected/);
+ const old=await fixture();assert.doesNotMatch(old.text('overviewCounts'),/Замечаний/);
+});
+test('decisions tied to requirements are grouped under them and old decisions stay a plain list',async()=>{
+ const d=sample();d.decisions=[{at:'2026-10-19T10:00:00Z',text:'Старое решение'},'Строковое решение',
+  {at:'2026-10-19T10:01:00Z',text:'Храним в SQLite',requirements:['R01']},
+  {at:'2026-10-19T10:02:00Z',text:'Общее для двух',requirements:['R01','A01']}];
+ const f=await fixture('',d);const text=f.text('decisions');
+ assert.match(text,/Старое решение/);assert.match(text,/Строковое решение/);
+ assert.match(text,/R01 · Отправка формы/);assert.match(text,/A01 · Черновик/);
+ const grouped=text.slice(text.indexOf('R01 · Отправка формы'));
+ assert.match(grouped,/Храним в SQLite/);assert.match(grouped,/Общее для двух/);
+ assert.ok(text.indexOf('Старое решение')<text.indexOf('R01 · Отправка формы'));
+ const bad=sample();bad.decisions=[{text:'Решение',requirements:'R01'}];
+ await f.update(bad);assert.match(f.text('sourceLabel'),/Нет связи/);
+});
+test('a hidden tab stops polling and the clock tick, and coming back asks at once',async()=>{
+ const f=await fixture();assert.equal(f.tickIntervals(),1);assert.equal(f.timerCount(),1);
+ const before=f.fetchCount();
+ await f.setHidden(true);
+ assert.equal(f.tickIntervals(),0,'The one-second tick kept running in a hidden tab');
+ assert.equal(f.timerCount(),0,'A refresh timer was left armed in a hidden tab');
+ f.advance(60000);assert.equal(f.fetchCount(),before);assert.equal(f.text('time-T01'),'30 с');
+ await f.setHidden(false);
+ assert.equal(f.fetchCount(),before+1,'Coming back must request at once');
+ assert.equal(f.tickIntervals(),1);assert.equal(f.timerCount(),1);
+});
+test('a request that finishes while the tab is hidden does not rearm polling',async()=>{
+ const f=await fixture();f.holdNext();f.el('refresh').click();await f.settle();assert.equal(f.activeRequests(),1);
+ await f.setHidden(true);await f.release();
+ assert.equal(f.timerCount(),0);
+ await f.setHidden(false);assert.equal(f.maxActiveRequests(),1);
+});
+test('replies of calculating keep saying the snapshot is being calculated and never become "no connection"',async()=>{
+ const d=sample(),f=await fixture('',pendingSnapshot(d));
+ for(let i=0;i<8;i++){await f.nextTimer();
+  assert.match(f.text('sourceLabel'),/Снимок считается/);assert.doesNotMatch(f.text('sourceLabel'),/Нет связи|актуальных данных/);}
+ f.advance(60000);assert.match(f.text('sourceLabel'),/Снимок считается/,'A long calculation must not read as lost connection');
+});
+test('"no connection" needs 20 seconds without any HTTP reply, and a quick failure still shows it',async()=>{
+ const f=await fixture();await f.fail();assert.match(f.text('sourceLabel'),/Нет связи/);
+ const g=await fixture();g.advance(19999);assert.match(g.text('sourceLabel'),/Живые данные/);
+ g.advance(2);assert.match(g.text('sourceLabel'),/Нет актуальных данных/);
 });

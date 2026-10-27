@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import test_dashboard_server as server_tests
 from aispa_core import dashboard_server as dashboard
-from aispa_core.store import Invalid, atomic_json
+from aispa_core.store import Invalid, Journal, atomic_json
 from aispa_core.contracts import artifact_valid
 from aispa_core.dashboard_reader import SnapshotJournal
 
@@ -268,6 +268,58 @@ class DashboardSnapshotTests(unittest.TestCase):
                 expired_code, expired = response(url + "?calculation=" + second["calculation"]["id"])
             self.assertEqual(expired_code, 410, "Finished generations must have bounded retention")
             self.assertEqual(expired["error"]["code"], "snapshot_generation_expired")
+            self.assertEqual(len(calls), 2)
+
+    def test_unchanged_journal_serves_the_same_snapshot_and_an_append_calculates_again(self):
+        original = dashboard.project
+        calls = []
+
+        def projection(reader, state):
+            calls.append(reader)
+            return original(reader, state)
+
+        with self.inline_server(projection, reuse=True) as url:
+            code, first = response(url)
+            if code == 202:
+                code, first = self.await_ready(url, first)
+            self.assertEqual(code, 200)
+            for _ in range(5):
+                code, again = response(url)
+                self.assertEqual(code, 200, "Reuse must not turn a poll into a pending calculation")
+                self.assertEqual(again["calculation"]["id"], first["calculation"]["id"])
+                self.assertEqual(again["snapshot"]["capturedAt"], first["snapshot"]["capturedAt"])
+            self.assertEqual(len(calls), 1, "Polling an unchanged journal calculated again")
+            writer = Journal(self.store.root)
+            current = writer.load()
+            current["notes"].append({"text": "decision after the first snapshot", "at": current["updatedAt"]})
+            writer.append(current, "agent-decision-recorded")
+            code, fresh = response(url)
+            if code == 202:
+                code, fresh = self.await_ready(url, fresh)
+            self.assertEqual(code, 200)
+            self.assertEqual(fresh["decisions"][-1]["text"], "decision after the first snapshot")
+            self.assertEqual(len(calls), 2)
+
+    def test_reuse_ends_after_the_limit_even_when_files_are_untouched(self):
+        original = dashboard.project
+        calls = []
+
+        def projection(reader, state):
+            calls.append(reader)
+            return original(reader, state)
+
+        with self.inline_server(projection, reuse=True) as url:
+            code, first = response(url)
+            if code == 202:
+                code, first = self.await_ready(url, first)
+            module = sys.modules["aispa_core.dashboard_snapshot"]
+            now = module.monotonic()
+            with patch.object(module, "monotonic", return_value=now + module.REUSE_SECONDS + 1):
+                code, later = response(url)
+                if code == 202:
+                    code, later = self.await_ready(url, later)
+            self.assertEqual(code, 200)
+            self.assertNotEqual(later["calculation"]["id"], first["calculation"]["id"])
             self.assertEqual(len(calls), 2)
 
 
