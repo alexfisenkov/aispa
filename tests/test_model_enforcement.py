@@ -3,6 +3,7 @@
 Fixtures describe synthetic host evidence; no model or provider is ever called.
 """
 import argparse
+import json
 from pathlib import Path
 import shlex
 import sys
@@ -225,6 +226,84 @@ class CapabilityBlockTests(RoutedFixture):
             model_routes.enforce(self.store, self.state, "planner", "claude-code", "judge", "host-session",
                                  "claude-opus-5-5", "high", evidence, save=save)
         self.assertEqual([row["role"] for row in self.store.load()["modelBlocks"]], ["brief-reviewer", "planner"])
+
+    class JournalFlow:
+        """The saving seam of the `participant` command: every event goes to the journal and to ``events``."""
+
+        def __init__(self, test, sources):
+            self.test, self.sources, self.events = test, sources, []
+
+        def running(self):
+            pass
+
+        def save(self, event):
+            self.events.append(event)
+            self.test.store.append(self.test.state, event)
+
+        def read_input(self, name):
+            return json.dumps(self.sources[name])
+
+    def participant(self, flow, role, native, evidence):
+        args = argparse.Namespace(action="participant", role=role, runtime="claude-code", native_id=native,
+                                  session="host-session", model="claude-opus-5-5", reasoning="high",
+                                  model_evidence=evidence)
+        return controls.execute(self.store, self.state, flow, args)
+
+    def block(self, flow, role, evidence):
+        with self.assertRaisesRegex(Invalid, "BLOCKED_MODEL_CAPABILITY"):
+            model_routes.enforce(self.store, self.state, role, "claude-code", "judge", "host-session",
+                                 "claude-opus-5-5", "high", flow.sources[evidence], save=flow.save)
+
+    def sources(self):
+        return {name: host_model_source(self.store, self.state, runtime="claude-code", provider="anthropic",
+                                        requested=model, native="judge", session="host-session")
+                for name, model in (("missing", "claude-sonnet-5-5"), ("offered", "claude-opus-5-5"))}
+
+    def test_a_later_assignment_lifts_the_blocker_with_its_own_event_and_writes_no_event_of_its_own(self):
+        flow = self.JournalFlow(self, self.sources())
+        for role in ("brief-reviewer", "planner"):
+            self.block(flow, role, "missing")
+        self.assertEqual(len(self.store.load()["modelBlocks"]), 2)
+        self.participant(flow, "brief-reviewer", "judge", "offered")
+        # Only the same role is lifted; the other role's blocker stays until its own assignment succeeds.
+        self.assertEqual([row["role"] for row in self.store.load()["modelBlocks"]], ["planner"])
+        self.assertEqual(flow.events, ["model-capability-blocked:brief-reviewer", "model-capability-blocked:planner",
+                                       "participant-assigned:brief-reviewer"])
+        self.assertFalse([event for event in flow.events if event.startswith("model-capability-cleared")])
+
+    def test_enforce_alone_changes_state_but_saves_nothing(self):
+        flow = self.JournalFlow(self, self.sources())
+        self.block(flow, "brief-reviewer", "missing")
+        saved = list(flow.events)
+        route = model_routes.enforce(self.store, self.state, "brief-reviewer", "claude-code", "judge", "host-session",
+                                     "claude-opus-5-5", "high", flow.sources["offered"], save=flow.save)
+        self.assertEqual(route["model"], "claude-opus-5-5")
+        self.assertEqual(self.state["modelBlocks"], [])
+        self.assertEqual(flow.events, saved)
+        self.assertEqual(len(self.store.load()["modelBlocks"]), 1)
+
+    def test_an_assignment_that_fails_after_the_route_check_leaves_the_blocker_in_the_journal(self):
+        flow = self.JournalFlow(self, self.sources())
+        self.participant(flow, "brief-reviewer", "judge", "offered")
+        self.block(flow, "brief-reviewer", "missing")
+        self.assertEqual([row["role"] for row in self.store.load()["modelBlocks"]], ["brief-reviewer"])
+        saved = list(flow.events)
+        # The route check passes (and lifts the blocker in memory), then the same native identity is refused.
+        with self.assertRaisesRegex(Invalid, "Native identity уже зарегистрирована"):
+            self.participant(flow, "brief-reviewer", "judge", "offered")
+        self.assertEqual(self.state["modelBlocks"], [])  # the lift did happen in memory, so the check above is not vacuous
+        self.assertEqual(flow.events, saved)
+        self.assertEqual([row["role"] for row in self.store.load()["modelBlocks"]], ["brief-reviewer"])
+
+
+class RoleLabelTests(unittest.TestCase):
+    def test_every_routed_role_has_a_russian_label_and_an_english_one_in_the_panel(self):
+        from aispa_core import display_feed
+        html = (Path(__file__).resolve().parents[1] / "skills/aispa/assets/dashboard.html").read_text(encoding="utf-8")
+        for role in model_routes.ROLE_CLASS:
+            label = display_feed.ROLE_LABELS.get(role)
+            self.assertIsNotNone(label, "роль %s без подписи в display_feed.ROLE_LABELS" % role)
+            self.assertRegex(html, r"'%s':'[A-Za-z]" % label, "роль %s без английской подписи в панели" % role)
 
 
 class CoordinatorTests(RoutedFixture):

@@ -1170,3 +1170,27 @@ test('after an overrun the remainder and the task line do not melt with the cloc
  const g=await fixture('',{...sample(),estimate:measured({lowerSeconds:1205,upperSeconds:2330})});
  const before=g.text('eta');g.advance(10000);assert.notEqual(g.text('eta'),before);
 });
+test('every role that can get a missing-model blocker is named in English, not only worker and critics',async()=>{
+ const roles=[['coordinator','Координатор','Coordinator'],['idea','Разбор идеи','Idea assessment'],['source-reader','Читатель источников','Source reader'],
+  ['brief-analyst','Аналитик брифа','Brief analyst'],['brief-reviewer','Проверяющий бриф','Brief reviewer'],['branch-reviewer','Проверяющий всю ветку','Whole-branch reviewer'],
+  ['integration-reviewer','Проверяющий проект','Project reviewer'],['recovery-reviewer','Проверяющий восстановление','Recovery reviewer'],
+  ['discovery','Исследователь проекта','Project researcher'],['coverage','Проверяющий покрытие брифа','Brief coverage reviewer'],
+  ['planner','Планировщик','Planner'],['blind','Итоговый независимый приёмщик','Final independent acceptor'],['knowledge-writer','Хранитель знаний','Knowledge keeper'],
+  ['acceptor','Приёмщик задачи','Task acceptor']];
+ const d=sample();d.modelBlocks=roles.map(function(r){return modelBlock({role:r[0],roleLabel:r[1],task:null,options:[]})});
+ const f=await fixture('',d);f.el('language').change('en');const en=f.text('modelBlocks');
+ roles.forEach(function(r){assert.ok(en.includes(r[2]),r[0]+' must read '+r[2]+' in English')});
+ assert.doesNotMatch(en,/[А-Яа-яЁё]/,'No Russian role name may remain in the English panel');
+});
+test('after an overrun a running stage outside the tasks keeps counting down while the tasks line and the main remainder stay frozen',async()=>{
+ const d=sample();d.estimate=measured({overrunning:['T01'],afterOverrun:true,lowerSeconds:1205,upperSeconds:2330});
+ d.estimate.rows=[{kind:'tasks',lowerSeconds:1205,upperSeconds:2330,basis:'run',sampleCount:3,status:'running'},
+  {kind:'branchReview',lowerSeconds:1805,upperSeconds:2405,basis:'run',sampleCount:2,status:'running'},
+  {kind:'finalRepair',status:'conditional',lowerSeconds:null,upperSeconds:null,basis:null,sampleCount:0},
+  {kind:'blind',status:'pending',lowerSeconds:null,upperSeconds:null,basis:null,sampleCount:0}];
+ const f=await fixture('',d);const line=function(name){return f.text('etaRows').split('\n').filter(function(l){return l.indexOf(name)===0})[0]};
+ const eta=f.text('eta'),tasks=line('Задачи'),branch=line('Проверка ветки');
+ f.advance(10000);
+ assert.equal(f.text('eta'),eta);assert.equal(line('Задачи'),tasks);
+ assert.notEqual(line('Проверка ветки'),branch,'The branch review line must keep counting down');
+});

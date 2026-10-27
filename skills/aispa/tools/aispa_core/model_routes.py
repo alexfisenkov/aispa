@@ -230,7 +230,10 @@ def enforce(store, state, role, runtime, native_id, session, model, reasoning, e
     """One gate for every subagent assignment. Without modelRoutes nothing changes (empty dict).
 
     A missing approved model is written to ``state["modelBlocks"]`` and saved
-    through ``save`` before the refusal, so the blocker survives the error.
+    through ``save`` before the refusal, so the blocker survives the error. A
+    later successful check of the same role, runtime and task removes it from
+    ``state`` only; the caller's own assignment event saves that, so a failed
+    assignment leaves the blocker in the journal.
     """
     if not enabled(state):
         return {}
@@ -248,7 +251,24 @@ def enforce(store, state, role, runtime, native_id, session, model, reasoning, e
                 if save is not None:
                     save("model-capability-blocked:" + role)
             raise Invalid(block["message"])
+    _lift_blocks(state, role, runtime.strip().casefold(), task)
     return route
+
+
+def _lift_blocks(state, role, runtime, task):
+    """An assignment by the table lifts the blocker of the same role, runtime and task: the work no longer waits.
+
+    Changes ``state`` only and saves nothing: the lift reaches the journal with
+    the caller's own assignment event, after the assignment is recorded.
+    """
+    rows = state.get(MODEL_BLOCKS)
+    if not isinstance(rows, list):
+        return
+    task_id = task.get("id") if isinstance(task, dict) else None
+    kept = [row for row in rows if not (isinstance(row, dict) and row.get("role") == role
+                                        and row.get("runtime") == runtime and row.get("task") == task_id)]
+    if len(kept) != len(rows):
+        state[MODEL_BLOCKS] = kept
 
 
 def confirm(route, role, runtime, metadata):
