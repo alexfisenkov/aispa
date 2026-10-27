@@ -9,3 +9,5 @@ __pycache__/
 .aispa/
 документы/
 .архив/
+.autopilot/
+.autopilot/serve.*
