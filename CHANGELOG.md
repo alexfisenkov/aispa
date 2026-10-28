@@ -1,5 +1,14 @@
 # What's new in AISpa
 
+## 1.0.2 — 2026-10-28
+
+- The interview goes through the whole brief: in `interview` and `manual` every requirement is walked through its own words, the eight dimensions (first run, empty, wrong input, failure, interruption, growth, boundaries, aftermath) and the list of what to ask about, until no fork is left. No cap on questions; several dozen on an ordinary project is normal. The old «three to six rounds» calibration is gone. `important` keeps asking only forks that change the result.
+- The question map: before the first round the agent writes `interview.md` in the run folder (themes, questions, the row each closes, what is left) and shows the user the topics and the rough count; every round opens with «Тема 2 из 5 · осталось примерно 20 вопросов». The map survives a compaction.
+- «По одному»: on request — in the call, in the answer to the start question or at any moment — questions go one per message, with the same recommendation; «давай раундами» switches back. Stored in `state.js` as `questions` (`rounds` | `one`): `ap.py init --questions one`, `ap.py set questions=one|rounds`. It is in the switch list of the opening block.
+- Real choices instead of a row of «ок»: a question whose branches give a visibly different product is marked ⚑ with options а/б/в, and «ок» for the round does not cover it; after three bare «ок» rounds the agent offers once to decide the rest itself.
+- «Дальше решай сам» stops the interview at any point: the rest is decided the way `auto` decides it and listed in the report.
+- The «Интервью» option of the start question now says honestly that there will be many questions and that they can come one at a time.
+
 ## 1.0.1 — 2026-10-28
 
 - Copies of AISpa 0.x installed from a GitHub Release move to 1.0 through their own updater: the next `/aispa` offers «Установить обновление», and after that the copy keeps updating from Releases the same way.

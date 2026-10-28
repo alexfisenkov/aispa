@@ -2,42 +2,85 @@
 
 `ap.py stage briefing`. The phase the user is actually needed for. Its job is not to collect wishes: it is to **close what cannot be built as written**, and — where the mode or depth asks — to find out what the brief got wrong while changing it is still free. Every question exists to move a row in the manifest.
 
-**Depth decides how much gets opened up; the mode decides who closes it.** A fork found at `deep` is the same fork in every mode — in `auto` you settle it and label the decision, in `interview` you put it to the user.
+**Depth decides how much gets opened up; the mode decides who closes it.** A fork found at `deep` is the same fork in every mode — in `auto` you settle it and label the decision, in `interview` you put it to the user. One shift: in `interview` and `manual` the user has asked to be asked, so at «Сбалансированно» the interview walks every dimension too (the question map below) — what is theirs to answer plainly matters once they want to answer it.
 
 **When the adversarial pass runs** — mode `interview` or `manual` at any depth, or depth `deep` in any mode — read `phases/2-adversarial.md` and run it **before** the first question. Otherwise skip it.
 
 ## The interview — in rounds
 
-**Ask a round, not a question.** One message holds the whole current frontier — every question whose answer does not depend on another unanswered one — up to four at a time, numbered. Each carries a recommended answer and a reason in half a line, so the user can reply «ок» to accept every recommendation, or «2 — таблица, остальное ок». The next round is built from the answers: what they opened, what they closed.
+**Ask a round, not a question.** One message holds the current frontier — questions whose answers do not depend on another unanswered one — up to four at a time, numbered, **one theme per round** (one screen, one feature, one kind of decision). Each carries a recommended answer and a reason in half a line, so the user can reply «ок» to accept every recommendation, or «2 — таблица, остальное ок». The next round is built from the answers: what they opened, what they closed.
 
 ```
-Три вопроса, дальше соберу сам:
+Тема 1 из 5 — заявки · осталось примерно 30 вопросов
 
 1. Где хранить заявки — в Google-таблице или в базе? Я бы взял таблицу: тебе её видно и не нужен сервер.
 2. Кто отвечает клиентам ночью? Я бы принимал заявки круглосуточно и обещал ответ в рабочие часы.
-3. Отменить заявку можно в любой момент или только до приезда мастера? Я бы — до приезда.
+3. ⚑ Отменить заявку клиент может:
+   а) в любой момент — проще для клиента, мастер иногда едет зря;
+   б) только до выезда мастера — после выезда отмена через звонок тебе.
+   Я бы взял «б». Тут выбери букву сам — от этого зависит, что увидит клиент.
 
-Ответь номерами или «ок», если согласен со всеми.
+Ответь номерами или «ок» — согласен с остальными моими вариантами.
 ```
 
-Before each round goes out: `ap.py ask briefing --note "три вопроса — где хранить заявки, ночь, отмена"`. The answers close it — `answered`, or the next round's `ask`.
+Before each round goes out: `ap.py ask briefing --note "тема «заявки» — хранение, ночь, отмена"`. The answers close it — `answered`, or the next round's `ask`.
 
-- **Every question names its requirement** — internally, «this closes R07». A question that closes no row is dropped.
-- **Look facts up, ask only decisions.** What stack the repo uses is a fact; which payment provider they have an account with is a decision.
+- **Every question names its requirement** — internally, «this closes R07». A question that closes no row is dropped — unless its answer adds something in the user's words (a scope edge, an item from the last run), which becomes a `G##` row.
+- **Look facts up, ask only decisions.** What stack the repo uses, what a file already contains, how a service usually works — facts, found by you. Which payment provider they have an account with, what a client may do — decisions, asked.
 - **Blocking unknowns go in the first round** — payment, hosting, which accounts exist, where the data lives, an existing system to fit into. Asked at the end, they cost half the project.
 - **Decisions, never secrets.** *Which* provider, *whether* an account exists — yes; the key itself — never.
-- **Never answer for the user.** «Не знаю» → the row stays live with the missing fact named in Основание, and the build puts a visible stub there.
-- **Ask what the brief leaves open — however many that is, including none.** The mode moves the line; the brief decides how much falls on each side of it:
-
-| | Which forks reach the user |
-|---|---|
-| **important** | the ones where the branches lead to a visibly different product; the rest you settle and record |
-| **interview · manual** | all of them, plus everything the adversarial pass opened |
-
-- **Everything else you decide yourself** — error wording, retry policy, defaults, naming, layout — in every mode. But a decision goes back to the user, not to you, if it **costs money or ties them to a vendor**, **changes what they see or can do**, **means rebuilding rather than editing to undo**, or **encodes a rule about their business** — prices, deadlines, who may do what, what happens to someone's data. Unsure which side it falls on → ask.
+- **Never answer for the user.** «Не знаю» → the row stays live with the missing fact named in Основание, and the build puts a visible stub there. A fact about their business (a price, an address, a text) gets no invented recommendation — the recommendation is «не знаешь сейчас — поставлю заметную заглушку».
+- **Everything that is craft you decide yourself** — error wording, retry policy, naming, code structure — in every mode; asking it is padding. A decision goes to the user, not to you, if it **costs money or ties them to a vendor**, **changes what they see or can do**, **means rebuilding rather than editing to undo**, or **encodes a rule about their business** — prices, deadlines, who may do what, what happens to someone's data. Unsure which side it falls on → in `important`, decide and record; in `interview` and `manual`, ask.
 - **Nothing open → say so and go:** «Вопросов нет — в брифе всё однозначно, пишу спецификацию», and `ap.py stage briefing skip --note "вопросов не потребовалось"`.
 
-Calibration, not a target: `important` usually lands at one or two rounds; interview and manual at three to six on a real project. What makes an interview bad is padding, never length. Say once, if it will be long, that it will be — and do not apologise for the count as you go.
+## How far the interview goes — by mode
+
+| | What reaches the user |
+|---|---|
+| **important** | only forks whose branches lead to a visibly different product; the rest you settle and record. Usually a round or two; none when the brief is unambiguous |
+| **interview · manual** | **the whole brief, systematically** — every requirement walked through the map below, plus everything the adversarial pass opened. It ends when the map is empty, not when a count is reached |
+
+### The question map — interview and manual
+
+The user chose to be asked, and every answer they give is one guess fewer in the build: here the thorough interview is the product, not a cost to trim. Before the first round, walk every manifest row (`R##`, `R##i`) and write down each question it raises, grouped by theme, in `.aispa-work/<dir>/interview.md` — one line each: the theme, the question, the row it closes, and a status (`ждёт` · `спрошен` · `ответ` · `решил сам`). The file is the map of what is left: it survives a compaction, and it is where «осталось примерно» comes from.
+
+For each row, three passes:
+
+1. **Its own words** — every word with two readings («заявка», «клиент», «быстро»), every number not given, every «и т.д.».
+2. **The eight dimensions** — the same as the spec phase uses: *первый запуск* (what is there before any data), *пусто* (zero items), *неверный ввод*, *сбой* (network, service), *прерывание* (closed halfway, sent twice), *рост* (ten versus ten thousand), *границы* (who may do this, and who may not), *после* (where the result goes, who learns, can it be undone). At «Сбалансированно» and «Максимум» — all eight for every row; at «Быстро» — only *неверный ввод*, *сбой* and pass 1, since nothing beyond what was said will be built. A dimension that does not apply is skipped silently, never asked as «не применимо?». Only the part of the answer that is the user's goes on the map; the craft part you decide in the spec.
+3. **The list in «What to ask about»** below, as it touches this row.
+
+Then order the map: blocking externals first, the adversarial findings no later than the second round, then themes in the order the brief tells them, scope edges last. Answers open new questions — add them to the map and recount; the count you say is honest and approximate, never a promise.
+
+**Open with the map, in one message, before the first round** — the user sees how much there is and how to steer it:
+
+```
+Пройду твой бриф по темам, чтобы ничего не потерялось:
+1. Заявки · 2. Оплата · 3. Уведомления · 4. Кабинет мастера · 5. Чего не нужно
+Это примерно 35 вопросов, по 3–4 за раз — у каждого мой вариант.
+Отвечай коротко: «ок» — согласен с моими вариантами, «2 — таблица» — поправить один.
+Устанешь — скажи «дальше решай сам»: остальное решу сам и перечислю в отчёте.
+Удобнее по одному вопросу — скажи «по одному».
+```
+
+Every round after it opens with one line: «Тема 2 из 5 — оплата · осталось примерно 20 вопросов».
+
+### Real choices, not «ок, ок, ок»
+
+Forty «ок» in a row usually means nothing was decided — the recommendations were taken unread. Two guards:
+
+- **⚑ — the user picks.** A question where the branches give a visibly different product — what the client sees, what it costs, what is hard to undo — is written as a choice: two or three options lettered а/б/в, each with what it means for them in their words, your pick named after them, and «⚑ тут выбери букву сам». «Ок» for the round does not cover it. A reply without a letter → ask it once more, alone, with what the recommended option will mean; a second «как скажешь» → take the recommendation and record «принято по рекомендации» in Основание. At most one ⚑ per round, so the rest stays quick. In `important` every question is such a fork, so pick the one that matters most for the ⚑.
+- **Three bare «ок» rounds in a row** → one line before the next round: «Ты соглашаешься со всем подряд — это нормально, если варианты подходят. Хочешь — дальше решу сам и перечислю решения в отчёте». Said once per briefing.
+
+### «Дальше решай сам»
+
+«Дальше решай сам», «хватит вопросов», «остальное на твоё усмотрение» — at any point — stop asking. Close what is left on the map the way `auto` would (below): a decision into Основание as `ASSUMPTION — принято за пользователя: …` plus `ap.py add debt.assumptions "…"`, a fact about the user left as a visible stub; mark those lines `решил сам` in `interview.md`. One line to the user — «Понял, остальное решу сам — решения будут в отчёте» — and on. The mode does not change: manual still shows the spec and the tickets, and the safety questions are still asked.
+
+### One question at a time
+
+On request — «спрашивай по одному», «по одному вопросу», «давай по одному», "one at a time" — the interview goes **one question per message**: the same recommendation and reason in half a line, the same ⚑ for a real choice, «ок» takes the recommendation. The progress line shrinks to the question: «Вопрос 7 · тема «оплата» · осталось примерно 15». Back to rounds on «можно пачкой», «давай раундами», "all at once". It can be asked for in the call («/aispa interview спрашивай по одному …» — said to you, not a sentence about the product), in the answer to the start question («интервью, по одному») or at any moment; it changes the form, never what is asked. Stored in the run: `ap.py init --questions one` or `ap.py set questions=one` / `questions=rounds`, one line of acknowledgement («Хорошо, дальше по одному вопросу»), and `ask briefing` before each question.
+
+Calibration, not a target: on a real project an interview or a manual run lands at **several dozen questions** — roughly five to fifteen per screen or main feature, twenty to sixty in all, over many rounds; a one-page brief, at ten or fifteen; `important`, at a round or two. There is no cap. What makes an interview bad is padding — a question you could have answered yourself, a craft decision dressed up as a choice — never length. Say the size once, in the opening map, and do not apologise for the count as you go.
 
 In interview and manual the thing to guard against is **drift into process**: «какой стек берём?», «нарезать помельче?», «показать спецификацию?» are questions AISpa answers itself.
 
@@ -65,7 +108,7 @@ Whatever the user hands you that the result could be measured against — refere
 
 ## Recording answers
 
-After each round, update the manifest rows at once: a decision into Основание; a cancellation → `dropped` with the user's words; something new → a `G##` row with their phrasing; «не знаю» → the missing fact into Основание. Every answer that **cancels, adds or reverses** is also appended to the brief's `## Дополнения`, dated and verbatim.
+After each round, update the manifest rows at once, and the statuses in `interview.md` when there is one: a decision into Основание; a cancellation → `dropped` with the user's words; something new → a `G##` row with their phrasing; «не знаю» → the missing fact into Основание. Every answer that **cancels, adds or reverses** is also appended to the brief's `## Дополнения`, dated and verbatim.
 
 ## When the brief changes later
 
@@ -87,4 +130,4 @@ No interview: `ap.py stage briefing skip --note "сам по брифу — са
 
 ## Closing
 
-Gate **G1**: every row has a status; nothing `open` without a recorded reason. Then one line — «Понял. Пишу спецификацию» — and Phase 3. Do not summarise the interview back to the user.
+Gate **G1**: every row has a status; nothing `open` without a recorded reason; in `interview` and `manual`, no line of `interview.md` left at `ждёт` or `спрошен`. Then one line — «Понял. Пишу спецификацию» — and Phase 3. Do not summarise the interview back to the user.

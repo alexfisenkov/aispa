@@ -4,4 +4,4 @@ VERSION is what the updater compares with GitHub Releases. It must equal
 metadata.version in SKILL.md; tests/test_release.py checks that.
 """
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"

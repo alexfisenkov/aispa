@@ -9,6 +9,7 @@
     python3 .aispa-work/ap.py stage briefing skip --note "сам по брифу — самобрифинг"
     python3 .aispa-work/ap.py set tier=T2 baseCommit=a1b2c3d
     python3 .aispa-work/ap.py set mode=manual            # режим сменили по ходу (full/semi тоже понимаются)
+    python3 .aispa-work/ap.py set questions=one          # «спрашивай по одному»; обратно — questions=rounds
     python3 .aispa-work/ap.py tickets                    # опубликовать задачи из <dir>/tickets/*.md
     python3 .aispa-work/ap.py check-plan                 # гейт G3: трасса манифест ↔ задачи
     python3 .aispa-work/ap.py ticket 02 03 start         # волна ушла
@@ -89,6 +90,13 @@ DEPTH_WORDS = {
     "max": "deep", "maximum": "deep", "максимум": "deep", "максимальная": "deep", "максимально": "deep",
     "по максимуму": "deep", "проработка по максимуму": "deep",
     "глубоко": "deep", "глубокая": "deep", "глубокий": "deep",
+}
+# Как задаются вопросы брифинга: rounds — раундами до четырёх, one — по одному в сообщении.
+# Хранится в state.js, чтобы выбор пользователя пережил сжатие контекста и продолжение.
+QUESTION_FORMS = ("rounds", "one")
+QUESTION_WORDS = {
+    "round": "rounds", "раундами": "rounds", "пачкой": "rounds",
+    "по одному": "one", "по-одному": "one", "одному": "one", "one at a time": "one",
 }
 ORDER = ["preflight", "manifest", "briefing", "spec", "plan", "build", "review", "final"]
 # Этап, чей результат лежит на диске, пройден — даже если его забыли отметить.
@@ -199,6 +207,15 @@ def depth_of(v):
     return d
 
 
+def questions_of(v):
+    """rounds|one; «по одному», "one at a time" → one, «раундами», «пачкой» → rounds."""
+    q = str(v or "").strip().lower()
+    q = QUESTION_WORDS.get(q, q)
+    if q not in QUESTION_FORMS:
+        die("вопросы: rounds (раундами) | one (по одному), а не «%s»" % v)
+    return q
+
+
 def fresh_state(a):
     t = now()
     return {
@@ -206,6 +223,7 @@ def fresh_state(a):
         "slug": a["slug"], "dir": "%s-%s--wip" % (t[:10], a["slug"]),
         "title": a.get("title") or a["slug"],
         "mode": mode_of(a.get("mode") or "important"), "depth": depth_of(a.get("depth") or "normal"),
+        "questions": questions_of(a.get("questions") or "rounds"),
         "tier": None, "briefFile": a.get("brief-file"),
         "memoryFile": a.get("memory-file") or "AGENTS.md",
         "memoryOwner": a.get("memory-owner") or "aispa",
@@ -892,6 +910,7 @@ def cmd_init(opt):
         die("init требует --slug")
     mode_of(opt.get("mode") or "important")       # неверный режим — отказ до архивации прошлого прогона
     depth_of(opt.get("depth") or "normal")
+    questions_of(opt.get("questions") or "rounds")
     old = read_state()
     notes = []
     if old and not old.get("finishedAt") and not opt.get("force"):
@@ -1041,6 +1060,8 @@ def cmd_set(state, pos):
             v = mode_of(v)
         elif k == "depth":
             v = depth_of(v)
+        elif k == "questions":
+            v = questions_of(v)
         state[k] = None if v in ("", "null") else v
 
 

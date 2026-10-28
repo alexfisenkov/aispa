@@ -186,6 +186,30 @@ class Run(unittest.TestCase):
         self.assertNotEqual(self.ap("set", "depth=bottomless")[0], 0)
         self.assertEqual(self.state()["depth"], "deep")
 
+    def test_questions_go_in_rounds_unless_asked_one_at_a_time(self):
+        self.init()
+        self.assertEqual(self.state()["questions"], "rounds")
+        for given, kept in (("one", "one"), ("rounds", "rounds"), ("по одному", "one"),
+                            ("раундами", "rounds"), ("one at a time", "one"), ("Пачкой", "rounds")):
+            code, out = self.ap("set", "questions=" + given)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.state()["questions"], kept)
+        self.ap("set", "questions=one")
+        code, out = self.ap("set", "questions=by-telepathy")
+        self.assertNotEqual(code, 0)
+        self.assertIn("rounds", out)
+        self.assertEqual(self.state()["questions"], "one")
+
+    def test_init_takes_the_question_form_and_refuses_a_bad_one(self):
+        code, out = self.init_with("--questions", "по одному")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.state()["questions"], "one")
+        self.ap("finish", "--result", "готово")
+        code, out = self.ap("init", "--slug", "second", "--questions", "telepathy")
+        self.assertNotEqual(code, 0)
+        self.assertTrue(self.state()["dir"].endswith(self.state()["slug"]))
+        self.assertIsNotNone(self.state()["finishedAt"])
+
     def test_init_records_the_skill_version(self):
         self.init()
         want = re.search(r'^\s*version:\s*"([^"]+)"', read(os.path.join(SKILL, "SKILL.md")), re.M).group(1)
@@ -559,6 +583,18 @@ class Words(unittest.TestCase):
             self.assertIn(label, text)
         for old in ("`full`", "`semi`", "«полный автомат»", "«полуавтомат»"):
             self.assertIn(old, text)
+
+    def test_one_question_at_a_time_is_offered_and_documented(self):
+        modes = read(os.path.join(SKILL, "phases", "0-modes.md"))
+        self.assertIn("• «по одному»", modes)
+        self.assertIn("set questions=one", modes)
+        briefing = read(os.path.join(SKILL, "phases", "2-briefing.md"))
+        for rule in ("One question at a time", "interview.md", "«Дальше решай сам»", "⚑"):
+            self.assertIn(rule, briefing)
+        self.assertNotIn("three to six", briefing)
+        readme = os.path.join(os.path.dirname(SKILL), "..")
+        self.assertIn("«по одному»", read(os.path.join(readme, "README.ru.md")))
+        self.assertIn("\"one at a time\"", read(os.path.join(readme, "README.md")))
 
     def test_phases_do_not_name_modes_the_old_way(self):
         old = re.compile(r"\bsemi\b|\bin full\b(?! check)|\bfull mode\b|\bfull:|^\*\*full\b|\| full \|"

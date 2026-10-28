@@ -4,7 +4,7 @@ description: Builds an app, site, bot, or feature end-to-end from a dictated ide
 disable-model-invocation: true
 argument-hint: "[auto|important|interview|manual] [fast|balanced|max] что нужно построить или путь к brief.md"
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 # AISpa
@@ -34,7 +34,7 @@ This file is the orchestrator: order, gates, the rules that never lose. Each pha
 | — | `phases/9-memory.md` — also in Phase 5, when a ticket discovered something worth keeping | |
 | — | `phases/rationalizations.md` — on a failed gate, on catching yourself excusing something, once before the report | |
 
-**After a compaction, re-read the state, not the phases:** `state.js` (it holds `dir` and `skillDir`), `manifest.md`, `interfaces.md`, `carried.md` if the run has one, and the file of the phase you are in. Nothing else.
+**After a compaction, re-read the state, not the phases:** `state.js` (it holds `dir`, `skillDir` and `questions` — rounds or one at a time), `manifest.md`, `interfaces.md`, `carried.md` if the run has one, `interview.md` while an interview is going on, and the file of the phase you are in. Nothing else.
 
 ## The words the user sees
 
@@ -51,12 +51,12 @@ Phase names here are English and never shown. In the chat, on the dashboard and 
 
 Two dials, decided once in Phase 0 (`phases/0-modes.md`): **the mode** — `auto` «сам по брифу», `important` «только важное», `interview` «интервью», `manual` «ручной»; **the depth** — «Быстро» (`fast`), «Сбалансированно» (`balanced`, default), «Максимум» (`max`); old mode words are understood and stored under the new names: `full`, «полный автомат» → `auto`; `semi`, «полуавтомат» → `important`. For the depth it is the other way round: the user is told Быстро / Сбалансированно / Максимум, and every depth word, old or new, is stored as `strict` / `normal` / `deep` (`fast`, `strict`, «быстро», «строго по брифу» → `strict`; `balanced`, `normal`, «обычная» → `normal`; `max`, `deep`, «глубоко» → `deep`).
 
-**A mode not named in the call is asked once, before `init`** — one choice of four, the host's native choice tool or four numbered options (`phases/0-modes.md`), then wait for the answer. A mode named in the call is never asked again; an answer that names none of the four is `important`. **A depth not named in the call is asked once, as a second, separate question** after the mode — three numbered options with the price in words, wait for the answer before `init` (`phases/0-modes.md`, «The depth start choice»). A depth named in the call, or in the answer to the mode question, is never asked again; an answer that names none of the three is «Сбалансированно». The levels change how much is worked out beyond the brief, not whether the gates and reviews run.
+**A mode not named in the call is asked once, before `init`** — one choice of four, the host's native choice tool or four numbered options (`phases/0-modes.md`), then wait for the answer. A mode named in the call is never asked again; an answer that names none of the four is `important`. **A depth not named in the call is asked once, as a second, separate question** after the mode — three numbered options with the price in words, wait for the answer before `init` (`phases/0-modes.md`, «The depth start choice»). A depth named in the call, or in the answer to the mode question, is never asked again; an answer that names none of the three is «Сбалансированно». The levels change how much is worked out beyond the brief, not whether the gates and reviews run. **«По одному»** — one question per message instead of a round — is the form of the questions, not a mode: taken from the call, the answer to the start question or any moment mid-run, kept in `state.js` (`questions`), never asked about (`phases/2-briefing.md`).
 
 | Phase | auto | important | interview | manual |
 |---|---|---|---|---|
 | 1 Manifest | auto | auto | auto | auto |
-| 2 Briefing | self-briefing | only what the brief leaves open | the adversarial pass, then every fork | the same |
+| 2 Briefing | self-briefing | only forks that change the result | the adversarial pass, then the whole brief, requirement by requirement, until no fork is left | the same |
 | 3 Spec | auto | auto | auto | show → wait for «ок» |
 | 4 Plan | auto, notify | auto, stoppable | auto, stoppable | discuss → wait for «ок» |
 | 5 Build · 6 Review | auto | auto | auto | auto |
@@ -94,6 +94,7 @@ Binding on every phase; the phases do not restate it.
 │   ├── <YYYY-MM-DD>-brief.md   the user's words, redacted; later changes appended
 │   ├── manifest.md             requirements and their status
 │   ├── reference.md            what it should be like — the user's comparables only
+│   ├── interview.md            the question map of an interview: themes, questions, what is left
 │   ├── spec.md                 the specification
 │   ├── interfaces.md           the boundaries, the project rules, what finished tickets built
 │   ├── notes.md                exploration notes, in an existing codebase

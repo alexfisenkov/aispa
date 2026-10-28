@@ -10,7 +10,7 @@ Everything after `/aispa` splits into **the mode** (`auto`, `important`, `interv
 |---|---|---|
 | **auto** — «сам по брифу» | `auto`, «сам по брифу», «ничего не спрашивай»; old: `full`, «полный автомат», «полностью сам», "fully automatic", "don't ask me anything" | none |
 | **important** — «только важное» | `important`, «только важное», «спроси только важное»; old: `semi`, «полуавтомат» | questions, on genuine forks only |
-| **interview** — «интервью» | `interview`, «режим интервью», «погриль меня», «допроси», «задай все вопросы», «разбери задачу со мной», "interview me", "ask me everything" | questions, all of them |
+| **interview** — «интервью» | `interview`, «режим интервью», «погриль меня», «допроси», «задай все вопросы», «разбери задачу со мной», "interview me", "ask me everything" | questions, all of them — the whole brief, requirement by requirement |
 | **manual** — «ручной» | `manual`, «ручной режим», «согласовывай каждый шаг», "approve every step" | the same questions + the spec + the tickets |
 
 `auto` is the old `full`, `important` the old `semi`. The old words are understood everywhere — in the call, in the start choice, mid-run — and stored under the new names: `ap.py init --mode` and `ap.py set mode=` accept `full` and `semi` and write `auto` and `important`.
@@ -21,6 +21,7 @@ Everything after `/aispa` splits into **the mode** (`auto`, `important`, `interv
 - **Not named → the start choice**, once, before `init`.
 - **An answer that names none of the four** — «как хочешь», «не знаю», silence after a nudge, something unrelated — resolves to `important`.
 - **Switchable mid-run** («переключись в ручной») — applies from the next phase; `ap.py set mode=manual`, one line of acknowledgement, nothing replayed.
+- **One question at a time** is not a mode but the form of the questions, in any mode that asks: «спрашивай по одному», «по одному вопросу», "one at a time" — in the call when it is said to you about the questions (not a sentence about the product: «бот задаёт вопросы по одному» is brief), in the answer to the start question («интервью, по одному»), or mid-run. `ap.py init --questions one`, or `ap.py set questions=one` / `questions=rounds` later; how it runs is in `phases/2-briefing.md`. Never asked as a separate start question.
 - **Instructions in the brief** — stack, budget, «без базы данных», a deadline — are requirements in the manifest. They constrain the build; they never replace a phase.
 - **No mode removes the manifest gates or the safety gates.** Deploy, publish, pay, message a third party, delete data, rewrite history — a question in all four modes, `auto` included, with `ap.py ask action --note "…"` before it goes out.
 
@@ -32,7 +33,7 @@ Only on a new run (not a resume, not a run going on in another window) and only 
 Как работаем? Ответь цифрой или словом:
 1. Сам по брифу — по брифу ничего не спрашиваю, решения за тебя перечислю в отчёте.
 2. Только важное — спрошу только то, что в брифе не определено и меняет результат.
-3. Интервью — разберу бриф вопросами до конца, дальше соберу сам.
+3. Интервью — подробно пройду весь бриф вопросами, тема за темой. Вопросов будет много — на обычный проект несколько десятков, зато соберу ровно то, что ты задумал. К каждому — мой вариант, хватит ответить «ок». Хочешь — буду спрашивать по одному. Дальше соберу сам.
 4. Ручной — как интервью, плюс согласуешь спецификацию и список задач.
 ```
 
@@ -85,9 +86,10 @@ Once, before Phase 1, together with the dashboard and the memory file. **A hint,
 Можно переключить в любой момент, просто скажи:
 • «сам по брифу» — по брифу не спрашиваю ничего
 • «только важное» — спрашиваю только то, что меняет результат
-• «интервью» — разберу бриф вопросами до конца, дальше соберу сам
+• «интервью» — подробно пройду весь бриф вопросами, дальше соберу сам
 • «ручной» — то же плюс согласуешь спецификацию и список задач
 • «быстро» / «сбалансированно» / «максимум» — меньше или больше проработки сверх сказанного (в списке только два уровня, которые сейчас не включены)
+• «по одному» — задаю вопросы по одному, а не по несколько сразу
 ```
 
-The first line names the mode and depth actually set, with the words above; the switch list leaves out the mode already on, and its depth line names only the two levels not on (at Сбалансированно — «быстро» / «максимум»; at Быстро — «сбалансированно» / «максимум»; at Максимум — «быстро» / «сбалансированно»). No server → the dashboard line names the file: «Дашборд открыл — `.aispa-work/dashboard.html`, обновляется сам.» Never repeated later; a mid-run switch gets one line: «Понял, дальше ручной режим».
+The first line names the mode and depth actually set, with the words above, and adds «· вопросы по одному» when that form is on; the switch list leaves out the mode already on, and its depth line names only the two levels not on (at Сбалансированно — «быстро» / «максимум»; at Быстро — «сбалансированно» / «максимум»; at Максимум — «быстро» / «сбалансированно»). The last line is «по одному» while questions go in rounds and «раундами» — «снова по несколько вопросов сразу» — while they go one at a time; in `auto` it is left out, since no questions come. No server → the dashboard line names the file: «Дашборд открыл — `.aispa-work/dashboard.html`, обновляется сам.» Never repeated later; a mid-run switch gets one line: «Понял, дальше ручной режим».

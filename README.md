@@ -113,7 +113,7 @@ If you didn't name a mode, the agent first asks one thing — how to work — an
 How do we work? Answer with a number or a word:
 1. On my own from the brief (сам по брифу) — I ask nothing about the brief; decisions made for you are listed in the report.
 2. Only what matters (только важное) — I ask only what the brief leaves undecided and what changes the result.
-3. Interview (интервью) — I go through the brief with questions to the end, then build it myself.
+3. Interview (интервью) — I go through the whole brief in detail, topic by topic. There will be many questions — several dozen on an ordinary project — but I build exactly what you have in mind. Each comes with my own answer, so "ok" is enough. If you like, I'll ask one at a time. Then I build it myself.
 4. Manual (ручной) — like interview, plus you approve the spec and the task list.
 ```
 
@@ -140,12 +140,17 @@ Project memory — AGENTS.md (+ CLAUDE.md pointing to it).
 
 You can switch at any time, just say:
 • "on my own from the brief" — I ask nothing about the brief
-• "interview me" — I go through the brief with questions to the end, then build it myself
+• "interview me" — I go through the whole brief in detail, then build it myself
 • "manual" / "approve every step" — the same, plus you approve the spec and the task list
 • "fast" / "maximum" — less or more elaboration beyond what you said
+• "one at a time" — I ask questions one by one instead of several at once
 ```
 
-Questions come in **rounds**: several at once, numbered, each with the answer the agent would pick itself. Agree with all — reply "ok"; disagree with one — "2 — a spreadsheet, the rest ok".
+Questions come in **rounds**: up to four at once, on one topic, numbered, each with the answer the agent would pick itself. Agree with all — reply "ok"; disagree with one — "2 — a spreadsheet, the rest ok". Where the answer decides what you get, the question is marked ⚑ with options а/б/в — that letter you pick yourself; "ok" does not stand in for it.
+
+Hard to read several questions in a row? Say **"one at a time"** (in the command, in the answer to the first question, or at any moment): the agent asks one question per message, still with its own answer. "In rounds" switches back.
+
+In interview and manual mode there are many questions — several dozen on an ordinary project: the agent walks the brief requirement by requirement until every fork is closed. Before the first question it shows the topics and roughly how many questions there are, and every round says how many are left. Had enough — say **"decide the rest yourself"**: it settles the rest and lists those decisions in the report.
 
 ---
 
@@ -156,8 +161,8 @@ After `/aispa` you can add how closely you want to be involved. Add nothing — 
 | Mode | How to turn it on | What you're asked |
 |---|---|---|
 | **On my own from the brief** (`auto`) | `/aispa auto ...` or "don't ask me anything" | Nothing about the brief (only the one start question about depth, if you didn't name it in the command). At the end — a list of decisions made for you |
-| **Only what matters** (`important`) | `/aispa important ...`; also what an unclear answer to the first question means | Only what the brief leaves undecided: usually one or two rounds of questions. If everything is clear — none |
-| **Interview** | `/aispa interview ...`, "interview me", "ask me everything" | Every fork, plus where the idea might not work. Then it builds on its own |
+| **Only what matters** (`important`) | `/aispa important ...`; also what an unclear answer to the first question means | Only what the brief leaves undecided and what changes the result: usually one or two rounds of questions. If everything is clear — none |
+| **Interview** | `/aispa interview ...`, "interview me", "ask me everything" | The whole brief in detail, topic by topic: for every requirement — what its words mean, what an empty screen shows, what happens on an error, who may do what, what comes after. Plus where the idea might not work. Usually several dozen questions, one at a time if you like. Then it builds on its own |
 | **Manual** | `/aispa manual ...` or "approve every step" | Same as interview, then your "ok" on the spec and on the task list |
 
 ```
@@ -286,7 +291,7 @@ The main principle: **the order is the product**. Code is written in the second-
 |---|---|
 | **Preflight** | Project folder setup, `.gitignore`, instruments — the dashboard opens right away |
 | **Requirements** | Your text → numbered requirements, word for word |
-| **Briefing** | Questions in rounds, only on real forks; first come the ones the project can't be built without: payments, hosting, access |
+| **Briefing** | Questions in rounds (or one at a time, if you ask), only on real forks; first come the ones the project can't be built without: payments, hosting, access. In interview mode — the whole brief in detail, topic by topic |
 | **Spec** | Requirements unfold into worked-out scenarios |
 | **Plan** | The spec is cut into tasks — or not, if the job is small — and laid out in waves: what can be built at the same time, and what only in order |
 | **Development** | One task = one separate agent with a clean memory, one commit; independent tasks run in parallel |
@@ -454,7 +459,7 @@ skills/aispa/
 │   ├── 0-instruments.md        dashboard: launch, and one command per event
 │   ├── 0-memory.md             choosing the project memory file
 │   ├── 1-manifest.md           brief → requirements, secrets filter
-│   ├── 2-briefing.md           questions in rounds, reference
+│   ├── 2-briefing.md           questions in rounds or one at a time, the interview question map, reference
 │   ├── 2-adversarial.md        where the idea might fail — in interview mode and at Maximum depth
 │   ├── 3-spec.md               the spec and how deep to work it out
 │   ├── 4-plan.md               splitting into tasks by volume, waves, who gets review and which model
