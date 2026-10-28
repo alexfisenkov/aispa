@@ -188,9 +188,10 @@ class Run(unittest.TestCase):
 
     def test_questions_go_in_rounds_unless_asked_one_at_a_time(self):
         self.init()
-        self.assertEqual(self.state()["questions"], "rounds")
+        self.assertIsNone(self.state()["questions"])  # форму ещё не спрашивали — спросит карта интервью
         for given, kept in (("one", "one"), ("rounds", "rounds"), ("по одному", "one"),
-                            ("раундами", "rounds"), ("one at a time", "one"), ("Пачкой", "rounds")):
+                            ("раундами", "rounds"), ("one at a time", "one"), ("Пачкой", "rounds"),
+                            ("пачками", "rounds")):
             code, out = self.ap("set", "questions=" + given)
             self.assertEqual(code, 0, out)
             self.assertEqual(self.state()["questions"], kept)

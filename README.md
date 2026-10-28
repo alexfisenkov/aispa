@@ -520,7 +520,7 @@ Four rules; break one and updates stop for everyone who installed from a Release
 
 ```bash
 gh release edit v1.0.0 --prerelease --latest=false
-curl -sIL https://github.com/alexfisenkov/aispa/releases/latest/download/install.py | grep -i '^location' | tail -1   # must point at v1.0.1
+curl -sIL https://github.com/alexfisenkov/aispa/releases/latest/download/install.py | grep -i '^location' | tail -1   # must point at the newest Release
 ```
 
 ## License

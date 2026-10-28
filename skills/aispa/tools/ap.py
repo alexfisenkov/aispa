@@ -95,7 +95,7 @@ DEPTH_WORDS = {
 # Хранится в state.js, чтобы выбор пользователя пережил сжатие контекста и продолжение.
 QUESTION_FORMS = ("rounds", "one")
 QUESTION_WORDS = {
-    "round": "rounds", "раундами": "rounds", "пачкой": "rounds",
+    "round": "rounds", "раундами": "rounds", "пачкой": "rounds", "пачками": "rounds", "по несколько": "rounds",
     "по одному": "one", "по-одному": "one", "одному": "one", "one at a time": "one",
 }
 ORDER = ["preflight", "manifest", "briefing", "spec", "plan", "build", "review", "final"]
@@ -223,7 +223,7 @@ def fresh_state(a):
         "slug": a["slug"], "dir": "%s-%s--wip" % (t[:10], a["slug"]),
         "title": a.get("title") or a["slug"],
         "mode": mode_of(a.get("mode") or "important"), "depth": depth_of(a.get("depth") or "normal"),
-        "questions": questions_of(a.get("questions") or "rounds"),
+        "questions": questions_of(a["questions"]) if a.get("questions") else None,  # None — форму ещё не спрашивали
         "tier": None, "briefFile": a.get("brief-file"),
         "memoryFile": a.get("memory-file") or "AGENTS.md",
         "memoryOwner": a.get("memory-owner") or "aispa",
@@ -910,7 +910,8 @@ def cmd_init(opt):
         die("init требует --slug")
     mode_of(opt.get("mode") or "important")       # неверный режим — отказ до архивации прошлого прогона
     depth_of(opt.get("depth") or "normal")
-    questions_of(opt.get("questions") or "rounds")
+    if opt.get("questions"):
+        questions_of(opt["questions"])
     old = read_state()
     notes = []
     if old and not old.get("finishedAt") and not opt.get("force"):

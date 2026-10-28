@@ -67,7 +67,7 @@ Immediately after `init`, before Phase 1 asks anything.
 | entering a phase | `stage <id>` — the stage before it closes itself |
 | a phase consciously not run | `stage <id> skip --note "причина"` |
 | tier decided | `set tier=T2` |
-| «по одному» or back to rounds — in the call, the start answer or mid-run | `set questions=one` · `set questions=rounds` (or `--questions one` on `init`) |
+| «по одному» or back to rounds — in the call, the start answer, the answer to the form question in the interview map, or mid-run | `set questions=one` · `set questions=rounds` (or `--questions one` on `init`) |
 | ticket files written | `tickets` — publishes every ticket; manifest rows `in-spec` → `in-ticket` |
 | gate G3 | `check-plan` |
 | the plan commit is made | `set baseCommit=<sha>` — chained with it (`phases/4-plan.md`) |

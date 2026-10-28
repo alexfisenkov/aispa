@@ -520,7 +520,7 @@ AISpa можно менять точечно. Все файлы — обычны
 
 ```bash
 gh release edit v1.0.0 --prerelease --latest=false
-curl -sIL https://github.com/alexfisenkov/aispa/releases/latest/download/install.py | grep -i '^location' | tail -1   # должно вести на v1.0.1
+curl -sIL https://github.com/alexfisenkov/aispa/releases/latest/download/install.py | grep -i '^location' | tail -1   # должно вести на последний выпуск
 ```
 
 ## Лицензия
