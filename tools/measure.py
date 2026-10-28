@@ -82,10 +82,16 @@ def _add(totals, usage, fields):
 def parse_tokens(text):
     """Sum of the environment's own usage numbers, or "unknown". Nothing is estimated.
 
-    Codex: every `turn.completed`. Claude Code: every answer with `modelUsage`
-    (all models, subagents included), summed over all answers when a wrapper
-    continues the run in several turns; without `modelUsage` every `result`
-    answer's `usage`. Otherwise the last top-level `usage`.
+    Codex: every `turn.completed` is one turn's spend, so they are summed.
+    Claude Code: `modelUsage` (all models, subagents included) is the running
+    total of the whole session, and a wrapper that continues the run
+    (`--resume <session_id>`) gets it back on every turn. So answers are grouped
+    by `session_id`, the last answer of each session gives that session's total,
+    and the totals of different sessions are summed. An answer without a
+    `session_id` is its own session. Without `modelUsage` every `result`
+    answer's top-level `usage` is summed (it is per turn, main chat only; a
+    live log showed it dropping to zero on idle turns). Otherwise the last
+    top-level `usage`.
     """
     items = _json_items(text)
     totals = {}
@@ -95,7 +101,12 @@ def parse_tokens(text):
         for item in turns:
             _add(totals, item["usage"], TOKEN_FIELDS)
     elif answers:
-        for item in answers:
+        last_of_session = {}
+        for index, item in enumerate(answers):
+            session = item.get("session_id")
+            key = session if isinstance(session, str) and session else ("no-session", index)
+            last_of_session[key] = item
+        for item in last_of_session.values():
             for usage in item["modelUsage"].values():
                 if isinstance(usage, dict):
                     _add(totals, usage, MODEL_USAGE_FIELDS)

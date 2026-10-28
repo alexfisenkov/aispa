@@ -36,15 +36,26 @@ elif mode == "codex":
     print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 300, "cached_input_tokens": 0, "output_tokens": 60}}))
 elif mode in ("claude-models", "claude-two"):
     # The top-level usage covers the main chat only; modelUsage also has every subagent model.
+    # claude-two: two separate sessions, one answer each (their totals are added).
     answers = 2 if mode == "claude-two" else 1
     for index in range(answers):
-        print(json.dumps({"type": "result", "result": "done", "usage": {"input_tokens": 1, "output_tokens": 1},
+        print(json.dumps({"type": "result", "result": "done", "session_id": "session-%d" % index,
+                          "usage": {"input_tokens": 1, "output_tokens": 1},
                           "modelUsage": {
                               "claude-opus-5-5": {"inputTokens": 100 + index, "outputTokens": 50,
                                                   "cacheReadInputTokens": 1000, "cacheCreationInputTokens": 10,
                                                   "costUSD": 0.5},
                               "claude-sonnet-5-5": {"inputTokens": 400, "outputTokens": 70,
                                                     "cacheReadInputTokens": 2000, "cacheCreationInputTokens": 30}}}))
+elif mode == "claude-resumed":
+    # One session continued with --resume: modelUsage is the running total, and the last turn hit the limit
+    # and did nothing, so it repeats the previous total.
+    for opus_in, opus_out, cache_read, cache_creation in ((100, 50, 1000, 10), (160, 80, 3000, 30), (160, 80, 3000, 30)):
+        print(json.dumps({"type": "result", "result": "done", "session_id": "one-session",
+                          "usage": {"input_tokens": 1, "output_tokens": 1},
+                          "modelUsage": {"claude-opus-5-5": {"inputTokens": opus_in, "outputTokens": opus_out,
+                                                             "cacheReadInputTokens": cache_read,
+                                                             "cacheCreationInputTokens": cache_creation}}}))
 elif mode == "codex-long":
     print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 200, "output_tokens": 40}}))
     sys.stdout.write("x" * (5 * 1024 * 1024) + "\\n")
@@ -139,9 +150,15 @@ class PairTests(ToolCase):
         # Hand sums of the fixture: opus 100+50+1000+10, sonnet 400+70+2000+30.
         self.assertEqual(record["aispa"]["tokens"], {"input": 500, "output": 120, "cacheRead": 3000,
                                                       "cacheCreation": 40, "total": 3660})
-        # Two answers of a wrapper that continues the run: both are counted (second opus input is 101).
+        # Two different sessions: their totals are added (second opus input is 101).
         self.assertEqual(record["autopilot"]["tokens"], {"input": 1001, "output": 240, "cacheRead": 6000,
                                                           "cacheCreation": 80, "total": 7321})
+
+    def test_a_resumed_session_counts_its_last_running_total_once(self):
+        code, out, record = self.pair(self.command("claude-resumed"), self.command("silent"))
+        # Three answers of one session (100 -> 160 -> 160 after a limit turn): the last total, not 420 input.
+        self.assertEqual(record["aispa"]["tokens"], {"input": 160, "output": 80, "cacheRead": 3000,
+                                                      "cacheCreation": 30, "total": 3270})
 
     def test_tokens_are_counted_on_the_whole_stdout_and_only_the_saved_copy_is_cut(self):
         code, out, record = self.pair(self.command("codex-long"), self.command("silent"), limit=60)
@@ -162,6 +179,54 @@ class PairTests(ToolCase):
         code, out, record = self.pair("definitely-not-a-program-xyz", self.command("claude"))
         self.assertEqual(record["aispa"]["exitCode"], "not-started")
         self.assertEqual(record["aispa"]["tokens"], "unknown")
+
+
+class ParseTokensTests(unittest.TestCase):
+    @staticmethod
+    def answer(session, opus_input, opus_output=0, **extra):
+        item = {"type": "result", "modelUsage": {"claude-opus-5-5": {"inputTokens": opus_input,
+                                                                       "outputTokens": opus_output}}}
+        if session is not None:
+            item["session_id"] = session
+        return {**item, **extra}
+
+    @staticmethod
+    def text(*items):
+        return "\n".join(json.dumps(item) for item in items)
+
+    def test_answers_of_one_session_give_the_last_running_total(self):
+        tokens = measure.parse_tokens(self.text(self.answer("a", 100, 10), self.answer("a", 160, 40),
+                                                self.answer("a", 190, 90)))
+        self.assertEqual(tokens, {"input": 190, "output": 90, "total": 280})
+
+    def test_different_sessions_add_their_last_totals(self):
+        tokens = measure.parse_tokens(self.text(self.answer("a", 100), self.answer("b", 1000),
+                                                self.answer("a", 160), self.answer("b", 1500)))
+        self.assertEqual(tokens, {"input": 1660, "output": 0, "total": 1660})
+
+    def test_a_turn_stuck_on_the_limit_with_the_same_total_adds_nothing(self):
+        stuck = self.answer("a", 160, 40)
+        once = measure.parse_tokens(self.text(self.answer("a", 100, 10), stuck))
+        repeated = measure.parse_tokens(self.text(self.answer("a", 100, 10), stuck, stuck, stuck))
+        self.assertEqual(repeated, once)
+        self.assertEqual(repeated, {"input": 160, "output": 40, "total": 200})
+
+    def test_an_answer_without_session_id_is_its_own_session(self):
+        tokens = measure.parse_tokens(self.text(self.answer(None, 7), self.answer(None, 5), self.answer("a", 100)))
+        self.assertEqual(tokens, {"input": 112, "output": 0, "total": 112})
+
+    def test_without_model_usage_every_result_usage_is_summed_as_before(self):
+        def result(tokens):
+            return {"type": "result", "session_id": "a", "usage": {"input_tokens": tokens, "output_tokens": 1}}
+        tokens = measure.parse_tokens(self.text(result(10), result(20), result(0)))
+        self.assertEqual(tokens, {"input": 30, "output": 3, "total": 33})
+
+    def test_codex_turns_are_still_summed(self):
+        turn = {"type": "turn.completed", "usage": {"input_tokens": 5, "output_tokens": 1}}
+        self.assertEqual(measure.parse_tokens(self.text(turn, turn)), {"input": 10, "output": 2, "total": 12})
+
+    def test_no_numbers_stay_unknown(self):
+        self.assertEqual(measure.parse_tokens("no json"), "unknown")
 
 
 class CompareTests(ToolCase):
