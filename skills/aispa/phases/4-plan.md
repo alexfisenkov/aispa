@@ -51,7 +51,7 @@ Every ticket of the chain carries the same requirement. It applies when the chan
 **Review** — whether the ticket gets a point review after its commit (`phases/6-review.md`). It never holds up the build: the next tickets fly while it runs. **Every ticket is reviewed once at the end anyway**, as part of the whole branch — a point review is only for what is worth catching earlier.
 
 - `да — фундамент` — ticket 01, when later tickets build on it, and the expand step of a wide change. Nothing else is foundation.
-- `да — <риск>` — a ticket whose **own code** is one of these: sign-in, passwords, sessions, 2FA; keys and secrets; money; deleting or migrating user data. A ticket that only checks permissions inside an ordinary feature is not a risk ticket — the whole-branch review covers it. Most tickets in a product with access rights touch them; marking them all is how a run reviews 12 tickets of 15.
+- `да — <риск>` — a ticket whose **own code** is one of these: sign-in, passwords, sessions, 2FA; keys and secrets; money; deleting or migrating user data; granting and checking access; processing personal data. A ticket that only checks permissions inside an ordinary feature is not a risk ticket — the whole-branch review covers it. Most tickets in a product with access rights touch them; marking them all is how a run reviews 12 tickets of 15.
 - `нет` — the rest. Most tickets. **At T0 the one ticket is `нет` too**: the whole-branch review is its review, and a point review would read the same diff twice.
 
 **Model** — who builds it.
@@ -98,6 +98,7 @@ Every ticket of the chain carries the same requirement. It applies when the chan
 ```
 
 - **The verbatim brief quotes are not decoration** — they are the last thing standing between a fresh context and a plausible reinterpretation, and the point reviewer judges the Manifest axis from them.
+- **A criterion names the surface in the brief's words** — «нажимает кнопку „Записаться“», not «вызывает запись». Where the brief says how it is used — a button, a command, a screen, a role — the criterion says it the same way.
 - **Every criterion is checkable and false at the commit the executor starts from.** A criterion already true tests nothing; the executor proves each one red before building it (`prompts/executor.md`).
 - No file paths or code snippets except a structure prose states worse — a schema, a state machine.
 - `Зависит от` lists ticket numbers only — `01, 02`, or `—`.

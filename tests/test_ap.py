@@ -33,6 +33,15 @@ MANIFEST = """# Манифест требований
 | R05 | «цвета студии» | in-spec | — | spec §6 |
 """
 
+BRIEF = """# Изначальная задача
+
+Бот принимает заявки и складывает в таблицу, плюс SMS, в цветах студии.
+
+## Дополнения
+
+- 2026-10-01 — «SMS не надо, только телега»
+"""
+
 
 def read(path):
     with open(path, encoding="utf-8") as f:
@@ -156,6 +165,7 @@ class Run(unittest.TestCase):
     def plan(self):
         self.init()
         self.write("manifest.md", MANIFEST)
+        self.write("2026-10-01-brief.md", BRIEF)
         self.write("tickets/01-karkas.md", ticket("01", "Каркас", "R01, R05", "—", ["src/core/"], 1, "да — фундамент", "сильная"))
         self.write("tickets/02-priem.md", ticket("02", "Приём", "R01.1, R02, A01", "01", ["src/bot/"], 2))
 
@@ -193,6 +203,30 @@ class Run(unittest.TestCase):
         self.write("manifest.md", MANIFEST + "| G01 | «отмена» | in-spec | — | spec §5 |\n")
         code, out = self.ap("check-plan")
         self.assertIn("требование G01", out)
+
+    def dropped_lines(self, out):
+        return [line for line in out.splitlines() if line.lstrip().startswith("!") and "R03" in line]
+
+    def test_check_plan_accepts_a_drop_quoted_from_any_brief_file(self):
+        self.plan()
+        self.write("2026-10-01-brief.md", "# Изначальная задача\n\nБот для заявок, SMS тоже.\n")
+        self.write("2026-10-02-brief.md", "# Изначальная задача\n\nА SMS — не надо, только телега.\n")
+        code, out = self.ap("check-plan")
+        self.assertEqual(self.dropped_lines(out), [], out)
+        self.assertIn("G3: трасса сходится", out)
+
+    def test_check_plan_flags_a_drop_whose_quote_is_not_in_the_brief(self):
+        self.plan()
+        self.write("2026-10-01-brief.md", "# Изначальная задача\n\nБот для заявок.\n\n## Дополнения\n\n- 2026-10-01 — «телега»\n")
+        code, out = self.ap("check-plan")
+        self.assertEqual(len(self.dropped_lines(out)), 1, out)
+        self.assertFalse(self.state()["gates"]["G3"]["ok"])
+
+    def test_check_plan_flags_a_drop_without_a_quote(self):
+        self.plan()
+        self.write("manifest.md", MANIFEST.replace("| dropped | «не надо» |", "| dropped | пользователь отказался |"))
+        code, out = self.ap("check-plan")
+        self.assertEqual(len(self.dropped_lines(out)), 1, out)
 
     def test_done_closes_rows_only_when_all_their_tickets_are_done(self):
         self.plan()

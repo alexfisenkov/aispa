@@ -45,7 +45,7 @@
 - A promised wait — «через минуту», «если не ответишь за N секунд» — you cannot honour.
 - An invented fact about the user where a stub belongs.
 - A process question outside manual — which tracker, which memory file, ticket granularity.
-- A requirement quietly narrowed to whatever worked, or the spec amended with no `D##`.
+- A requirement quietly narrowed to whatever worked, or the spec amended with no `D##`, or the way of use the user asked for replaced by another.
 - Two tickets in one context or one commit; a commit that took files outside the ticket's zone, or swept in work the user had in the tree.
 - The orchestrator editing a file outside `.aispa-work/`, the memory files, `.gitignore` and `.env.example`.
 - A diff or a raw test log read into the orchestrator's context.

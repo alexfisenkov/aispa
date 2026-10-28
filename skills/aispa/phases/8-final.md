@@ -1,12 +1,12 @@
 # Phase 8 — Acceptance
 
-`ap.py stage final`. Three subagents, no contact between them, each answering a different question. The blind checker and the ADR agent go out **in one message**; the memory agent goes out when the blind checker has returned, because it needs the commands the checker proved:
+`ap.py stage final`. Three subagents, no contact between them, each answering a different question. The blind checker and the ADR agent go out **in one message**; the memory agent goes out last — after the blind check, its `F2` repair and the repeat check (§1) — because it needs the commands the last check proved and describes the code as the repair left it:
 
 | Agent | Question | Receives | Never receives |
 |---|---|---|---|
 | blind checker | что из брифа сделано | the brief files, the repository | `spec.md`, `manifest.md`, tickets |
 | ADR *(T2+)* | почему сделано именно так и как здесь называются вещи | `spec.md`, `manifest.md`, `interfaces.md`, `notes.md` | the repo |
-| memory | как этим пользоваться завтра | the repo, the memory file, `interfaces.md`, the tier, the commands the checker ran | `spec.md`, tickets |
+| memory | как этим пользоваться завтра | the repo, the memory file, `interfaces.md`, the tier, the commands the last blind check ran | `spec.md`, tickets |
 
 ## 1. Blind acceptance — gate G4
 
@@ -34,6 +34,10 @@ It receives every `*-brief.md` in `dir`, oldest first, **whole, `## Дополн
 > вообще (нужен аккаунт, ключ, внешний сервис) — скажи прямо, что помешало,
 > и не выдавай чтение кода за проверку.
 >
+> Проходи сценарий тем способом, что назван в брифе: просили кнопки — нажимай
+> кнопки; есть роли — пройди за каждую роль; данные бери те, что дал заказчик.
+> Сделано другим способом — «нет», даже если результат тот же.
+>
 > По каждому требованию из брифа: реализовано / частично / нет — и одна строка,
 > где это видно. Требование выполнено формально, а по сути не работает (данные
 > сохраняются, но пользователю не показываются) — это «частично».
@@ -48,12 +52,18 @@ It receives every `*-brief.md` in `dir`, oldest first, **whole, `## Дополн
 | Manifest | Blind | Meaning |
 |---|---|---|
 | `done` | реализовано | agreed |
-| `done` | **частично / нет** | 🔴 **drift** — the manifest is wrong. A ticket, or a line in the report; never an edit of your own |
+| `done` | **частично / нет** | 🔴 **drift** — the manifest is wrong. Repaired by the three steps below; never an edit of your own |
 | `placeholder` | частично | expected — confirm the stub is visible, not an invented fact |
 | `dropped` / `deferred` | нет | expected — in the report as not built |
 | — | реализовано, но не из брифа | scope that grew without a parent — reported |
 
-Record it in one call — `ap.py blind checked=N matched=M --mismatch "…" --mismatch "…"`, one `--mismatch` per 🔴. A drift found here is the run working; hiding it is the failure. **A build nobody has launched is a build nobody has seen work** — if it cannot be run here at all, that goes to «Что нужно от тебя», not into the accepted column.
+Record it in one call — `ap.py blind checked=N matched=M --mismatch "…" --mismatch "…"`, one `--mismatch` per 🔴. A drift found here is the run working; hiding it is the failure. Then it is repaired — one round, no more:
+
+1. **Every drift that code can close goes into one ticket, `F2`**, by the path of `F1` (`phases/6-review.md`): the drifted requirements, the checker's lines as its acceptance criteria verbatim, the zone of the tickets that built them; one executor, the check, one re-review in mode «ремонт», one commit.
+2. **Then one repeat blind check** of only the items that drifted, with the same prompt, from a fresh clone; record it again — `ap.py blind checked=N matched=M --mismatch "…"` over the whole count, with what still drifts.
+3. **Into the report goes only** what cannot be fixed without the user — their fact, an access, an account — and what is still off after this round.
+
+**A build nobody has launched is a build nobody has seen work** — if it cannot be run here at all, that goes to «Что нужно от тебя», not into the accepted column.
 
 ## 2. Memory and ADRs
 
@@ -67,10 +77,10 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 
 | Section | Read from |
 |---|---|
-| Решения, принятые за тебя *(full: first in the report)* | `manifest.md` — every `ASSUMPTION` |
+| Решения, принятые за тебя *(first in the report)* | `manifest.md` — every `ASSUMPTION`, and beside them every `deferred` `R##` / `G##` row with its quote and Основание |
 | Готово | **the blind checker's verdict**, not the manifest's `done` rows |
 | Что нужно от тебя | `placeholder` rows + `state.js` → `debt` |
-| Что не вошло | `deferred` and `dropped` rows, with their quotes |
+| Что не вошло | `dropped` rows, with their quotes |
 | Что я добавил сверх заказанного | `state.js` → `additions`, checked against the spec's `A##` |
 | Что пошло не по плану | every `D##` row, every failed ticket |
 | Что осталось после ревью | `state.js` → `report` |
