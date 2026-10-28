@@ -1,0 +1,30 @@
+name: Проверка
+
+# Один ручной запуск на готовый набор перед выпуском: Actions → Проверка → Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Тесты
+        run: python -B -m unittest discover -s tests -v
+      - name: Сборка файлов выпуска и самопроверка
+        shell: bash
+        run: python -B tools/собрать-выпуск.py --output "$RUNNER_TEMP/выпуск"

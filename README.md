@@ -494,7 +494,7 @@ AISpa can be changed point by point. Every file is plain text: the rules of each
 `npx skills` installs get a new version from `main` right after the push. Copies installed from a GitHub Release — all former 0.x — see it only in a **Release carrying three files**. So every new version is five steps:
 
 1. **The version in three places, the same:** `metadata.version` in `skills/aispa/SKILL.md`, `VERSION` in `skills/aispa/tools/aispa_core/__init__.py`, and a new `## X.Y.Z` line at the top of `CHANGELOG.md`. The tests check that all three match.
-2. **Tests and commit:** `python3 -B -m unittest discover -s tests`, then commit and `git push origin main`.
+2. **Tests and commit:** `python3 -B -m unittest discover -s tests`, then commit and `git push origin main`. After the push — one check on GitHub on macOS, Linux and Windows: `gh workflow run ci.yml --ref main`, wait for green with `gh run watch`.
 3. **Release files:** `python3 tools/собрать-выпуск.py`. It takes the files of the last commit (not of the working folder), puts three files into `dist/` — `aispa.zip`, `aispa-update.json`, `install.py` — and checks them the same way the updater will. If it complains, do not release until it is fixed. Build **after** the last commit: its hash goes into the manifest and must equal the commit of the tag.
 4. **A tag on that same commit:** `git tag vX.Y.Z && git push origin vX.Y.Z`.
 5. **The Release with the files:**
