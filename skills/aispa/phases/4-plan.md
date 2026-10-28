@@ -57,7 +57,9 @@ Every ticket of the chain carries the same requirement. It applies when the chan
 **Model** — who builds it.
 
 - `сильная` — every ticket with review `да`, and any ticket whose core is a genuinely hard algorithm or an unfamiliar integration.
-- `обычная` — the rest: a well-specified slice over decided boundaries. It runs on a cheaper model (`phases/5-subagents.md`).
+- `обычная` — the rest: a well-specified slice over decided boundaries. It runs on a cheaper model (route table in `SKILL.md`).
+- `механика-скрипт` — mechanics: «форматирование, сверка, раскладка файлов, где результат проверяет скрипт». Only when the ticket's criteria name the script command that checks every one of them.
+- `механика` — the same kind of work, when no script checks the result. A ticket that writes code or text for a person is never mechanics.
 
 ## The ticket file
 

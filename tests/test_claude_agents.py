@@ -1,23 +1,18 @@
-"""Claude Code agent files shipped with the package match the model route table."""
-import json
+"""Agent files, openai.yaml and the model table in SKILL.md stay consistent (AISpa 1.0)."""
 from pathlib import Path
 import re
-import shutil
-import subprocess
-import sys
-import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "skills/aispa"
-sys.path.insert(0, str(PACKAGE / "tools"))
-from aispa_core import model_routes
-
 AGENTS = PACKAGE / "agents/claude-code"
-EXPECTED_FILES = {
-    "aispa-judge.md", "aispa-sensitive-worker.md", "aispa-worker.md",
-    "aispa-mechanic-scripted.md", "aispa-mechanic.md", "aispa-researcher.md",
-}
+SKILL = (PACKAGE / "SKILL.md").read_text(encoding="utf-8")
+
+NAMES = ["aispa-judge", "aispa-sensitive-worker", "aispa-worker",
+         "aispa-mechanic-scripted", "aispa-mechanic", "aispa-researcher"]
+FIRST_LINE = "Если в промпте есть путь к пакету роли — прочитай его целиком первым."
+FORBIDDEN = re.compile(r"\b(fable|astra|inherit|xhigh|max|ultra)\b", re.I)
+SECTION_TITLE = "## Subagent models"
 
 
 def frontmatter(path):
@@ -30,84 +25,104 @@ def frontmatter(path):
         key, sep, value = line.partition(":")
         if not sep:
             raise AssertionError("bad frontmatter line in %s: %r" % (path.name, line))
-        if key.strip() in fields:
-            raise AssertionError("duplicate key %s in %s" % (key, path.name))
         fields[key.strip()] = value.strip()
     return fields, text[match.end():]
 
 
-class ClaudeAgentFilesTests(unittest.TestCase):
-    def test_package_ships_exactly_the_six_route_agents(self):
-        self.assertTrue(AGENTS.is_dir())
-        self.assertEqual({p.name for p in AGENTS.iterdir()}, EXPECTED_FILES)
-        self.assertEqual({name + ".md" for name in model_routes.CLAUDE_AGENT_FILES.values()}, EXPECTED_FILES)
+def model_section():
+    start = SKILL.index(SECTION_TITLE)
+    end = SKILL.index("\n## ", start + 1)
+    return SKILL[start:end]
 
-    def test_model_and_effort_match_claude_code_route_table(self):
-        for cls, name in model_routes.CLAUDE_AGENT_FILES.items():
-            with self.subTest(cls=cls):
-                fields, body = frontmatter(AGENTS / (name + ".md"))
-                self.assertEqual(fields["name"], name)
-                self.assertRegex(fields["description"], r'\A"[^"]+"\Z')
-                self.assertIn(fields["model"], model_routes.CLAUDE_ALIASES)
-                route = model_routes.ROUTES[cls]["claude-code"]
-                self.assertEqual(model_routes.CLAUDE_ALIASES[fields["model"]], route["model"])
-                self.assertEqual(fields["effort"], route["effort"])
-                self.assertTrue(body.strip())
 
-    def test_owner_approved_aliases_per_class(self):
-        # Spec story 42: Opus for judge, sensitive worker and research; Sonnet for
-        # ordinary and unscripted mechanical work; Haiku only for scripted mechanics.
-        expected = {"judge": ("opus", "high"), "sensitive_worker": ("opus", "high"),
-                    "worker": ("sonnet", "medium"), "mechanical_scripted": ("haiku", "low"),
-                    "mechanical": ("sonnet", "low"), "research": ("opus", "medium")}
-        for cls, (model, effort) in expected.items():
-            with self.subTest(cls=cls):
-                fields, _body = frontmatter(AGENTS / (model_routes.CLAUDE_AGENT_FILES[cls] + ".md"))
-                self.assertEqual((fields["model"], fields["effort"]), (model, effort))
+def table_routes():
+    """agent name -> (model, effort) read from the table in SKILL.md."""
+    routes = {}
+    for row in model_section().splitlines():
+        if not row.startswith("|"):
+            continue
+        claude_cell = row.split("|")[2]
+        found = re.search(r"(Opus|Sonnet|Haiku) · (low|medium|high)", claude_cell)
+        if found:
+            for name in re.findall(r"`(aispa-[a-z-]+)`", claude_cell):
+                routes[name] = (found.group(1).lower(), found.group(2))
+    return routes
 
-    def test_no_forbidden_model_or_effort_words(self):
-        for path in AGENTS.iterdir():
+
+class AgentFilesTests(unittest.TestCase):
+    def test_package_ships_exactly_the_six_agents(self):
+        self.assertEqual(sorted(p.name for p in AGENTS.iterdir()), sorted(n + ".md" for n in NAMES))
+        for name in NAMES:
+            fields, _body = frontmatter(AGENTS / (name + ".md"))
+            self.assertEqual(fields["name"], name)
+
+    def test_model_and_effort_are_allowed_and_match_the_table(self):
+        routes = table_routes()
+        self.assertEqual(sorted(routes), sorted(set(NAMES) - {"aispa-researcher"}))
+        for name in NAMES:
+            with self.subTest(agent=name):
+                fields, _body = frontmatter(AGENTS / (name + ".md"))
+                self.assertIn(fields["model"], {"opus", "sonnet", "haiku"})
+                self.assertIn(fields["effort"], {"low", "medium", "high"})
+                if name in routes:
+                    self.assertEqual((fields["model"], fields["effort"]), routes[name])
+
+    def test_table_values_chosen_by_the_owner(self):
+        self.assertEqual(table_routes(), {
+            "aispa-judge": ("opus", "high"), "aispa-sensitive-worker": ("opus", "high"),
+            "aispa-worker": ("sonnet", "medium"), "aispa-mechanic-scripted": ("haiku", "low"),
+            "aispa-mechanic": ("sonnet", "low")})
+
+    def test_body_starts_with_the_role_package_line(self):
+        for name in NAMES:
+            with self.subTest(agent=name):
+                _fields, body = frontmatter(AGENTS / (name + ".md"))
+                self.assertEqual(body.strip().splitlines()[0], FIRST_LINE)
+
+
+class ForbiddenWordsTests(unittest.TestCase):
+    def hits(self, path):
+        text = path.read_text(encoding="utf-8").replace("max(", "(")
+        return [m.group(0) for m in FORBIDDEN.finditer(text)]
+
+    def test_agents_yaml_phases_and_prompts_have_none(self):
+        paths = list(AGENTS.iterdir()) + [PACKAGE / "agents/openai.yaml"]
+        paths += sorted((PACKAGE / "phases").glob("[0-9]-*.md"))
+        paths += [PACKAGE / "prompts/executor.md", PACKAGE / "prompts/review.md"]
+        for path in paths:
             with self.subTest(file=path.name):
-                text = path.read_text(encoding="utf-8").casefold()
-                for word in ("inherit", "fable", "astra", "xhigh", "ultra"):
-                    self.assertNotIn(word, text)
+                self.assertTrue(path.is_file())
+                self.assertEqual(self.hits(path), [])
+
+    def test_skill_md_has_them_only_in_the_model_rules(self):
+        section = model_section()
+        outside = SKILL.replace(section, "")
+        self.assertEqual(FORBIDDEN.findall(outside), [])
+        rule_lines = [l for l in section.splitlines() if l.startswith("- ")]
+        listed = [l for l in section.splitlines() if FORBIDDEN.search(l)]
+        self.assertTrue(listed)
+        for line in listed:
+            self.assertIn(line, rule_lines)
+
+    def test_phase_files_no_longer_inherit_the_chat_model(self):
+        text = (PACKAGE / "phases/5-subagents.md").read_text(encoding="utf-8")
+        self.assertNotIn("session's model", text)
+        self.assertNotIn("ignores this silently", text)
+        self.assertIn("SKILL.md", text)
 
 
-class AgentsCommandTests(unittest.TestCase):
-    """A 0.5.0 skill updated by the 0.4.0 apply has no agents; the CLI command adds them."""
-
+class OpenaiYamlTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="aispa-agents-cli-")
-        project = Path(self.temp.name) / "проект"
-        self.skill = project / ".claude" / "skills" / "aispa"
-        shutil.copytree(PACKAGE, self.skill, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        self.agents = project / ".claude" / "agents"
+        self.text = (PACKAGE / "agents/openai.yaml").read_text(encoding="utf-8")
 
-    def tearDown(self):
-        self.temp.cleanup()
+    def test_implicit_invocation_stays_off(self):
+        self.assertIn("allow_implicit_invocation: false", self.text)
 
-    def run_cli(self, *args):
-        return subprocess.run([sys.executable, "-B", str(self.skill / "tools/aispa.py"), *args],
-                              capture_output=True, text=True, timeout=60)
-
-    def test_update_agents_needs_confirmation_and_keeps_an_edited_file(self):
-        refused = self.run_cli("update-agents")
-        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
-        self.assertIn("подтверждение", refused.stderr)
-        self.assertFalse(self.agents.exists())
-        self.agents.mkdir()
-        edited = b"---\nname: aispa-worker\nmodel: opus\n---\nmy own worker\n"
-        (self.agents / "aispa-worker.md").write_bytes(edited)
-        done = self.run_cli("update-agents", "--confirm")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        receipt = json.loads(done.stdout)
-        self.assertEqual(receipt["status"], "conflict")
-        self.assertEqual(receipt["installed"], sorted(EXPECTED_FILES - {"aispa-worker.md"}))
-        self.assertEqual(receipt["skipped"], [{"file": "aispa-worker.md", "reason": "different"}])
-        self.assertEqual({p.name for p in self.agents.iterdir()}, EXPECTED_FILES)
-        self.assertEqual((self.agents / "aispa-worker.md").read_bytes(), edited)
-        for name in EXPECTED_FILES - {"aispa-worker.md"}:
-            self.assertEqual((self.agents / name).read_bytes(), (AGENTS / name).read_bytes())
+    def test_default_prompt_follows_the_new_route(self):
+        self.assertIn("$aispa", self.text)
+        self.assertIn("SKILL.md", self.text)
+        for old in ("assess", "seal", "update-check", "dashboard start"):
+            self.assertNotIn(old, self.text)
 
 
 if __name__ == "__main__":

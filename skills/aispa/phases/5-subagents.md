@@ -24,7 +24,7 @@ Never two tickets in one context — accumulated context is what makes long sess
 
 A subagent has a filesystem; pasting what it can read writes the same words twice into the bill, and the second copy stays in your context for the rest of the run. Every rule the executor must follow travels in its prompt or in `prompts/executor.md` — a rule that lives only in a phase file does not exist for the one writing the code.
 
-**The model.** A ticket marked `Модель: сильная` runs on the session's model. `обычная` runs on a cheaper one — in Claude Code, `model: "sonnet"` on the Agent call; a harness without a model choice ignores this silently. A ticket that already failed once is relaunched on the strong model.
+**The model.** Model and effort of every subagent come from the table in `SKILL.md`, never from the chat. `Модель: сильная` is Opus · high (Sol · high in Codex), so a chat on a stronger model does not leak into the executor. `обычная` is `aispa-worker`, `механика-скрипт` is `aispa-mechanic-scripted`, `механика` is `aispa-mechanic`. In Claude Code the agent file carries the effort; in Codex model and effort are passed explicitly on every spawn. A ticket that already failed once is relaunched on the strong model.
 
 **Dependencies.** Ticket 01 installs everything the spec's «Решения по реализации» names. A later ticket that needs something else returns `BLOCKED` with its name; if it fits a decision already made, add it to «Решения», relaunch that ticket with permission to install exactly that — the manifest and lock files join its commit — and fly nothing else that installs at the same time.
 

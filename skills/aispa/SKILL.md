@@ -84,6 +84,24 @@ Binding on every phase; the phases do not restate it.
 - **Refer to it by name** — `STRIPE_SECRET_KEY`. The user puts values into `.env` themselves; `.env` is ignored before the first commit; the report lists the names still empty.
 - **A leaked secret is a stop condition**: reported at once, in plain words, with the advice to rotate it — `ap.py ask stop` first, so the dashboard says it too.
 
+## Subagent models
+
+Phase files are read one at a time, so every subagent's route lives here. In Claude Code the agent file holds model and effort (an Agent call cannot pass effort); in Codex pass model and effort explicitly on every spawn.
+
+| Role | Claude Code (agent · model · effort) | Codex (ID · effort) |
+|---|---|---|
+| judge: G2 reader, point and repair reviewer, branch reviewer, blind acceptance; executor of a ticket with `Ревью: да — <риск>` or `сильная` | `aispa-judge` / `aispa-sensitive-worker` — Opus · high | `gpt-6.1-sol` · high |
+| executor `обычная`, code researcher (`3-spec`), memory agent, ADR, history reading (`0-preflight` §5) | `aispa-worker` — Sonnet · medium | `gpt-6.1-terra` · medium |
+| `механика-скрипт` | `aispa-mechanic-scripted` — Haiku · low | `gpt-6-luna` · low |
+| `механика` | `aispa-mechanic` — Sonnet · low | `gpt-6.1-terra` · low |
+
+Codex IDs: сверить с каталогом среды; новый ID — только после правки этой таблицы.
+
+- A subagent never gets Fable, Astra, `inherit`, an empty model, xhigh, max or ultra — not on the hardest task either; nothing above Opus · high or Sol · high.
+- Astra is known but not for subagents; an unfamiliar ID is never accepted by its prefix.
+- Advise the main chat Opus 5.5 in Claude Code and Sol 6.1 in Codex: high on the brief and the plan, medium after.
+- An agent file that is not visible (installed in this same session) → a built-in agent with the `model` parameter, and one line to the user: «усилие не применено».
+
 ## Files this skill owns
 
 ```
