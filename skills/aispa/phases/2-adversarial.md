@@ -4,7 +4,7 @@ Read only when it runs: mode `interview` or `manual` at any depth, or depth `dee
 
 Everything else in the briefing asks what the brief left undefined. This asks **where the idea itself comes apart** — a brief can be complete and consistent and still describe a thing that will not work, and every later check measures the build against what was asked for, so nothing downstream will notice.
 
-Seven questions, put to the задача, not to the user — the answers are yours to find:
+Seven questions, put to the brief, not to the user — the answers are yours to find:
 
 | | The question |
 |---|---|
@@ -25,8 +25,8 @@ Five to seven findings is the normal yield; fewer than three on a real project m
 | only the user can settle it | `ASSUMPTION` in the manifest and the report | asked **only if** the branches give a visibly different product | **asked**, in the second round at the latest |
 | craft — you can settle it | decided, into the spec | same | same |
 | a whole capability | `A##` under its parent, or «Вне рамок» | same | same, or offered as a question |
-| outside the задача | one line in «Вне рамок» | same | same |
+| outside the brief | one line in «Вне рамок» | same | same |
 
 **The pass removes nothing.** It produces questions, `A##` stories, «Вне рамок» lines and `ASSUMPTION` rows — never a `dropped` row, never a quietly narrowed requirement. A requirement it thinks is a bad idea earns at most one question naming the cost.
 
-**It grills the задача, not the person.** «Заявки будут приходить — а кто их читает в субботу?» is the pass working. «Ты уверен, что это вообще кому-то нужно?» is an opinion, and nothing can be built from it.
+**It grills the brief, not the person.** «Заявки будут приходить — а кто их читает в субботу?» is the pass working. «Ты уверен, что это вообще кому-то нужно?» is an opinion, and nothing can be built from it.

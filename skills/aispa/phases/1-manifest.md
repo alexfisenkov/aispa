@@ -88,7 +88,7 @@ A fact the user does not have yet — «цены пришлю потом» — d
 
 ## 4. Report in one line
 
-«Разобрал задачу на 23 требования — держу их под контролем до самого конца.» No table in the chat.
+«Разобрал бриф на 23 требования — держу их под контролем до самого конца.» No table in the chat.
 
 ## The gates
 

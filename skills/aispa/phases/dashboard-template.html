@@ -11,7 +11,7 @@
   /* Вид — AISpa 0.5 «Графит»: центрованный лист, белые карточки 28 px на светло-сером, тёмная главная карточка с бликом,
      надзаголовки разреженными заглавными с чертой, серые плитки внутри карточек, тонированные плашки с цветной обводкой.
      Цвет здесь — сигнал, а не украшение: у каждого состояния сборки свой.
-     Графит — идёт работа, хром — ждём человека, синий — таск пишется,
+     Графит — идёт работа, хром — ждём человека, синий — задача пишется,
      зелёный — сдано, бирюзовый — проверка, янтарный — ремонт, красный — упало.
      Палитра — AISpa 0.5: графит, хром, синий, бирюзовый, ремонт #854D0E, упало #991B1B и светлые плашки.
      Производные (в 0.5 такой роли нет): --done #18784E (темнее #1F8A5B ради белого текста AA), --tx2, --line2,
@@ -82,7 +82,7 @@
   .tabs button:focus-visible,.iconbtn:focus-visible,.chip:focus-visible,.btn-soft:focus-visible{box-shadow:0 0 0 5px rgba(199,201,204,.4)}
   .hero:not(.ask) :focus-visible{outline-color:#fff;box-shadow:0 0 0 5px rgba(199,201,204,.4)}
   code,.mono{font-family:'JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-  .tnum,.big b,.tv,.s-time,.tl-time,.ev em{font-variant-numeric:tabular-nums}
+  .tnum,.big b,.tv,.s-time,.ev em{font-variant-numeric:tabular-nums}
   /* Лист 0.5: до 1280 px содержимого по центру, поля clamp(16px,3vw,44px), между блоками 22 px. */
   .wrap{max-width:calc(1280px + 2 * clamp(16px,3vw,44px));margin:0 auto;padding:28px clamp(16px,3vw,44px) 64px;display:flex;flex-direction:column;gap:22px;min-width:0}
   .wrap>*{min-width:0}
@@ -208,40 +208,72 @@
   .f-idle{background:var(--idle)}
   .f-q{background:var(--quiet)}
 
-  /* ── ход сборки ───────────────────────────────────────────── */
-  .legend{display:flex;flex-wrap:wrap;gap:6px}
-  .lg{display:inline-flex;align-items:center;gap:7px;padding:4px 10px 4px 8px;border-radius:8px;background:var(--inset);border:1px solid var(--line);font-size:12.5px;font-weight:500;color:var(--tx2);line-height:1.4}
-  .lg i{width:10px;height:10px;border-radius:3px;display:block}
-  .lg b{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;color:var(--tx)}
-  /* Волна как в 0.5: хромовый шарик с номером, имя, черта между волнами. */
-  .wave{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:15px;font-weight:600;color:var(--tx);margin:20px 0 10px;padding-top:20px;border-top:1px solid var(--line)}
-  .whead+.wave{margin-top:4px;padding-top:0;border-top:0}
+  /* ── задачи по волнам: как в AISpa 0.5 ────────────────────── */
+  .bh{font-family:'Unbounded','Onest',-apple-system,sans-serif;margin:0;font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-.02em;overflow-wrap:anywhere}
+  .bsub{margin:8px 0 0;font-size:15px;line-height:1.5;color:var(--mut);max-width:80ch}
+  .waves{display:flex;flex-direction:column;gap:26px;margin-top:24px}
+  /* Волна: хромовый шарик с номером, счёт сданного справа, полоска прогресса, черта между волнами. */
+  .wave{display:flex;flex-direction:column;gap:12px}
+  .wave+.wave{padding-top:24px;border-top:1px solid var(--line)}
+  .wave-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px}
+  .wave-head>div{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600}
+  .wave-head>span{font-size:13px;color:var(--quiet)}
   .wn{width:34px;height:34px;border-radius:999px;background:var(--chrome);box-shadow:inset 0 1px 2px #fff,0 4px 10px rgba(20,20,22,.14);display:grid;place-items:center;
     font-family:'Unbounded','Onest',sans-serif;font-style:normal;font-weight:700;font-size:13px;color:#171717;flex:0 0 auto}
-  .wave span{font-weight:400;font-size:13px;color:var(--quiet)}
-  .tl{display:grid;grid-template-columns:36px minmax(0,1fr) 72px;gap:4px 12px;align-items:center;margin-bottom:8px}
-  .tl-id{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:var(--mut)}
-  .tl-id.on{color:var(--tx);font-weight:600}
-  /* Строка таска 0.5: серая скруглённая плашка, цвет состояния — полосой слева и плашкой справа. */
-  .bar{min-height:48px;border-radius:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 8px 6px 14px;
-    font-size:15px;font-weight:500;min-width:0;background:var(--inset);color:var(--tx);border:1px solid var(--line);border-left:4px solid var(--idle)}
-  .bar.f-done{border-left-color:var(--done)}.bar.f-now{border-left-color:var(--now)}.bar.f-rev{border-left-color:var(--rev)}
-  .bar.f-fix{border-left-color:var(--fix)}.bar.f-bad{border-left-color:var(--bad)}
-  .bar.f-wait{background:transparent;color:var(--mut);border:1.5px dashed var(--idle)}
-  .bar.stripes{background-color:var(--inset);background-size:22px 22px;background-image:linear-gradient(135deg,var(--now-soft) 25%,transparent 25%,transparent 50%,var(--now-soft) 50%,var(--now-soft) 75%,transparent 75%,transparent)}
-  .bar .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .chipin{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:8px;font-size:12.5px;font-weight:500;line-height:1.4;white-space:nowrap;border:1px solid currentColor;background:var(--card);color:var(--mut)}
-  .f-done .chipin{background:var(--done-soft);color:var(--done-tx)}
-  .f-now .chipin{background:var(--now-soft);color:var(--now-tx)}
-  .f-rev .chipin{background:var(--rev-soft);color:var(--rev-tx)}
-  .f-fix .chipin{background:var(--fix-soft);color:var(--fix-tx)}
-  .f-bad .chipin{background:var(--bad-soft);color:var(--bad-tx)}
-  .f-wait .chipin{background:var(--inset);color:var(--mut);border-color:var(--line)}
-  .tl-time{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;text-align:right;color:var(--mut);white-space:nowrap}
-  .tl-time.now{color:var(--now-tx)}.tl-time.fix{color:var(--fix-tx)}.tl-time.rev{color:var(--rev-tx)}.tl-time.bad{color:var(--bad-tx)}
-  .tl-note{grid-column:2/4;display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.5;padding:2px 2px 6px;overflow-wrap:anywhere}
-  .tl-note.fix{color:var(--fix-tx)}.tl-note.rev{color:var(--rev-tx)}.tl-note.bad{color:var(--bad-tx)}
-  .tl-note .ic{margin-top:2px}
+  .wbar{height:6px;border-radius:999px;background:var(--line);overflow:hidden}
+  .wbar i{display:block;height:100%;border-radius:inherit;background:var(--done)}
+  .wave-meta{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--mut)}
+  /* Задача: серая карточка, цвет состояния — полосой слева и точкой у подписи. */
+  .task{background:var(--inset);border:1px solid var(--line);border-left:4px solid var(--idle);border-radius:16px;min-width:0}
+  .task.k-done{border-left-color:var(--done)}.task.k-now{border-left-color:var(--now)}.task.k-rev{border-left-color:var(--rev)}
+  .task.k-fix{border-left-color:var(--fix)}.task.k-bad{border-left-color:var(--bad)}
+  .th{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:4px 14px;align-items:start;padding:14px 16px 12px}
+  .t-id{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:var(--mut);padding-top:2px}
+  .t-nm{margin:0;font-size:16px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+  .t-rq{display:block;margin-top:2px;font-size:12.5px;color:var(--quiet);overflow-wrap:anywhere}
+  .t-r{display:flex;flex-direction:column;align-items:flex-end;gap:3px;text-align:right;min-width:0}
+  .t-st{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--tx);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:0 0 auto}
+  .k-done .dot{background:var(--done-tx)}.k-now .dot{background:var(--now-tx);animation:pulse 1.8s cubic-bezier(.16,1,.3,1) infinite}
+  .k-rev .dot{background:var(--rev-tx)}.k-fix .dot{background:var(--fix-tx)}.k-bad .dot{background:var(--bad-tx)}
+  .t-tm{font-size:12.5px;color:var(--mut);white-space:nowrap}
+  .t-tm b{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:500;color:var(--tx2);margin-left:6px;font-variant-numeric:tabular-nums}
+  /* Шаги задачи: пройденный — зелёный с галочкой, текущий — цветом состояния, будущий — пустой. */
+  .steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:0 16px 12px 70px}
+  .ps{display:flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:4px 8px;border-radius:9px;border:1px solid var(--line);
+    background:var(--card);color:var(--mut);font-size:12.5px;font-weight:500;line-height:1.3;text-align:center;min-width:0;overflow-wrap:anywhere}
+  .ps .o{width:8px;height:8px;border-radius:50%;border:1.5px solid currentColor;flex:0 0 auto}
+  .ps .f{width:8px;height:8px;border-radius:50%;background:currentColor;flex:0 0 auto}
+  .ps .ic.xs{width:12px;height:12px}
+  .ps.ok{background:var(--done-soft);color:var(--done-tx);border-color:currentColor}
+  .ps.cur{font-weight:600;border-color:currentColor;box-shadow:0 0 0 3px var(--soft)}
+  .ps.cur.now{background:var(--now-soft);color:var(--now-tx)}
+  .ps.cur.rev{background:var(--rev-soft);color:var(--rev-tx)}
+  .ps.cur.fix{background:var(--fix-soft);color:var(--fix-tx)}
+  .ps.bad,.ps.back{background:var(--bad-soft);color:var(--bad-tx);border-color:currentColor}
+  .t-note{display:flex;gap:8px;align-items:flex-start;margin:0;padding:0 16px 12px 70px;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+  .t-note .ic{margin-top:2px}
+  .t-note.fix{color:var(--fix-tx)}.t-note.rev{color:var(--rev-tx)}.t-note.bad{color:var(--bad-tx)}
+  /* Раскрываемые подробности: всё, что о задаче записала сборка. */
+  .tdet>summary{display:flex;align-items:center;gap:6px;width:fit-content;max-width:100%;min-height:32px;margin:0 16px 8px 70px;padding:2px 4px;border-radius:8px;
+    list-style:none;cursor:pointer;font-size:13px;font-weight:500;color:var(--mut)}
+  .tdet>summary::-webkit-details-marker{display:none}
+  .tdet>summary::before{content:"";width:0;height:0;border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .2s}
+  .tdet[open]>summary::before{transform:rotate(90deg)}
+  .tdet>summary:hover{color:var(--tx)}
+  .tdb{display:flex;flex-direction:column;gap:16px;padding:16px 18px 18px 70px;border-top:1px solid var(--line);background:var(--card);border-radius:0 0 15px 11px}
+  .tdb h4{margin:0 0 8px;font-size:13px;font-weight:600;color:var(--mut)}
+  .treq{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+  .treq:first-of-type{border-top:0;padding-top:0}
+  .treq p{margin:0;font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+  .treq p b{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;font-weight:600;margin-right:6px}
+  .tkv{display:grid;grid-template-columns:minmax(120px,max-content) minmax(0,1fr);gap:6px 18px;margin:0;font-size:13.5px;line-height:1.45}
+  .tkv dt{color:var(--mut)}
+  .tkv dd{margin:0;color:var(--tx);overflow-wrap:anywhere}
+  .tkv code{font-size:12.5px}
+  .tdb ul{margin:0;padding-left:18px;font-size:13.5px;line-height:1.5;color:var(--tx2)}
+  .tdb li{overflow-wrap:anywhere}
+  .tdb li+li{margin-top:5px}
 
   /* ── колонки и списки ─────────────────────────────────────── */
   .cols{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:22px;align-items:start}
@@ -314,7 +346,7 @@
   .boot .w{animation:rise .8s cubic-bezier(.16,1,.3,1) both}
   .boot .w:nth-child(2){animation-delay:.05s}.boot .w:nth-child(3){animation-delay:.1s}
   @keyframes rise{from{transform:translateY(10px);filter:blur(5px);opacity:.01}to{transform:none;filter:none;opacity:1}}
-  @media (prefers-reduced-motion:reduce){.boot .w,.live,.stripes,.iconbtn.busy svg,.s-now .seg i{animation:none}.iconbtn{transition:none}}
+  @media (prefers-reduced-motion:reduce){.boot .w,.live,.stripes,.iconbtn.busy svg,.s-now .seg i,.k-now .dot{animation:none}.iconbtn{transition:none}}
 
   /* ── ширина ───────────────────────────────────────────────── */
   @media (max-width:1180px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -361,17 +393,28 @@
     .stack{height:5px}
     .sq{gap:4px}.sq i{width:13px;height:13px;border-radius:4px}
     .okb{font-size:11.5px;padding:3px 8px}
-    .lg{font-size:11.5px;padding:3px 8px 3px 7px}
-    .wave{font-size:14px;margin:16px 0 8px;padding-top:16px;gap:4px 8px}
+    .bh{font-size:22px}
+    .bsub{font-size:13.5px;margin-top:6px}
+    .waves{margin-top:18px;gap:22px}
+    .wave+.wave{padding-top:20px}
+    .wave-head>div{font-size:14px}
+    .wave-head>span{font-size:12px}
     .wn{width:28px;height:28px;font-size:12px}
-    .wave span{font-size:12px}
-    .tl{grid-template-columns:28px minmax(0,1fr) 48px;gap:3px 8px;margin-bottom:6px}
-    .tl-id{font-size:11.5px}
-    .bar{min-height:40px;border-radius:10px;font-size:13.5px;padding:4px 5px 4px 10px;gap:6px}
-    .chipin{padding:3px 6px;font-size:11.5px}
-    .chipin .lbl{display:none}
-    .tl-time{font-size:11.5px}
-    .tl-note{font-size:12.5px}
+    .wave-meta{font-size:12px}
+    .th{grid-template-columns:28px minmax(0,1fr);gap:4px 10px;padding:12px 12px 10px}
+    .t-id{font-size:12px}
+    .t-nm{font-size:15px}
+    .t-r{grid-column:2;flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px 14px;text-align:left}
+    .t-st{font-size:12.5px}
+    .steps{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 10px}
+    .ps{font-size:12px;min-height:32px}
+    .t-note{padding:0 12px 10px;font-size:12.5px}
+    .tdet>summary{margin:0 12px 6px}
+    .tdb{padding:14px 12px 14px}
+    .tkv{grid-template-columns:minmax(0,1fr);gap:2px}
+    .tkv dd+dt{margin-top:8px}
+    .treq{grid-template-columns:minmax(0,1fr)}
+    .treq .pill{justify-self:start}
     .chip{padding:0 11px;font-size:12.5px}
     .req{padding:12px 2px;gap:10px}
     .req p{font-size:14px}
@@ -469,6 +512,8 @@ const plural = (n, one, few, many) => {
   return many;
 };
 const en = (n, one, many) => n === 1 ? one : many;
+const tkWord = ids => ids.length > 1 ? 'Задачи' : 'Задача';
+const tkWordEn = ids => ids.length > 1 ? 'Tasks' : 'Task';
 const q = (s, lang) => lang === 'en' ? `“${s}”` : `«${s}»`;
 
 const I18N = {
@@ -484,17 +529,17 @@ const I18N = {
       plan:"Составляется план",build:"Идёт разработка",review:"Идёт код-ревью",final:"Идёт приёмка"},
     h2Run:{preflight:"Готовлю репозиторий и дашборд",manifest:"Разбираю бриф на требования — слово в слово",
       briefing:"Ищу в брифе то, что нельзя построить как написано",spec:"Пишу спецификацию по твоим словам",
-      plan:"Режу спецификацию на таски",review:"Проверяю всю сборку целиком",final:"Проверяю результат вслепую — по брифу, без спецификации"},
+      plan:"Режу спецификацию на задачи",review:"Проверяю всю сборку целиком",final:"Проверяю результат вслепую — по брифу, без спецификации"},
     leadRun:{preflight:"Дальше бриф разрежется на требования, и ни одно не потеряется до конца сборки.",
       manifest:"Каждое требование хранит твои точные слова — по ним сборку проверят в конце.",
       briefing:"Если найдётся развилка, которую решать тебе, вопрос придёт в чат.",
       spec:"Потом независимый читатель сверит спецификацию с брифом — без моих пересказов.",
-      plan:"Каждое требование попадёт в таск, и каждый таск — от требования.",
-      review:"Одно ревью всей ветки с проверкой безопасности. Всё, что стоит поправить, исправит один таск.",
+      plan:"Каждое требование попадёт в задачу, и каждая задача — от требования.",
+      review:"Одно ревью всей ветки с проверкой безопасности. Всё, что стоит поправить, исправит одна задача.",
       final:"Проверяющий получает только твой бриф и чистую копию репозитория."},
-    buildH2:(d,n,r)=>d ? `Сдано ${d} ${plural(d,'таск','таска','тасков')} из ${n}${r ? `, ещё ${r} в работе` : ''}`
-      : `${n} ${plural(n,'таск','таска','тасков')} в плане${r ? `, ${r} уже в работе` : ''}`,
-    buildAllDone:n=>`Все ${n} ${plural(n,'таск','таска','тасков')} сданы`,
+    buildH2:(d,n,r)=>d ? `${plural(d,'Сдана','Сдано','Сдано')} ${d} ${plural(d,'задача','задачи','задач')} из ${n}${r ? `, ещё ${r} в работе` : ''}`
+      : `${n} ${plural(n,'задача','задачи','задач')} в плане${r ? `, ${r} уже в работе` : ''}`,
+    buildAllDone:n=>n === 1 ? 'Задача сдана' : `Все ${n} ${plural(n,'задача','задачи','задач')} сданы`,
     leadWriting:l=>`Пишется ${l}.`,leadReview:l=>`На проверке: ${l}.`,leadRepair:l=>`В ремонте после ревью: ${l}.`,
     leadFailed:l=>`Не собрался: ${l}.`,leadIdle:"Следующая волна вот-вот уйдёт.",
     waitState:"Сборка ждёт тебя",
@@ -509,35 +554,41 @@ const I18N = {
     etaLbl:"осталось — с ревью и приёмкой",etaLate:"осталось — до сдачи",stageClock:n=>`на этапе «${n}»`,
     paused:"пауза — часы стоят",min:"мин",hr:"ч",
     ahead:"впереди",skipped:"пропущен",failedSt:"не прошёл",waitingSt:"ждём ответа",
-    tReqs:"Требования",tTickets:"Таски",tTests:"Тесты",tTime:"В работе",tBlind:"Слепая приёмка",
+    tReqs:"Требования",tTickets:"Задачи",tTests:"Тесты",tTime:"В работе",tBlind:"Слепая приёмка",
     reqParts:{done:"сделано",work:n=>`${n} в работе`,open:n=>`${n} ${plural(n,'разбирается','разбираются','разбираются')}`,ph:n=>`${n} ${plural(n,'ждёт','ждут','ждут')} твоих данных`,
       def:n=>`${n} отложено`,drop:n=>`${n} снято тобой`},
     reqLater:"появятся после разбора брифа",
     tkParts:{now:n=>`пишется ${n}`,rev:n=>`проверка ${n}`,fix:n=>`ремонт ${n}`,bad:n=>`упало ${n}`,
       all:"все сданы",retry:n=>`${n} ${plural(n,'повтор','повтора','повторов')}`,repair:n=>`${n} ${plural(n,'ремонт','ремонта','ремонтов')}`},
     tkLater:"появятся после плана",noSplit:"без разбивки",
-    testsOk:"0 упало",testsBad:n=>`${n} упало`,testsSub:"после последнего сданного таска",testsFinal:"финальный прогон",testsLater:"появятся с первым таском",
-    timeSub:"без простоев и ожидания ответа",median:m=>`таск в среднем ${m} мин`,
+    testsOk:"0 упало",testsBad:n=>`${n} упало`,testsSub:"после последней сданной задачи",testsFinal:"финальный прогон",testsLater:"появятся с первой задачей",
+    timeSub:"без простоев и ожидания ответа",median:m=>`задача в среднем ${m} мин`,
     blindSub:(m,f)=>m ? `${m} ${plural(m,'расхождение','расхождения','расхождений')}` : "расхождений нет",
-    build:"Ход сборки",
-    kinds:{done:"готово",now:"пишется",rev:"проверка",fix:"ремонт",bad:"упало",wait:"ждёт"},
-    chip:{done:"сдан",now:"пишется",rev:"проверка",fix:"ремонт",bad:"не собрался",wait:"ждёт"},
-    wave:n=>`Волна ${n}`,waveSub:c=>`— ${c} ${plural(c,'таск','таска','тасков')} параллельно`,
-    waveWaits:l=>`— ждёт ${l.length > 1 ? 'таски' : 'таск'} ${l.join(', ')}`,
+    build:"Задачи по волнам",buildSub:"Волны идут по очереди: следующая начинается, когда готово то, от чего она зависит. Шаги задачи отмечены по записям сборки.",
+    chip:{done:"сдана",now:"пишется",rev:"на проверке",fix:"в ремонте",bad:"не собралась",wait:"ждёт"},
+    steps:{write:"Пишется",rev:"Проверка",fix:"Ремонт",done:"Сдана"},
+    wave:n=>`Волна ${n}`,waveDone:(d,n)=>`сдано ${d} из ${n} ${plural(n,'задачи','задач','задач')}`,
+    wavePar:"Задачи этой волны могут выполняться параллельно",
+    waveWaits:l=>`Ждёт ${l.length > 1 ? 'задачи' : 'задачу'} ${l.join(', ')}`,
+    tkReqs:l=>`Требования: ${l}`,whole:"Вся задача",notStarted:"ещё не начата",
     noteReview:r=>`Проверяется отдельно: ${r}`,noteRepair:r=>`Ревью вернуло: ${r}`,
-    noTickets:"Таски появятся после спецификации и плана. Разработка пойдёт сама.",
-    t0:"Ярус T0 — собирается за один заход, без разбивки на таски.",
+    details:"Требования и подробности задачи",dReqs:"Требования в задаче",dZone:"Зона",dDeps:"Зависит от",
+    dReview:"Отдельная проверка",dReviewNo:"не нужна — задачу проверит общее ревью",dModel:"Модель исполнителя",
+    dRepair:"Что вернуло ревью",dFail:"Почему не собралась",dTests:"Тесты",dCommit:"Коммит",dAttempts:"Повторы и ремонты",
+    dTestsVal:t=>`${t.passed} ${plural(t.passed,'прошёл','прошло','прошло')}${t.failed ? `, ${t.failed} упало` : ', 0 упало'}`,
+    noTickets:"Задачи появятся после спецификации и плана. Разработка пойдёт сама.",
+    t0:"Ярус T0 — собирается за один заход, без разбивки на задачи.",
     words:"Твои слова",wordsSub:n=>`${n} ${plural(n,'требование','требования','требований')} из брифа`,
     rs:{done:"сделано",work:"в работе",open:"разбирается",placeholder:"нужны твои данные",deferred:"отложено",dropped:"снято тобой"},
     fAll:"Все",fDone:"Сделано",fWork:"В работе",fOpen:"Разбирается",fPh:"Нужны твои данные",fDef:"Отложено",fDrop:"Снято",
     showAll:n=>`Показать все ${n}`,collapse:"Свернуть",more:n=>`Ещё ${n}`,
     gates:"Проверки",gatesOf:n=>`${n} из 4`,
-    gT:{G1:"Бриф разобран до конца",G2:"Спецификация ничего не потеряла",G3:"Каждое требование — в таске",G4:"Слепая приёмка"},
+    gT:{G1:"Бриф разобран до конца",G2:"Спецификация ничего не потеряла",G3:"Каждое требование — в задаче",G4:"Слепая приёмка"},
     g1ok:n=>`0 открытых вопросов из ${n}`,g1bad:n=>`${n} ${plural(n,'вопрос','вопроса','вопросов')} ещё ${plural(n,'открыт','открыты','открыто')}`,
     g1ask:"Ждёт твоих ответов в чате",g1later:"Впереди: после брифинга",
     g2:(f,x,d)=>f ? `Независимый читатель нашёл ${f} ${plural(f,'пропуск','пропуска','пропусков')}: ${x} ${plural(x,'дописан','дописано','дописано')}, ${d} отложено` : "Независимый читатель пропусков не нашёл",
     g2later:"Впереди: независимый читатель сверит её с брифом",
-    g3ok:(r,t)=>`${r} ${plural(r,'требование','требования','требований')} разложено на ${t} ${plural(t,'таск','таска','тасков')}`,
+    g3ok:(r,t)=>`${r} ${plural(r,'требование','требования','требований')} разложено на ${t} ${plural(t,'задачу','задачи','задач')}`,
     g3bad:n=>`${n} ${plural(n,'проблема','проблемы','проблем')} в плане — план переделывается`,g3later:"Впереди, на этапе плана",
     g4:(m,c,x)=>`${m} из ${c} подтверждено${x ? ` · ${x} ${plural(x,'расхождение','расхождения','расхождений')}` : ''}`,
     g4later:"В конце: чистая копия, проверка по брифу без спецификации",gNone:"Не отмечено в этой сборке",
@@ -549,18 +600,19 @@ const I18N = {
     blindBad:"Вот где он не согласился:",blindOk:"Расхождений с брифом нет.",
     report:"Открытые вопросы",concerns:"Замечания ревью",concernsNote:"Не мешают работе — оставлены с адресом в коде.",
     additions:"Добавлено сверх заказанного",
-    updated:"Обновлено",filesIn:"Требования и таски — в",frozen:"Сборка сдана — дашборд больше не обновляется",
+    updated:"Обновлено",filesIn:"Требования и задачи — в",frozen:"Сборка сдана — дашборд больше не обновляется",
     ago:{s:s=>`${s} сек назад`,m:m=>`${m} мин назад`,h:(h,m)=>`${h} ч ${m} мин назад`},
     agoShort:{s:"сейчас",m:m=>`${m} мин`,h:h=>`${h} ч`},
     ev:{init:"Сборка начата",
       stage:{start:n=>`Начат этап «${n}»`,done:n=>`Пройден этап «${n}»`,skip:(n,x)=>`Этап «${n}» пропущен${x ? ': ' + x : ''}`,fail:(n,x)=>`Этап «${n}» не прошёл${x ? ': ' + x : ''}`},
-      tickets:n=>`План: ${n} ${plural(n,'таск','таска','тасков')}`,
-      ticket:{start:ids=>ids.length > 1 ? `Ушла волна: ${ids.join(', ')}` : `Таск ${ids[0]} начат`,
-        review:ids=>`${ids.length > 1 ? 'Таски' : 'Таск'} ${ids.join(', ')} на проверке`,
-        repair:(ids,x)=>`Таск ${ids.join(', ')} вернулся в ремонт${x ? ': ' + x : ''}`,
-        done:(ids,t)=>`Таск ${ids.join(', ')} сдан${t ? ` · ${t.passed} ${plural(t.passed,'тест','теста','тестов')}${t.failed ? `, ${t.failed} упало` : ''}` : ''}`,
-        fail:(ids,x)=>`Таск ${ids.join(', ')} не собрался${x ? ': ' + x : ''}`,
-        retry:ids=>`Таск ${ids.join(', ')} перезапущен`,reset:ids=>`Таск ${ids.join(', ')} сброшен`},
+      tickets:n=>`План: ${n} ${plural(n,'задача','задачи','задач')}`,
+      ticket:{start:ids=>ids.length > 1 ? `Ушла волна: ${ids.join(', ')}` : `Задача ${ids[0]} начата`,
+        review:ids=>`${tkWord(ids)} ${ids.join(', ')} на проверке`,
+        repair:(ids,x)=>`${tkWord(ids)} ${ids.join(', ')} ${ids.length > 1 ? 'вернулись' : 'вернулась'} в ремонт${x ? ': ' + x : ''}`,
+        done:(ids,t)=>`${tkWord(ids)} ${ids.join(', ')} ${ids.length > 1 ? 'сданы' : 'сдана'}${t ? ` · ${t.passed} ${plural(t.passed,'тест','теста','тестов')}${t.failed ? `, ${t.failed} упало` : ''}` : ''}`,
+        fail:(ids,x)=>`${tkWord(ids)} ${ids.join(', ')} не ${ids.length > 1 ? 'собрались' : 'собралась'}${x ? ': ' + x : ''}`,
+        retry:ids=>`${tkWord(ids)} ${ids.join(', ')} ${ids.length > 1 ? 'перезапущены' : 'перезапущена'}`,
+        reset:ids=>`${tkWord(ids)} ${ids.join(', ')} ${ids.length > 1 ? 'сброшены' : 'сброшена'}`},
       gate:{G1:(ok,e)=>ok ? "Бриф разобран до конца" : `Бриф: открытых вопросов — ${e.open}`,
         G2:(ok,e)=>`Спецификация сверена с брифом${e.found ? `: ${e.found} ${plural(e.found,'пропуск','пропуска','пропусков')}` : ' — пропусков нет'}`,
         G3:(ok,e)=>ok ? "План покрывает все требования" : `План не сходится: ${e.problems} ${plural(e.problems,'проблема','проблемы','проблем')}`,
@@ -587,16 +639,16 @@ const I18N = {
       plan:"Planning",build:"Development",review:"Code review",final:"Acceptance"},
     h2Run:{preflight:"Setting up the repo and the dashboard",manifest:"Cutting the brief into requirements, word for word",
       briefing:"Looking for what cannot be built as written",spec:"Writing the spec from your words",
-      plan:"Cutting the spec into tickets",review:"Reviewing the whole build",final:"Checking the result blind — against the brief, without the spec"},
+      plan:"Cutting the spec into tasks",review:"Reviewing the whole build",final:"Checking the result blind — against the brief, without the spec"},
     leadRun:{preflight:"Next, the brief becomes requirements, and none of them gets lost before the end.",
       manifest:"Every requirement keeps your exact words — the build is checked against them at the end.",
       briefing:"If there is a fork that is yours to decide, the question will come to the chat.",
       spec:"An independent reader will check the spec against the brief — without my paraphrase.",
-      plan:"Every requirement goes into a ticket, and every ticket traces to a requirement.",
-      review:"One review of the whole branch, security included. Everything worth fixing goes into one ticket.",
+      plan:"Every requirement goes into a task, and every task traces to a requirement.",
+      review:"One review of the whole branch, security included. Everything worth fixing goes into one task.",
       final:"The checker gets only your brief and a clean copy of the repo."},
-    buildH2:(d,n,r)=>d ? `${d} of ${n} tickets done${r ? `, ${r} more in progress` : ''}` : `${n} tickets planned${r ? `, ${r} already in progress` : ''}`,
-    buildAllDone:n=>`All ${n} tickets done`,
+    buildH2:(d,n,r)=>d ? `${d} of ${n} ${en(n,'task','tasks')} done${r ? `, ${r} more in progress` : ''}` : `${n} ${en(n,'task','tasks')} planned${r ? `, ${r} already in progress` : ''}`,
+    buildAllDone:n=>n === 1 ? 'The task is done' : `All ${n} tasks done`,
     leadWriting:l=>`Writing ${l}.`,leadReview:l=>`In review: ${l}.`,leadRepair:l=>`Back from review for repair: ${l}.`,
     leadFailed:l=>`Failed: ${l}.`,leadIdle:"The next wave is about to go.",
     waitState:"The build is waiting for you",
@@ -611,33 +663,40 @@ const I18N = {
     etaLbl:"left — with review and acceptance",etaLate:"left — until done",stageClock:n=>`in “${n}”`,
     paused:"paused — the clock is stopped",min:"min",hr:"h",
     ahead:"ahead",skipped:"skipped",failedSt:"failed",waitingSt:"waiting for you",
-    tReqs:"Requirements",tTickets:"Tickets",tTests:"Tests",tTime:"Working time",tBlind:"Blind acceptance",
+    tReqs:"Requirements",tTickets:"Tasks",tTests:"Tests",tTime:"Working time",tBlind:"Blind acceptance",
     reqParts:{done:"done",work:n=>`${n} in progress`,open:n=>`${n} being read`,ph:n=>`${n} need your data`,def:n=>`${n} deferred`,drop:n=>`${n} dropped by you`},
     reqLater:"appear once the brief is read",
     tkParts:{now:n=>`writing ${n}`,rev:n=>`review ${n}`,fix:n=>`repair ${n}`,bad:n=>`failed ${n}`,
       all:"all done",retry:n=>`${n} ${en(n,'retry','retries')}`,repair:n=>`${n} ${en(n,'repair','repairs')}`},
     tkLater:"appear after the plan",noSplit:"no split",
-    testsOk:"0 failed",testsBad:n=>`${n} failed`,testsSub:"after the last finished ticket",testsFinal:"final run",testsLater:"appear with the first ticket",
-    timeSub:"no idle time, no waiting for you",median:m=>`about ${m} min per ticket`,
+    testsOk:"0 failed",testsBad:n=>`${n} failed`,testsSub:"after the last finished task",testsFinal:"final run",testsLater:"appear with the first task",
+    timeSub:"no idle time, no waiting for you",median:m=>`about ${m} min per task`,
     blindSub:(m)=>m ? `${m} ${en(m,'disagreement','disagreements')}` : "no disagreements",
-    build:"Build progress",
-    kinds:{done:"done",now:"writing",rev:"review",fix:"repair",bad:"failed",wait:"waiting"},
-    chip:{done:"done",now:"writing",rev:"review",fix:"repair",bad:"failed",wait:"waiting"},
-    wave:n=>`Wave ${n}`,waveSub:c=>`— ${c} tickets in parallel`,waveWaits:l=>`— waits for ${l.join(', ')}`,
+    build:"Tasks by wave",buildSub:"Waves run in order: the next one starts once what it depends on is ready. Task steps follow the build's records.",
+    chip:{done:"done",now:"writing",rev:"in review",fix:"in repair",bad:"failed",wait:"waiting"},
+    steps:{write:"Writing",rev:"Review",fix:"Repair",done:"Done"},
+    wave:n=>`Wave ${n}`,waveDone:(d,n)=>`${d} of ${n} ${en(n,'task','tasks')} done`,
+    wavePar:"Tasks in this wave can run in parallel",
+    waveWaits:l=>`Waits for ${en(l.length,'task','tasks')} ${l.join(', ')}`,
+    tkReqs:l=>`Requirements: ${l}`,whole:"Whole task",notStarted:"not started yet",
     noteReview:r=>`Reviewed on its own: ${r}`,noteRepair:r=>`Review sent back: ${r}`,
-    noTickets:"Tickets appear after the spec and the plan. Development starts by itself.",
-    t0:"Tier T0 — built in a single pass, no tickets.",
+    details:"Requirements and task details",dReqs:"Requirements in this task",dZone:"Zone",dDeps:"Depends on",
+    dReview:"Separate review",dReviewNo:"not needed — the branch review covers it",dModel:"Executor model",
+    dRepair:"What review sent back",dFail:"Why it failed",dTests:"Tests",dCommit:"Commit",dAttempts:"Retries and repairs",
+    dTestsVal:t=>`${t.passed} passed, ${t.failed || 0} failed`,
+    noTickets:"Tasks appear after the spec and the plan. Development starts by itself.",
+    t0:"Tier T0 — built in a single pass, no split into tasks.",
     words:"Your words",wordsSub:n=>`${n} ${en(n,'requirement','requirements')} from the brief`,
     rs:{done:"done",work:"in progress",open:"being read",placeholder:"your data needed",deferred:"deferred",dropped:"dropped by you"},
     fAll:"All",fDone:"Done",fWork:"In progress",fOpen:"Being read",fPh:"Your data needed",fDef:"Deferred",fDrop:"Dropped",
     showAll:n=>`Show all ${n}`,collapse:"Collapse",more:n=>`${n} more`,
     gates:"Checks",gatesOf:n=>`${n} of 4`,
-    gT:{G1:"The brief is fully read",G2:"The spec lost nothing",G3:"Every requirement is in a ticket",G4:"Blind acceptance"},
+    gT:{G1:"The brief is fully read",G2:"The spec lost nothing",G3:"Every requirement is in a task",G4:"Blind acceptance"},
     g1ok:n=>`0 open questions of ${n}`,g1bad:n=>`${n} ${en(n,'question','questions')} still open`,
     g1ask:"Waiting for your answers in the chat",g1later:"Ahead: after the briefing",
     g2:(f,x,d)=>f ? `An independent reader found ${f} ${en(f,'gap','gaps')}: ${x} written in, ${d} deferred` : "An independent reader found no gaps",
     g2later:"Ahead: an independent reader checks it against the brief",
-    g3ok:(r,t)=>`${r} requirements laid out in ${t} tickets`,g3bad:n=>`${n} ${en(n,'problem','problems')} in the plan — being redone`,g3later:"Ahead, at the plan",
+    g3ok:(r,t)=>`${r} ${en(r,'requirement','requirements')} laid out in ${t} ${en(t,'task','tasks')}`,g3bad:n=>`${n} ${en(n,'problem','problems')} in the plan — being redone`,g3later:"Ahead, at the plan",
     g4:(m,c,x)=>`${m} of ${c} confirmed${x ? ` · ${x} ${en(x,'disagreement','disagreements')}` : ''}`,
     g4later:"At the end: a clean copy, checked against the brief without the spec",gNone:"Not recorded in this build",
     feed:"Feed",
@@ -648,17 +707,17 @@ const I18N = {
     blindBad:"Here is where it disagreed:",blindOk:"No disagreements with the brief.",
     report:"Open questions",concerns:"Review notes",concernsNote:"They do not block anything — kept with their place in the code.",
     additions:"Added beyond the brief",
-    updated:"Updated",filesIn:"Requirements and tickets in",frozen:"The build is done — the dashboard no longer updates",
+    updated:"Updated",filesIn:"Requirements and tasks in",frozen:"The build is done — the dashboard no longer updates",
     ago:{s:s=>`${s}s ago`,m:m=>`${m} min ago`,h:(h,m)=>`${h}h ${m}m ago`},
     agoShort:{s:"now",m:m=>`${m} min`,h:h=>`${h} h`},
     ev:{init:"Build started",
       stage:{start:n=>`Stage “${n}” started`,done:n=>`Stage “${n}” passed`,skip:(n,x)=>`Stage “${n}” skipped${x ? ': ' + x : ''}`,fail:(n,x)=>`Stage “${n}” failed${x ? ': ' + x : ''}`},
-      tickets:n=>`Plan: ${n} tickets`,
-      ticket:{start:ids=>ids.length > 1 ? `Wave out: ${ids.join(', ')}` : `Ticket ${ids[0]} started`,
-        review:ids=>`Ticket ${ids.join(', ')} in review`,repair:(ids,x)=>`Ticket ${ids.join(', ')} back for repair${x ? ': ' + x : ''}`,
-        done:(ids,t)=>`Ticket ${ids.join(', ')} done${t ? ` · ${t.passed} tests${t.failed ? `, ${t.failed} failed` : ''}` : ''}`,
-        fail:(ids,x)=>`Ticket ${ids.join(', ')} failed${x ? ': ' + x : ''}`,
-        retry:ids=>`Ticket ${ids.join(', ')} restarted`,reset:ids=>`Ticket ${ids.join(', ')} reset`},
+      tickets:n=>`Plan: ${n} ${en(n,'task','tasks')}`,
+      ticket:{start:ids=>ids.length > 1 ? `Wave out: ${ids.join(', ')}` : `Task ${ids[0]} started`,
+        review:ids=>`${tkWordEn(ids)} ${ids.join(', ')} in review`,repair:(ids,x)=>`${tkWordEn(ids)} ${ids.join(', ')} back for repair${x ? ': ' + x : ''}`,
+        done:(ids,t)=>`${tkWordEn(ids)} ${ids.join(', ')} done${t ? ` · ${t.passed} tests${t.failed ? `, ${t.failed} failed` : ''}` : ''}`,
+        fail:(ids,x)=>`${tkWordEn(ids)} ${ids.join(', ')} failed${x ? ': ' + x : ''}`,
+        retry:ids=>`${tkWordEn(ids)} ${ids.join(', ')} restarted`,reset:ids=>`${tkWordEn(ids)} ${ids.join(', ')} reset`},
       gate:{G1:(ok,e)=>ok ? "The brief is fully read" : `Brief: ${e.open} open questions`,
         G2:(ok,e)=>`Spec checked against the brief${e.found ? `: ${e.found} gaps` : ' — no gaps'}`,
         G3:(ok,e)=>ok ? "The plan covers every requirement" : `The plan does not add up: ${e.problems} problems`,
@@ -812,8 +871,8 @@ function tick(){
   document.querySelectorAll('[data-ago]').forEach(el => {
     el.textContent = agoText(el.dataset.ago);
     // Молчание — повод присмотреться, но только когда никто не работает.
-    // Пока таск идёт, записей внутри него нет по устройству процесса:
-    // порог тогда — не пять минут, а заметно дольше самого долгого таска.
+    // Пока задача идёт, записей внутри неё нет по устройству процесса:
+    // порог тогда — не пять минут, а заметно дольше самой долгой задачи.
     const S = window.STATE || {};
     const busy = (S.tickets || []).some(t =>
       t.status === 'in-progress' || t.status === 'review' || t.status === 'repair');
@@ -914,8 +973,8 @@ function refreshNow(btn){
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-// Статус таска → цвет полосы, значок, подписи. Ремонт — не «ещё немного
-// разработки»: таск уже написан и вернулся с ревью, поэтому у него свой цвет.
+// Статус задачи → цвет полосы, значок, подписи. Ремонт — не «ещё немного
+// разработки»: задача уже написана и вернулся с ревью, поэтому у него свой цвет.
 const KIND = {
   'done':        {k:'done', bar:'f-done', icon:'check'},
   'in-progress': {k:'now',  bar:'f-now stripes', icon:'pen', on:true},
@@ -961,8 +1020,8 @@ function render(lang){
   const stage = id => stages.find(s => s.id === id) || {};
 
   // ——— сколько осталось ———
-  // По цепочке тасков в минутах, а не «медиана × длина цепочки»: иначе таск,
-  // который идёт двадцать седьмую минуту, стоит в оценке как не начатый.
+  // По цепочке задач в минутах, а не «медиана × длина цепочки»: иначе задача,
+  // которая идёт двадцать седьмую минуту, стоит в оценке как не начатая.
   // Плюс то, что идёт после разработки: ревью всей ветки и приёмка —
   // на реальных прогонах это почти половина времени, и без них оценка врала.
   const byId = Object.fromEntries(T.map(t => [t.id, t]));
@@ -1105,40 +1164,88 @@ function render(lang){
   // ——— ход сборки ———
   // Полоса показывает СОСТОЯНИЕ, а не долю: горизонтальная заливка в списке
   // задач читается как прогресс всегда. Длительность — цифрой справа.
+  // Вид — «Задачи по волнам» из AISpa 0.5. Рисуется только то, что записал ap.py:
+  // статус, требования, зона, зависимости, ревью, модель, ремонты, тесты, коммит.
+  const buildHead = `<h3 class="bh">${L.build}</h3><p class="bsub">${L.buildSub}</p>`;
   let buildCard = '';
   if (T.length) {
-    const counts = {};
-    T.forEach(t => { const k = kindOf(t).k; counts[k] = (counts[k] || 0) + 1; });
-    const legend = ['done','now','rev','fix','bad','wait'].filter(k => counts[k]).map(k =>
-      `<span class="lg"><i class="${{done:'f-done',now:'f-now',rev:'f-rev',fix:'f-fix',bad:'f-bad',wait:'f-wait'}[k]}"></i>${L.kinds[k]} <b>${counts[k]}</b></span>`).join('');
+    // Была ли у задачи отдельная проверка: событие ленты, текущий статус или ремонт.
+    const reviewedIds = new Set((S.log || []).filter(e => e.k === 'ticket' && e.act === 'review').flatMap(e => e.ids || []));
+    const reqById = Object.fromEntries(reqList.map(r => [r.id, r]));
+    const reqIds = t => [...new Set((t.requirements || []).map(x => String(x).split('.')[0]))];
+    const step = (cls, icon, label) => `<span class="ps ${cls}">${
+      icon === 'o' ? '<i class="o" aria-hidden="true"></i>' : icon === 'f' ? '<i class="f" aria-hidden="true"></i>' : ic(icon, 'xs')}${label}</span>`;
+    // Шаги «пишется → проверка → ремонт → сдана»: пройденный, текущий или пустой.
+    const stepsOf = t => {
+      const st = t.status, rep = (t.repairs || 0) > 0;
+      const reviewed = st === 'review' || st === 'repair' || rep || reviewedIds.has(t.id);
+      const P = {ok:['ok','check'], none:['','o'], back:['back','alert'], bad:['bad','x']};
+      const cur = c => ['cur ' + c, 'f'];
+      let w = P.none, r = P.none, f = P.none, d = P.none;
+      if (st === 'in-progress') { w = cur('now'); r = reviewed ? P.ok : P.none; f = rep ? P.ok : P.none; }
+      else if (st === 'review') { w = P.ok; r = cur('rev'); f = rep ? P.ok : P.none; }
+      else if (st === 'repair') { w = P.ok; r = P.back; f = cur('fix'); }
+      else if (st === 'done') { w = P.ok; r = reviewed ? P.ok : P.none; f = rep ? P.ok : P.none; d = P.ok; }
+      else if (st === 'failed') { w = rep ? P.ok : P.bad; r = reviewed ? (rep ? P.back : P.ok) : P.none; f = rep ? P.bad : P.none; }
+      return [[w, L.steps.write], [r, L.steps.rev], [f, L.steps.fix], [d, L.steps.done]].map(([[c, i], lb]) => step(c, i, lb)).join('');
+    };
+    const card = t => {
+      const k = kindOf(t);
+      const rq = reqIds(t);
+      const time = t.status === 'done' ? fmtDur(mins(t))
+        : (t.startedAt && t.status !== 'pending') ? timerHTML(t.startedAt, t.finishedAt) : '';
+      const reviewYes = /^(да|yes)/i.test(t.review || '');
+      const why = String(t.review || '').replace(/^(да|yes)\s*[—–-]?\s*/i, '');
+      const lastFix = (t.repairFindings || []).slice(-1)[0];
+      const note = t.status === 'repair' && lastFix ? ['fix', 'rotate', L.noteRepair(lastFix)]
+        : t.status === 'review' && reviewYes && why ? ['rev', 'clock', L.noteReview(why)]
+        : t.status === 'failed' && (t.concerns || []).length ? ['bad', 'x', t.concerns.join('; ')] : null;
+      // Подробности: требования словами брифа и всё, что сборка записала о задаче.
+      const reqRows = rq.map(id => { const r = reqById[id], kk = r ? (REQ_KIND[r.status] || 'open') : null;
+        return `<div class="treq"><p><b>${esc(id)}</b>${r ? esc(r.text) : ''}</p>${kk ? `<span class="pill ${REQ_PILL[kk]}">${L.rs[kk]}</span>` : ''}</div>`; }).join('');
+      const kv = [
+        (t.zone || []).length ? [L.dZone, t.zone.map(z => `<code>${esc(z)}</code>`).join(', ')] : null,
+        (t.blockedBy || []).length ? [L.dDeps, esc(t.blockedBy.join(', '))] : null,
+        t.review ? [L.dReview, reviewYes ? esc(why || t.review) : L.dReviewNo] : null,
+        t.model ? [L.dModel, esc(t.model)] : null,
+        t.tests ? [L.dTests, L.dTestsVal(t.tests)] : null,
+        t.commit ? [L.dCommit, `<code>${esc(t.commit)}</code>`] : null,
+        (t.repairs || t.retries) ? [L.dAttempts, [t.repairs ? L.tkParts.repair(t.repairs) : '', t.retries ? L.tkParts.retry(t.retries) : ''].filter(Boolean).join(' · ')] : null,
+      ].filter(Boolean);
+      const lists = [[L.dRepair, t.repairFindings], [L.dFail, t.concerns]].filter(x => (x[1] || []).length)
+        .map(([h, a]) => `<div><h4>${h}</h4><ul>${a.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`).join('');
+      const body = (reqRows ? `<div><h4>${L.dReqs}</h4>${reqRows}</div>` : '')
+        + (kv.length ? `<dl class="tkv">${kv.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>` : '') + lists;
+      const key = 'tk:' + t.id;
+      return `<article class="task k-${k.k}">
+        <div class="th"><span class="t-id">${esc(t.id)}</span>
+          <div style="min-width:0"><h4 class="t-nm">${esc(t.title)}</h4>${rq.length ? `<span class="t-rq">${L.tkReqs(esc(rq.join(', ')))}</span>` : ''}</div>
+          <div class="t-r"><span class="t-st"><i class="dot" aria-hidden="true"></i>${L.chip[k.k]}</span>
+            <span class="t-tm">${L.whole}${time ? `<b>${time}</b>` : ` · ${L.notStarted}`}</span></div></div>
+        <div class="steps">${stepsOf(t)}</div>
+        ${note ? `<p class="t-note ${note[0]}">${ic(note[1])}<span>${esc(note[2])}</span></p>` : ''}
+        ${body ? `<details class="tdet" data-key="${esc(key)}"${UI.open[key] ? ' open' : ''}><summary>${L.details}</summary><div class="tdb">${body}</div></details>` : ''}
+      </article>`;
+    };
     const waves = [...new Set(T.map(t => t.wave ?? 1))].sort((a,b) => a-b);
     const rows = waves.map(w => {
       const inWave = T.filter(t => (t.wave ?? 1) === w)
         .sort((a,b) => String(a.id).localeCompare(String(b.id), undefined, {numeric:true}));
+      const wDone = inWave.filter(t => t.status === 'done').length;
       const blockers = [...new Set(inWave.flatMap(t => t.blockedBy || []))].filter(b => byId[b] && byId[b].status !== 'done');
-      const sub = inWave.every(t => t.status === 'pending') && blockers.length ? L.waveWaits(blockers)
-        : inWave.length > 1 ? L.waveSub(inWave.length) : '';
-      return `<div class="wave"><i class="wn" aria-hidden="true">${esc(w)}</i>${L.wave(w)}${sub ? ` <span>${sub}</span>` : ''}</div>` + inWave.map(t => {
-        const k = kindOf(t);
-        const time = t.status === 'done' ? fmtDur(mins(t)) : (t.startedAt && t.status !== 'pending') ? timerHTML(t.startedAt, t.finishedAt) : '—';
-        const why = String(t.review || '').replace(/^(да|yes)\s*[—–-]\s*/i, '');
-        const note = t.status === 'repair' && (t.repairFindings || []).length ? ['fix', L.noteRepair(t.repairFindings[t.repairFindings.length - 1])]
-          : t.status === 'review' && /^(да|yes)/i.test(t.review || '') && why ? ['rev', L.noteReview(why)]
-          : t.status === 'failed' && (t.concerns || []).length ? ['bad', t.concerns.join('; ')] : null;
-        const extra = t.status === 'done' && (t.repairs || t.retries)
-          ? ' · ' + [t.repairs ? L.tkParts.repair(t.repairs) : '', t.retries ? L.tkParts.retry(t.retries) : ''].filter(Boolean).join(' · ') : '';
-        return `<div class="tl"><span class="tl-id${k.on ? ' on' : ''}">${esc(t.id)}</span>
-          <div class="bar ${k.bar}" title="${esc(t.title)}"><span class="nm">${esc(t.title)}</span>
-            <span class="chipin">${ic(k.icon,'xs')}<span class="lbl">${L.chip[k.k]}${extra}</span></span></div>
-          <span class="tl-time ${k.on ? k.k : ''}">${time}</span>
-          ${note ? `<div class="tl-note ${note[0]}">${ic(KIND[t.status].icon)}<span>${esc(note[1])}</span></div>` : ''}</div>`;
-      }).join('');
+      const meta = [inWave.length > 1 ? L.wavePar : '',
+        inWave.every(t => t.status === 'pending') && blockers.length ? L.waveWaits(blockers) : ''].filter(Boolean);
+      return `<div class="wave">
+        <div class="wave-head"><div><i class="wn" aria-hidden="true">${esc(w)}</i>${L.wave(w)}</div><span>${L.waveDone(wDone, inWave.length)}</span></div>
+        <div class="wbar" aria-hidden="true"><i style="width:${Math.round(wDone / inWave.length * 100)}%"></i></div>
+        ${meta.length ? `<div class="wave-meta">${meta.map(x => `<span>${x}</span>`).join('')}</div>` : ''}
+        ${inWave.map(card).join('')}</div>`;
     }).join('');
-    buildCard = `<section class="card w"><div class="whead"><h3 class="wt">${L.build}</h3><div class="legend">${legend}</div></div>${rows}</section>`;
+    buildCard = `<section class="card w">${buildHead}<div class="waves">${rows}</div></section>`;
   } else if (t0 && (activeStage?.id === 'build' || stage('build').status === 'done')) {
-    buildCard = `<section class="card w"><div class="whead"><h3 class="wt">${L.build}</h3></div><div class="empty">${ic('list','m')}<span>${L.t0}</span></div></section>`;
+    buildCard = `<section class="card w">${buildHead}<div class="empty" style="margin-top:18px">${ic('list','m')}<span>${L.t0}</span></div></section>`;
   } else if (!fin) {
-    buildCard = `<section class="card w"><div class="whead"><h3 class="wt">${L.build}</h3></div><div class="empty">${ic('list','m')}<span>${L.noTickets}</span></div></section>`;
+    buildCard = `<section class="card w">${buildHead}<div class="empty" style="margin-top:18px">${ic('list','m')}<span>${L.noTickets}</span></div></section>`;
   }
 
   // ——— списки ———
@@ -1313,6 +1420,12 @@ document.getElementById('app').addEventListener('click', e => {
     UI.open[b.dataset.more] = !UI.open[b.dataset.more]; render(CUR.lang);
   }
 });
+
+// Раскрытые подробности задачи переживают перерисовку: toggle не всплывает, ловим на захвате.
+document.getElementById('app').addEventListener('toggle', e => {
+  const d = e.target;
+  if (d && d.matches && d.matches('details[data-key]')) UI.open[d.dataset.key] = d.open;
+}, true);
 
 let savedLang = 'ru';
 try { savedLang = localStorage.getItem('aispa-lang')

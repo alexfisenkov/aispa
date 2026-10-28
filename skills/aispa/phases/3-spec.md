@@ -53,7 +53,7 @@ Elaborating «принимает заявки» into retry, resume and validatio
 
 ## Boundaries — decided here, written to `interfaces.md`
 
-Several executors in fresh contexts build one project only if the **boundaries between modules are already decided**. Leave them open and ticket 01 decides them, having seen an eighth of the задача, and everything after it obeys that shape or quietly builds a second one.
+Several executors in fresh contexts build one project only if the **boundaries between modules are already decided**. Leave them open and ticket 01 decides them, having seen an eighth of the work, and everything after it obeys that shape or quietly builds a second one.
 
 For every unit the build will have: **what it owns**, **what it exposes** (signatures other units call — names and shapes, not implementations; names in English, never transliterated Russian, unless the existing code does otherwise), **what it hides**. Then the **test seams** — a subset of those same boundaries, the fewer the better, existing ones preferred. Boundaries follow the depth pass, not the requirement list; a boundary no ticket crosses is not a boundary; a few deep modules beat many shallow ones.
 
