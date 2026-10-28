@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/aispa-logo-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="assets/aispa-logo-light.png">
-    <img src="assets/aispa-logo-light.png" alt="aispa" width="420">
+    <img src="assets/aispa-logo-light.png" alt="AISpa" width="420">
   </picture>
 </p>
 
