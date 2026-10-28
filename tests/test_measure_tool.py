@@ -225,6 +225,40 @@ class ParseTokensTests(unittest.TestCase):
         turn = {"type": "turn.completed", "usage": {"input_tokens": 5, "output_tokens": 1}}
         self.assertEqual(measure.parse_tokens(self.text(turn, turn)), {"input": 10, "output": 2, "total": 12})
 
+    @staticmethod
+    def started(thread):
+        return {"type": "thread.started", "thread_id": thread}
+
+    @staticmethod
+    def turn(tokens, output=1):
+        return {"type": "turn.completed", "usage": {"input_tokens": tokens, "cached_input_tokens": tokens // 2,
+                                                    "output_tokens": output, "reasoning_output_tokens": 1}}
+
+    def test_codex_turns_of_one_session_give_the_last_running_total(self):
+        # Each turn.completed of a continued session carries the whole session's running total.
+        tokens = measure.parse_tokens(self.text(self.started("t1"), self.turn(100, 10), self.turn(160, 40),
+                                                self.turn(190, 90)))
+        self.assertEqual(tokens, {"input": 190, "output": 90, "total": 280})
+
+    def test_codex_resumed_turns_with_the_same_thread_id_count_once(self):
+        # `codex exec resume`: every turn prints thread.started with the same id; later turns repeat the total.
+        tokens = measure.parse_tokens(self.text(self.started("t1"), self.turn(100, 10), self.started("t1"),
+                                                self.turn(160, 40), self.started("t1"), self.turn(160, 40)))
+        self.assertEqual(tokens, {"input": 160, "output": 40, "total": 200})
+
+    def test_codex_sessions_add_their_last_totals(self):
+        tokens = measure.parse_tokens(self.text(self.started("t1"), self.turn(100, 10), self.turn(160, 40),
+                                                self.started("t2"), self.turn(1000, 100), self.turn(1500, 200)))
+        self.assertEqual(tokens, {"input": 1660, "output": 240, "total": 1900})
+
+    def test_codex_turns_without_thread_started_are_summed_as_before(self):
+        tokens = measure.parse_tokens(self.text(self.turn(100, 10), self.turn(160, 40), self.turn(190, 90)))
+        self.assertEqual(tokens, {"input": 450, "output": 140, "total": 590})
+
+    def test_codex_thread_started_without_an_id_does_not_join_turns_into_one_session(self):
+        tokens = measure.parse_tokens(self.text({"type": "thread.started"}, self.turn(100, 10), self.turn(160, 40)))
+        self.assertEqual(tokens, {"input": 260, "output": 50, "total": 310})
+
     def test_no_numbers_stay_unknown(self):
         self.assertEqual(measure.parse_tokens("no json"), "unknown")
 

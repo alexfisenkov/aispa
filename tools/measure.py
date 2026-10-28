@@ -79,10 +79,37 @@ def _add(totals, usage, fields):
             totals[name] = totals.get(name, 0) + value
 
 
+def _codex_session_usages(items):
+    """`usage` of the last `turn.completed` of every Codex session, in order of first appearance.
+
+    A `turn.completed` belongs to the session named by the last `thread.started`
+    (`thread_id`) before it. A continued session (`codex exec resume <thread_id>`)
+    prints that same `thread_id` at the start of every turn, and each of its
+    `turn.completed` lines carries the running total of the whole session, not the
+    turn's own spend: a live log showed input growing 24.2 -> 47.3 -> ... -> 49.1M
+    over six turns of one session. So the last line of a session is its total.
+    A `turn.completed` with no usable `thread_id` before it (older output without
+    `thread.started`, or a `thread.started` without the id) is its own session, so
+    such lines are summed, as before this fix.
+    """
+    last_of_session = {}
+    thread = None
+    for index, item in enumerate(items):
+        kind = item.get("type")
+        if kind == "thread.started":
+            value = item.get("thread_id")
+            thread = value if isinstance(value, str) and value else None
+        elif kind == "turn.completed" and isinstance(item.get("usage"), dict):
+            last_of_session[thread if thread is not None else ("no-thread", index)] = item["usage"]
+    return list(last_of_session.values())
+
+
 def parse_tokens(text):
     """Sum of the environment's own usage numbers, or "unknown". Nothing is estimated.
 
-    Codex: every `turn.completed` is one turn's spend, so they are summed.
+    Codex: the last `turn.completed` of each session (`thread_id`) is that
+    session's total (see `_codex_session_usages`); sessions are summed, and
+    turns that name no session are summed one by one.
     Claude Code: `modelUsage` (all models, subagents included) is the running
     total of the whole session, and a wrapper that continues the run
     (`--resume <session_id>`) gets it back on every turn. So answers are grouped
@@ -95,11 +122,11 @@ def parse_tokens(text):
     """
     items = _json_items(text)
     totals = {}
-    turns = [item for item in items if item.get("type") == "turn.completed" and isinstance(item.get("usage"), dict)]
+    turns = _codex_session_usages(items)
     answers = [item for item in items if isinstance(item.get("modelUsage"), dict)]
     if turns:
-        for item in turns:
-            _add(totals, item["usage"], TOKEN_FIELDS)
+        for usage in turns:
+            _add(totals, usage, TOKEN_FIELDS)
     elif answers:
         last_of_session = {}
         for index, item in enumerate(answers):
