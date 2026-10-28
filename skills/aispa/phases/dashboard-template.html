@@ -29,7 +29,7 @@
     --rev:#0F766E; --rev-soft:#CCFBF1; --rev-tx:#0F766E;
     --fix:#854D0E; --fix-soft:#FEF3C7; --fix-tx:#854D0E;
     --bad:#991B1B; --bad-soft:#FEE2E2; --bad-tx:#991B1B;
-    --idle:#C7C9CC; --eyeline:rgba(23,23,23,.45);
+    --idle:#C7C9CC; --eyeline:rgba(23,23,23,.45); --cur:#171717; --pastline:#171717;
     --sh:0 20px 60px rgba(20,20,22,.10);
     --sh-btn:0 10px 26px rgba(23,23,23,.22);
     --sh-tab:0 4px 12px rgba(20,20,22,.10);
@@ -46,7 +46,7 @@
       --rev-soft:#123D38; --rev-tx:#99F6E4;
       --fix-soft:#3D3217; --fix-tx:#FDE68A;
       --bad-soft:#431C22; --bad-tx:#FCA5A5;
-      --idle:#5A5D63; --eyeline:rgba(255,255,255,.5);
+      --idle:#5A5D63; --eyeline:rgba(255,255,255,.5); --cur:#383A40; --pastline:#B9BBC1;
       --sh:0 20px 60px rgba(0,0,0,.24);
       --sh-btn:0 10px 26px rgba(0,0,0,.35);
       --sh-tab:0 4px 12px rgba(0,0,0,.3);
@@ -64,7 +64,7 @@
     --rev-soft:#123D38; --rev-tx:#99F6E4;
     --fix-soft:#3D3217; --fix-tx:#FDE68A;
     --bad-soft:#431C22; --bad-tx:#FCA5A5;
-    --idle:#5A5D63; --eyeline:rgba(255,255,255,.5);
+    --idle:#5A5D63; --eyeline:rgba(255,255,255,.5); --cur:#383A40; --pastline:#B9BBC1;
     --sh:0 20px 60px rgba(0,0,0,.24);
     --sh-btn:0 10px 26px rgba(0,0,0,.35);
     --sh-tab:0 4px 12px rgba(0,0,0,.3);
@@ -82,7 +82,7 @@
   .tabs button:focus-visible,.iconbtn:focus-visible,.chip:focus-visible,.btn-soft:focus-visible{box-shadow:0 0 0 5px rgba(199,201,204,.4)}
   .hero:not(.ask) :focus-visible{outline-color:#fff;box-shadow:0 0 0 5px rgba(199,201,204,.4)}
   code,.mono{font-family:'JetBrains Mono',ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-  .tnum,.big b,.tv,.s-time,.ev em{font-variant-numeric:tabular-nums}
+  .tnum,.tbig,.tv,.s-time,.ev em{font-variant-numeric:tabular-nums}
   /* Лист 0.5: до 1280 px содержимого по центру, поля clamp(16px,3vw,44px), между блоками 22 px. */
   .wrap{max-width:calc(1280px + 2 * clamp(16px,3vw,44px));margin:0 auto;padding:28px clamp(16px,3vw,44px) 64px;display:flex;flex-direction:column;gap:22px;min-width:0}
   .wrap>*{min-width:0}
@@ -101,6 +101,23 @@
   .top{display:flex;align-items:center;justify-content:flex-start;gap:14px;flex-wrap:wrap}
   /* Шапка бренда, как в 0.5: ссылка-блок на канал, знак, «AI мастерская» и «AISpa». */
   .brand{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-right:auto;min-width:0}
+  .brand-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-right:auto;min-width:0}
+  .brand-row .brand{margin-right:0}
+  /* Плашка версии и индикатор связи — как в шапке 0.5. */
+  .vpill{padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:13px;color:var(--mut);line-height:1.3;overflow-wrap:anywhere}
+  .source{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);min-width:0}
+  .source .sdot{width:8px;height:8px;border-radius:999px;flex:none;background:var(--silver)}
+  .source.s-live .sdot{background:#1F8A5B}
+  .source.s-lost .sdot,.source.s-snap .sdot{background:var(--quiet)}
+  .pref{height:44px;padding:0 10px;border:1px solid var(--line);border-radius:11px;background:var(--card);color:var(--tx);font:600 13px 'Onest',-apple-system,sans-serif;cursor:pointer}
+  .pref:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+  .btn{height:44px;padding:0 20px;border:1px solid var(--press-line);border-radius:15px;background:var(--press);color:var(--press-tx);font:600 14px 'Onest',-apple-system,sans-serif;cursor:pointer;
+    box-shadow:var(--sh-btn);display:inline-flex;align-items:center;gap:10px;transition:transform .3s cubic-bezier(.16,1,.3,1)}
+  .btn:hover{transform:translateY(-2px)}
+  .btn:active{transform:scale(.96)}
+  .btn:focus-visible{outline:2px solid var(--tx);outline-offset:3px;box-shadow:0 0 0 5px rgba(199,201,204,.4)}
+  .btn span{background:linear-gradient(100deg,#9A9DA2 0%,#FFFFFF 50%,#9A9DA2 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .btn.busy .arr{animation:pulse .8s linear infinite}
   .brand-link{display:flex;align-items:center;gap:14px;color:var(--tx);text-decoration:none;border-radius:12px}
   .brand-link:focus-visible{outline:2px solid var(--tx);outline-offset:5px}
   .brand h1{display:block;margin:0;font-family:'Unbounded','Onest',-apple-system,sans-serif;font-weight:700;font-size:25px;line-height:1.1;letter-spacing:-.01em}
@@ -138,39 +155,103 @@
     box-shadow:0 40px 90px rgba(20,20,22,.16),inset 0 1px 0 #fff}
   .hero.won{background:var(--glow),linear-gradient(165deg,#18784E 0%,#10593A 100%);--h-mut:rgba(255,255,255,.9);--h-track:rgba(255,255,255,.26);--h-line:rgba(255,255,255,.2);--h-fill:rgba(255,255,255,.05);--h-cur:rgba(0,0,0,.22);--h-cur-line:rgba(255,255,255,.3);box-shadow:0 40px 90px rgba(24,120,78,.22),inset 0 1px 0 rgba(255,255,255,.16)}
   .hero.bad{background:var(--glow),linear-gradient(165deg,#A82121 0%,#851717 100%);--h-track:rgba(255,255,255,.26);--h-line:rgba(255,255,255,.2);--h-fill:rgba(255,255,255,.08);--h-cur:rgba(0,0,0,.22);--h-cur-line:rgba(255,255,255,.3);box-shadow:0 40px 90px rgba(153,27,27,.2),inset 0 1px 0 rgba(255,255,255,.16)}
-  .hero-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:stretch;gap:20px 40px}
-  .hero-main{flex:1 1 420px;min-width:0}
+  .hero-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px 20px}
+  .hero-main{min-width:0;margin-top:-8px}
+  /* Надзаголовок главной карточки 0.5: «AISPA · проект». */
+  .hwt{margin:0;font-family:'Unbounded','Onest',-apple-system,sans-serif;font-size:11px;font-weight:600;letter-spacing:.24em;text-transform:uppercase;color:var(--h-mut);
+    display:flex;align-items:center;gap:10px;line-height:1.6;min-width:0;overflow-wrap:anywhere;flex:1 1 260px}
+  .hwt::before{content:"";flex:0 0 26px;height:1px;background:linear-gradient(90deg,transparent,var(--h-mut))}
   /* Состояние — плашка-пилюля 0.5 («● В работе»). */
-  .state{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 10px;border-radius:999px;background:var(--h-fill);border:1px solid var(--h-line);font-size:13px;font-weight:600;color:var(--h-tx);margin-bottom:16px}
+  .state{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 10px;border-radius:999px;background:var(--h-fill);border:1px solid var(--h-line);font-size:13px;font-weight:600;color:var(--h-tx)}
+  /* Строка фактов 0.5: подпись сверху, значение снизу. */
+  .facts{display:flex;flex-wrap:wrap;gap:10px 32px;font-size:12px;color:var(--h-mut);margin:0}
+  .facts div{display:grid;gap:3px;min-width:0}
+  .facts dt{margin:0}
+  .facts dd{margin:0;font-size:13px;font-weight:600;color:var(--h-tx);overflow-wrap:anywhere}
+  .facts dd.mono{font-weight:500}
+  /* «Данные прогона» — раскрываемый блок под чертой, как run-context в 0.5. */
+  .runctx{border-top:1px solid var(--h-line);padding-top:6px;margin-top:-10px}
+  .runctx>summary{display:flex;align-items:center;gap:6px;width:fit-content;min-height:32px;cursor:pointer;list-style:none;font-size:12.5px;color:var(--h-mut);border-radius:6px}
+  .runctx>summary::-webkit-details-marker{display:none}
+  .runctx>summary::before{content:'▸'}
+  .runctx[open]>summary::before{content:'▾'}
+  .runctx>summary:hover{color:var(--h-tx)}
+  .rkv{display:grid;grid-template-columns:minmax(120px,max-content) minmax(0,1fr);gap:6px 18px;margin:8px 0 2px;font-size:13px;line-height:1.45}
+  .rkv dt{color:var(--h-mut)}
+  .rkv dd{margin:0;color:var(--h-tx);overflow-wrap:anywhere}
+  .rkv code{font-size:12.5px}
   .hero h2{font-family:'Unbounded','Onest',-apple-system,sans-serif;margin:0;font-size:32px;line-height:1.15;font-weight:600;letter-spacing:-.02em;text-wrap:balance;max-width:32ch;overflow-wrap:anywhere}
   .lead{margin:12px 0 0;font-size:16px;line-height:1.55;color:var(--h-mut);max-width:64ch}
   .lead b{color:var(--h-tx);font-weight:600}
-  /* Время — отдельной колонкой за тонкой чертой, как сводка времени в 0.5. */
-  .big{flex:0 0 auto;display:flex;flex-direction:column;justify-content:flex-end;border-left:1px solid var(--h-line);padding-left:28px;min-width:0}
-  .big b{font-family:'Unbounded','Onest',-apple-system,sans-serif;display:block;font-size:56px;line-height:.95;font-weight:700;letter-spacing:-.045em}
-  .big b small{font-size:22px;letter-spacing:-.02em;font-weight:600;margin-left:6px}
-  .big>span{display:block;font-size:13px;color:var(--h-mut);margin-top:10px}
-  .big .paused{display:block;margin-top:6px;font-weight:600;color:var(--h-tx)}
   .hint{display:inline-flex;align-items:center;gap:10px;margin-top:18px;min-height:44px;padding:8px 20px;border-radius:15px;background:#171717;color:#fff;font-size:14px;font-weight:600;line-height:1.35;box-shadow:0 10px 26px rgba(23,23,23,.22)}
-  /* Этапы — сегменты 0.5: линия сверху, пройденные приглушены, текущий залит графитом. */
-  .track{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
-  .track>div{display:flex;flex-direction:column;gap:7px;padding:9px 10px 10px;border-radius:12px;border:1px solid var(--h-line);min-width:0}
-  .track>.s-done{background:var(--h-fill)}
-  .track>.s-now,.track>.s-fail{background:var(--h-cur);border-color:var(--h-cur-line)}
-  .hero.ask .track>.s-now{color:#fff;--h-mut:rgba(255,255,255,.82)}
-  .seg{height:3px;border-radius:999px;background:var(--h-track);overflow:hidden}
-  .seg i{display:block;height:100%;border-radius:inherit}
-  .s-done .seg i{width:100%;background:#34A56F}
-  .hero.won .s-done .seg i,.hero.bad .s-done .seg i{background:#fff}
-  .hero.ask .s-done .seg i{background:#171717}
-  .s-now .seg i{background:linear-gradient(90deg,#9A9DA2,#FFFFFF,#9A9DA2) 0 0/200% 100%;animation:chromeShine 2.4s linear infinite}
-  .s-fail .seg i{width:100%;background:#fff}
-  .s-skip{border-style:dashed!important}
-  .s-skip .seg{background:repeating-linear-gradient(135deg,var(--h-track) 0 4px,transparent 4px 8px)}
+  /* Блок «Этап» 0.5: белая карточка, шаги 01–08, пройденные — серые с графитовой чертой, текущий — графит с хромом. */
+  .rowh{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 12px;margin-bottom:12px}
+  .sh{margin:0;font-family:'Unbounded','Onest',-apple-system,sans-serif;font-weight:600;font-size:17px}
+  .rowh>span{font-size:13px;color:var(--quiet)}
+  .stgc{padding:16px 20px;border-radius:24px}
+  .stgs{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
+  .stg{display:flex;flex-direction:column;gap:6px;padding:8px 10px 9px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--quiet);min-width:0}
+  .stg>i{display:block;height:2px;border-radius:999px;background:var(--line)}
+  .stg small{font-family:'Unbounded','Onest',sans-serif;font-size:11px;opacity:.75}
+  .stg b{display:block;font-size:12.5px;font-weight:600;line-height:1.25;overflow-wrap:anywhere}
+  .stg.past{background:var(--inset);color:var(--tx)}
+  .stg.past>i{background:var(--pastline)}
+  .stg.cur{background:var(--cur);color:#fff;border-color:var(--cur)}
+  .stg.cur>i{background:linear-gradient(90deg,#9A9DA2,#FFFFFF,#9A9DA2) 0 0/200% 100%;animation:chromeShine 2.4s linear infinite}
+  .stg.fail{background:var(--bad-soft);color:var(--bad-tx);border-color:currentColor}
+  .stg.fail>i{background:currentColor}
+  .stg.skip{border-style:dashed}
+  .stg.skip>i{background:repeating-linear-gradient(90deg,var(--line2) 0 4px,transparent 4px 8px)}
   @keyframes chromeShine{from{background-position:200% 0}to{background-position:-200% 0}}
-  .s-name{display:block;font-size:12.5px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
-  .s-pend .s-name,.s-skip .s-name{color:var(--h-mut);font-weight:500}
-  .s-time{display:block;margin-top:-4px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--h-mut)}
+  .s-time{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;opacity:.8}
+  .stg-foot{margin:12px 0 0;font-size:13px;font-weight:600}
+  /* Карточка времени 0.5: «Время прогона» слева, «Примерно до завершения» справа за чертой. */
+  .timec{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px 28px;padding:20px clamp(20px,2.4vw,30px)}
+  .tcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .tcol+.tcol{border-left:1px solid var(--line);padding-left:28px}
+  .tlb{font-size:12.5px;color:var(--mut)}
+  .tlb::first-letter{text-transform:uppercase}
+  .tbig{font-family:'Unbounded','Onest',-apple-system,sans-serif;font-size:30px;line-height:1.15;font-weight:700;letter-spacing:-.02em;overflow-wrap:anywhere}
+  .tbig small{font-size:16px;font-weight:600;margin-left:4px}
+  .tbig.dim{font-family:'Onest',-apple-system,sans-serif;font-size:18px;font-weight:600;color:var(--mut);letter-spacing:0}
+  .tnote{font-size:12.5px;line-height:1.5;color:var(--quiet);max-width:62ch;text-wrap:pretty}
+  .tnote.paused{font-weight:600;color:var(--fix-tx)}
+  /* Предупреждение о тишине — жёлтая плашка 0.5. */
+  .notice{margin-top:16px;padding:12px 15px;border-radius:12px;border:1px solid var(--fix-tx);color:var(--fix-tx);background:var(--fix-soft);font-size:13px;line-height:1.5}
+  /* Требования: заголовок слева, фильтры справа, как в 0.5. */
+  .reqh{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;margin-bottom:12px}
+  .reqh>div:first-child{min-width:0}
+  .reqh .chips{margin-bottom:0}
+  /* Остатки и решения агента — нижний ряд 0.5. */
+  .lower{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:22px;align-items:start}
+  .lower>*{min-width:0}
+  .lower .bh{font-size:22px}
+  .rem-group{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+  .rem-group>span{font-family:'Unbounded','Onest',sans-serif;font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--quiet)}
+  .rem{display:flex;gap:12px;padding:13px 15px;border-radius:14px;background:var(--inset);border-left:3px solid var(--tx);min-width:0}
+  .rem>span.mono{flex:none;font-size:13px;color:var(--mut);padding-top:2px}
+  .rem>div{min-width:0;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
+  .rem small{display:block;font-size:12.5px;color:var(--quiet);margin-top:3px}
+  .rem-group .btn-soft{align-self:flex-start}
+  .clean{margin-top:18px;padding:14px 16px;border-radius:14px;background:var(--inset);font-size:15px;color:var(--tx2)}
+  .card.dark{background:radial-gradient(520px 520px at calc(100% + 140px) -100px,rgba(199,201,204,.20),transparent 70%),var(--hero);color:#fff;box-shadow:var(--hero-sh)}
+  .card.dark .bsub{color:#C7C9CC}
+  .dec{display:grid;grid-template-columns:30px minmax(0,1fr);gap:12px;padding:13px 0;border-top:1px solid rgba(255,255,255,.14)}
+  .dec>span{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;color:#A9ACB1;padding-top:3px}
+  .dec>p{margin:0;font-size:15px;line-height:1.5;color:#ECEDEF;overflow-wrap:anywhere}
+  .dec-h{margin:18px 0 0;font-size:12.5px;color:#C7C9CC}
+  .card.dark .muted{color:#C7C9CC;margin-top:16px}
+  .card.dark .btn-soft{background:transparent;color:#fff;border-color:rgba(255,255,255,.3);margin-top:10px}
+  /* История — свёрнутая карточка 0.5 с числом событий. */
+  .hist{padding:14px clamp(20px,2.4vw,30px)}
+  .hist>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;cursor:pointer;list-style:none;border-radius:8px}
+  .hist>summary::-webkit-details-marker{display:none}
+  .hist>summary h3{margin:0;font-family:'Unbounded','Onest',-apple-system,sans-serif;font-size:15px;font-weight:600}
+  .hist>summary>span{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;color:var(--mut)}
+  .hist>summary:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+  .hlist{margin-top:6px}
+  .gates4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .gates4 .gate{margin-top:0}
   .live{width:9px;height:9px;border-radius:50%;background:#fff;display:inline-block;flex:0 0 auto;animation:pulse 1.8s cubic-bezier(.16,1,.3,1) infinite}
   .hero.ask .live{background:#171717}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
@@ -181,7 +262,7 @@
   @keyframes stripes{to{background-position:22px 0}}
 
   /* ── плитки: белые карточки 0.5 ───────────────────────────── */
-  .tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:22px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:22px}
   .tile{display:flex;flex-direction:column;gap:12px;padding:22px 24px;border-radius:24px}
   .tk{font-size:13px;font-weight:500;color:var(--mut)}
   .tv{font-family:'Unbounded','Onest',-apple-system,sans-serif;font-size:36px;line-height:1;font-weight:700;letter-spacing:-.04em}
@@ -349,8 +430,7 @@
   @media (prefers-reduced-motion:reduce){.boot .w,.live,.stripes,.iconbtn.busy svg,.s-now .seg i,.k-now .dot{animation:none}.iconbtn{transition:none}}
 
   /* ── ширина ───────────────────────────────────────────────── */
-  @media (max-width:1180px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
-  @media (max-width:1040px){.cols{grid-template-columns:minmax(0,1fr)}}
+    @media (max-width:1040px){.cols{grid-template-columns:minmax(0,1fr)}.gates4{grid-template-columns:repeat(2,minmax(0,1fr))}.stgs{grid-template-columns:repeat(4,minmax(0,1fr))}}
   /* Узкая панель рядом с чатом — главный способ смотреть дашборд. Здесь всё
      плотнее: те же блоки, но цифры и полосы под ширину 380–900 px, а не экрана. */
   @media (max-width:900px){
@@ -372,18 +452,24 @@
     .state{font-size:12px;margin-bottom:10px;padding:5px 11px 5px 9px}
     .hero h2{font-size:20px;letter-spacing:-.01em;max-width:none}
     .lead{font-size:14px;margin-top:8px}
-    .big{flex:1 1 100%;border-left:0;border-top:1px solid var(--h-line);padding:12px 0 0}
-    .big b{font-size:30px;letter-spacing:-.03em}
-    .big b small{font-size:15px}
-    .big>span{font-size:12px;margin-top:4px}
     .hint{font-size:13.5px;margin-top:12px;padding:8px 14px}
-    /* Как этапы 0.5 на телефоне: сегменты переносятся рядами и тянутся по ширине, слова не рвутся. */
-    .track{display:flex;flex-wrap:wrap;gap:5px}
-    .track>div{flex:1 1 auto;padding:7px 9px 8px;border-radius:10px;gap:5px}
-    .s-name{overflow-wrap:normal;white-space:nowrap}
-    .seg{height:2px}
-    .s-name{font-size:11.5px}
-    .s-time{font-size:10.5px;margin-top:-2px}
+    .facts{gap:8px 20px}
+    .rkv{grid-template-columns:minmax(0,1fr);gap:2px}
+    .rkv dd+dt{margin-top:6px}
+    .stgc{padding:14px;border-radius:20px}
+    .stgs{display:flex;flex-wrap:wrap;gap:5px}
+    .stg{flex:1 1 auto;padding:6px 8px 7px;gap:4px}
+    .stg b{font-size:11.5px;white-space:nowrap}
+    .sh{font-size:15px}
+    .timec{grid-template-columns:minmax(0,1fr);padding:18px}
+    .tcol+.tcol{border-left:0;border-top:1px solid var(--line);padding:14px 0 0}
+    .tbig{font-size:24px}
+    .tbig.dim{font-size:16px}
+    .lower{gap:14px}
+    .lower .bh{font-size:19px}
+    .rem>div{font-size:14px}
+    .dec>p{font-size:14px}
+    .hist{padding:10px 18px}
     .tiles{gap:12px}
     .tile{padding:16px;gap:8px;border-radius:20px}
     .tk{font-size:12.5px}
@@ -435,6 +521,9 @@
   @media (max-width:440px){
     .hero h2{font-size:19px}
     .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .gates4{grid-template-columns:minmax(0,1fr)}
+    .tools{width:100%}
+    .tools .source{flex:1 1 100%}
     .tv{font-size:22px}
     .req{grid-template-columns:minmax(0,1fr)}
     .req .pill{justify-self:start}
@@ -490,16 +579,9 @@ const IC = {
 };
 const ic = (n, cls) => `<svg class="ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true"><path d="${IC[n]}"/></svg>`;
 
-const systemDark = () => {
-  try { return matchMedia('(prefers-color-scheme: dark)').matches; } catch(e) { return false; }
-};
 const storedTheme = () => {
   try { return localStorage.getItem('aispa-theme'); } catch(e) { return null; }
 };
-// Явный выбор пользователя перевешивает системную тему; до первого клика — системная.
-function effectiveTheme(){
-  return storedTheme() || (systemDark() ? 'dark' : 'light');
-}
 function applyTheme(t){
   if (t) document.documentElement.setAttribute('data-theme', t);
   else document.documentElement.removeAttribute('data-theme');
@@ -520,10 +602,33 @@ const I18N = {
   ru:{lang:"ru",of:"из",
     stages:{preflight:"Подготовка",manifest:"Требования",briefing:"Брифинг",spec:"Спецификация",
       plan:"План",build:"Разработка",review:"Код-ревью",final:"Приёмка"},
-    modes:{full:"Полный автомат",semi:"Полуавтомат",interview:"Интервью",manual:"Ручной режим"},
-    depths:{strict:"Строго по брифу",normal:"Обычная глубина",deep:"Максимальная глубина"},
+    modes:{auto:"Сам по брифу",important:"Только важное",interview:"Интервью",manual:"Ручной",full:"Сам по брифу",semi:"Только важное"},
+    depths:{strict:"Строго по брифу",normal:"Обычная",deep:"Глубоко"},
+    verPre:"Предварительная версия",verAlpha:"Альфа",
+    src:{live:"Живые данные · локальный сервер",file:"Данные из файла · без сервера",lost:"Нет связи",snap:"Последний снимок"},
+    themeSystem:"Система",
+    fUpdated:"Последняя запись агента",fStage:"Текущий этап",fMode:"Режим",fDepth:"Глубина",
+    runData:"Данные прогона",rStarted:"Начата",rFinished:"Сдана",rDir:"Папка прогона",rBrief:"Бриф",rTier:"Ярус",rBase:"Базовый коммит",rSkill:"Версия AISpa",rMemory:"Память проекта",
+    stageHead:"Этап",stepOf:(n,m)=>`Шаг ${n} из ${m}`,inWork:n=>`В работе задач: ${n}`,
+    runTime:"Время прогона · без отмеченных пауз",estimate:"Примерно до завершения",noEta:"Пока нет оценки",
+    finishedAt:"Сдано",
+    etaWhy:{build:m=>`Оценка по самой длинной цепочке незавершённых задач: задача — ${m} мин, как медиана сданных, минус уже потраченное; плюс ревью ветки — половина всего времени разработки, не меньше 10 мин, — и 8 мин на приёмку. Показан разброс от 0,75 до 1,4 расчёта.`,
+      review:"Оценка: ревью ветки — около 60% времени разработки за вычетом уже прошедшего, не меньше 5 мин, плюс 8 мин на приёмку. Показан разброс от 0,75 до 1,4 расчёта.",
+      final:"Оценка: приёмка — около 10 мин от её начала, не меньше 3 мин. Показан разброс от 0,75 до 1,4 расчёта.",
+      firstTask:"Оценка появится, когда будет сдана первая задача: она считается по длительности сданных.",
+      early:"Оценка появится на этапе разработки, после первой сданной задачи.",
+      waiting:"Сборка ждёт ответа: сколько он займёт, неизвестно, поэтому оценки нет.",
+      failed:"Этап не прошёл — оценки нет."},
+    silent:t=>`Новых событий нет уже ${t}.`,silentLink:" Соединение работает; текущий результат агента ещё не записан.",
+    reqHead:"Требования",
+    remaining:"Остатки",remainingNote:"Остаются обязательствами и сохраняются в учёте.",
+    rBlock:"Блокеры",rOut:"Не вошло",noRem:"Остатков нет.",remLater:"Итоги ещё не подведены.",
+    decisions:"Решения агента",decisionsNote:"Если с каким-то решением не согласны, запустите AISpa снова и укажите, что изменить.",
+    noDec:"Самостоятельные решения пока не записаны.",
+    history:"История",
+    footer:"Экран только отображает результат. Право назвать работу готовой определяет движок.",
     started:t=>`начата ${t}`,startedRange:(a,b)=>`${a} — ${b}`,today:"сегодня в",
-    refresh:"Обновить сейчас",workshopLink:" — Telegram-канал, новая вкладка",langLabel:"Язык",themeLabel:"Тема",themeLight:"Светлая тема",themeDark:"Тёмная тема",
+    refresh:"Обновить",workshopLink:" — Telegram-канал, новая вкладка",langLabel:"Язык",themeLabel:"Тема",themeLight:"Светлая",themeDark:"Тёмная",
     lost:"Связь с дашбордом пропала — на экране последнее, что он успел получить. Так бывает, когда компьютер засыпает. Скажи агенту «подними дашборд»: страница подхватит его сама, перезагружать не нужно.",
     stateRun:{preflight:"Идёт подготовка",manifest:"Разбор требований",briefing:"Идёт брифинг",spec:"Пишется спецификация",
       plan:"Составляется план",build:"Идёт разработка",review:"Идёт код-ревью",final:"Идёт приёмка"},
@@ -595,7 +700,7 @@ const I18N = {
     feed:"Лента",
     need:"Понадобится от тебя",prep:"Перед запуском — от тебя",
     envKeys:"Ключи в .env",placeholders:"Заглушки — нужны твои данные",assumptions:"Решения, принятые за тебя",
-    needEmpty:"Пока ничего. Ключи, заглушки и решения за тебя появятся здесь по ходу сборки.",
+    needEmpty:"Пока ничего. Ключи и заглушки появятся здесь по ходу сборки.",
     blind:"Слепая приёмка",blindNote:"Проверяющий видел только твой бриф и готовый код — без спецификации.",
     blindBad:"Вот где он не согласился:",blindOk:"Расхождений с брифом нет.",
     report:"Открытые вопросы",concerns:"Замечания ревью",concernsNote:"Не мешают работе — оставлены с адресом в коде.",
@@ -630,10 +735,33 @@ const I18N = {
   en:{lang:"en",of:"of",
     stages:{preflight:"Preflight",manifest:"Requirements",briefing:"Briefing",spec:"Spec",
       plan:"Plan",build:"Development",review:"Code review",final:"Acceptance"},
-    modes:{full:"Fully automatic",semi:"Semi-automatic",interview:"Interview",manual:"Manual"},
-    depths:{strict:"Strictly as written",normal:"Normal depth",deep:"Maximum depth"},
+    modes:{auto:"On its own from the brief",important:"Only what matters",interview:"Interview",manual:"Manual",full:"On its own from the brief",semi:"Only what matters"},
+    depths:{strict:"Strictly as written",normal:"Normal",deep:"Deep"},
+    verPre:"Prerelease",verAlpha:"Alpha",
+    src:{live:"Live data · local server",file:"Data from file · no server",lost:"Disconnected",snap:"Last snapshot"},
+    themeSystem:"System",
+    fUpdated:"Last agent record",fStage:"Current stage",fMode:"Mode",fDepth:"Depth",
+    runData:"Run data",rStarted:"Started",rFinished:"Done",rDir:"Run folder",rBrief:"Brief",rTier:"Tier",rBase:"Base commit",rSkill:"AISpa version",rMemory:"Project memory",
+    stageHead:"Stage",stepOf:(n,m)=>`Step ${n} of ${m}`,inWork:n=>`Tasks in progress: ${n}`,
+    runTime:"Run time · without marked pauses",estimate:"Approximately until done",noEta:"No estimate yet",
+    finishedAt:"Done",
+    etaWhy:{build:m=>`Estimated along the longest chain of unfinished tasks: a task takes ${m} min, the median of finished ones, minus time already spent; plus the branch review — half of all development time, at least 10 min — and 8 min for acceptance. The range is 0.75 to 1.4 of the estimate.`,
+      review:"Estimate: the branch review takes about 60% of development time minus what has passed, at least 5 min, plus 8 min for acceptance. The range is 0.75 to 1.4 of the estimate.",
+      final:"Estimate: acceptance takes about 10 min from its start, at least 3 min. The range is 0.75 to 1.4 of the estimate.",
+      firstTask:"An estimate appears once the first task is done: it is based on how long finished tasks took.",
+      early:"An estimate appears during development, after the first finished task.",
+      waiting:"The build is waiting for an answer: how long that takes is unknown, so there is no estimate.",
+      failed:"The stage failed — no estimate."},
+    silent:t=>`No new journal events for ${t}.`,silentLink:" The connection works; the agent's current result has not been recorded yet.",
+    reqHead:"Requirements",
+    remaining:"Remaining",remainingNote:"They remain commitments and are kept on record.",
+    rBlock:"Blockers",rOut:"Not included",noRem:"Nothing remaining.",remLater:"Not summed up yet.",
+    decisions:"Agent decisions",decisionsNote:"If you disagree with a decision, run AISpa again and say what to change.",
+    noDec:"No agent decisions recorded yet.",
+    history:"History",
+    footer:"The screen only displays the result. The engine decides whether the work is done.",
     started:t=>`started ${t}`,startedRange:(a,b)=>`${a} — ${b}`,today:"today at",
-    refresh:"Refresh now",workshopLink:" — Telegram channel, new tab",langLabel:"Language",themeLabel:"Theme",themeLight:"Light theme",themeDark:"Dark theme",
+    refresh:"Refresh",workshopLink:" — Telegram channel, new tab",langLabel:"Language",themeLabel:"Theme",themeLight:"Light",themeDark:"Dark",
     lost:"The dashboard lost its connection — the screen shows the last state it received. This happens when the computer sleeps. Ask the agent to bring the dashboard back up: the page will pick it up by itself, no reload needed.",
     stateRun:{preflight:"Preflight",manifest:"Reading the brief",briefing:"Briefing",spec:"Writing the spec",
       plan:"Planning",build:"Development",review:"Code review",final:"Acceptance"},
@@ -702,7 +830,7 @@ const I18N = {
     feed:"Feed",
     need:"Needed from you",prep:"Before you run it",
     envKeys:"Keys in .env",placeholders:"Placeholders — your data needed",assumptions:"Decisions made for you",
-    needEmpty:"Nothing yet. Keys, placeholders and decisions made for you will show up here as the build goes.",
+    needEmpty:"Nothing yet. Keys and placeholders will show up here as the build goes.",
     blind:"Blind acceptance",blindNote:"The checker saw only your brief and the finished code — no spec.",
     blindBad:"Here is where it disagreed:",blindOk:"No disagreements with the brief.",
     report:"Open questions",concerns:"Review notes",concernsNote:"They do not block anything — kept with their place in the code.",
@@ -859,6 +987,18 @@ function agoShort(iso){
   const m = Math.floor(ms/60000);
   return m < 1 ? CUR.agoShort.s : m < 60 ? CUR.agoShort.m(m) : CUR.agoShort.h(Math.floor(m/60));
 }
+// Молчание — повод присмотреться, но только когда никто не работает.
+// Пока задача идёт, записей внутри неё нет по устройству процесса:
+// порог тогда — порог простоя (IDLE_CAP_MS), а не пять минут.
+// Возвращает длительность молчания или null, если повода нет.
+function silentFor(iso){
+  const S = window.STATE || {};
+  if (!iso || S.finishedAt || S.waiting) return null;
+  const busy = (S.tickets || []).some(t =>
+    t.status === 'in-progress' || t.status === 'review' || t.status === 'repair');
+  const ms = spanMs(iso, null);
+  return ms != null && ms > (busy ? IDLE_CAP_MS : 300000) ? ms : null;
+}
 function tick(){
   const stopped = idleNow();
   document.querySelectorAll('[data-live][data-from]').forEach(el => {
@@ -870,14 +1010,14 @@ function tick(){
   document.querySelectorAll('[data-idle-note]').forEach(el => { el.hidden = !stopped; });
   document.querySelectorAll('[data-ago]').forEach(el => {
     el.textContent = agoText(el.dataset.ago);
-    // Молчание — повод присмотреться, но только когда никто не работает.
-    // Пока задача идёт, записей внутри неё нет по устройству процесса:
-    // порог тогда — не пять минут, а заметно дольше самой долгой задачи.
-    const S = window.STATE || {};
-    const busy = (S.tickets || []).some(t =>
-      t.status === 'in-progress' || t.status === 'review' || t.status === 'repair');
-    el.classList.toggle('stale', !S.finishedAt && !S.waiting
-      && spanMs(el.dataset.ago, null) > (busy ? 2700000 : 300000));
+    el.classList.toggle('stale', silentFor(el.dataset.ago) != null);
+  });
+  // Жёлтая плашка «Новых событий нет уже N» — по тому же порогу молчания.
+  const quiet = silentFor((window.STATE || {}).updatedAt);
+  document.querySelectorAll('[data-silent]').forEach(el => {
+    el.hidden = quiet == null;
+    if (quiet != null) el.textContent = CUR.silent(fmtDur(Math.floor(quiet / 60000)))
+      + (SERVED && misses === 0 ? CUR.silentLink : '');
   });
   document.querySelectorAll('[data-ago-short]').forEach(el => {
     el.textContent = agoShort(el.dataset.agoShort);
@@ -925,6 +1065,24 @@ function showLink(){
   el.hidden = !lost;
   el.parentNode.hidden = !lost;
   if (lost) el.textContent = CUR.lost;
+  showSource();
+}
+// Индикатор связи в шапке, как в 0.5: что панель знает о своём источнике.
+// http — локальный сервер (или «нет связи» после двух неудач подряд);
+// file:// — файл state.js с диска; data: — только снимок внутри страницы.
+function sourceKind(){
+  const fin = window.STATE && window.STATE.finishedAt;
+  if (SERVED) return misses >= 2 && !fin ? 'lost' : 'live';
+  if (location.protocol === 'file:') return misses >= 2 ? 'snap' : 'file';
+  return 'snap';
+}
+function showSource(){
+  const k = sourceKind();
+  document.querySelectorAll('[data-source]').forEach(el => {
+    el.className = 'source s-' + k;
+    const t = el.querySelector('[data-source-label]');
+    if (t) t.textContent = CUR.src[k];
+  });
 }
 
 // Одна подгрузка state.js; done(ok) — когда она закончилась.
@@ -1064,23 +1222,19 @@ function render(lang){
 
   // ——— шапка ———
   const names = list => list.map(t => q(esc(t.title), L.lang)).join(', ');
-  let heroCls = '', stateLine, h2, lead = '', big = '', bigSub = '', hint = '';
+  let heroCls = '', stateLine, h2, lead = '', hint = '';
   if (fin) {
     heroCls = 'won';
     const k = (S.debt?.emptyEnv || []).length, p = (S.debt?.placeholders || []).length;
     stateLine = `<span class="badge-ic">${ic('check','xs')}</span>${L.doneState}`;
     h2 = esc(S.result || L.doneDefault);
     lead = k || p ? L.doneNeed(k, p) : L.doneNothing;
-    big = fmtClock(activeMs(S.startedAt, S.finishedAt));
-    bigSub = L.doneBig(hhmm(S.finishedAt));
   } else if (waiting) {
     heroCls = 'ask';
     stateLine = `<span class="live" aria-hidden="true"></span>${L.waitState}`;
     h2 = L.waitH2[waiting.kind] || L.waitState;
     lead = waiting.note ? esc(waiting.note) : '';
     hint = `<span class="hint">${ic('msg','m')}${L.waitHint}</span>`;
-    big = `<span data-since="${esc(waiting.since)}">${fmtClock(spanMs(waiting.since, null))}</span>`;
-    bigSub = L.waitBig;
   } else if (failedStage) {
     heroCls = 'bad';
     stateLine = `<span class="badge-ic">${ic('x','xs')}</span>${L.failState}`;
@@ -1098,32 +1252,65 @@ function render(lang){
       h2 = L.h2Run[cur.id] || stName(cur);
       lead = cur.note ? esc(cur.note) : (L.leadRun[cur.id] || '');
     }
-    if (eta) { big = etaText; bigSub = lateEta ? L.etaLate : L.etaLbl; }
-    else if (cur.startedAt) { big = timerHTML(cur.startedAt, null); bigSub = L.stageClock(stName(cur)); }
   }
-  // Шкала этапов: пройденное залито, текущее — в полоску, пропущенное — штриховкой.
-  const segs = stages.map(s => {
-    const st = s.status;
-    let cls = 's-pend', fill = '0%', inner = '', time = L.ahead;
-    if (st === 'done') { cls = 's-done'; fill = '100%'; time = s.startedAt ? timerHTML(s.startedAt, s.finishedAt) : '—'; }
-    else if (st === 'skipped') { cls = 's-skip'; time = L.skipped; }
-    else if (st === 'failed') { cls = 's-fail'; fill = '100%'; time = L.failedSt; }
-    else if (st === 'active') {
-      cls = 's-now'; inner = 'stripes';
-      fill = s.id === 'build' && T.length ? Math.max(8, Math.round(done.length / T.length * 100)) + '%' : '50%';
-      time = waiting ? L.waitingSt : (s.startedAt ? timerHTML(s.startedAt, null) : '—');
-    }
-    return `<div class="${cls}"><div class="seg"><i class="${inner}" style="width:${fill}"></i></div>
-      <span class="s-name">${esc(stName(s))}</span><span class="s-time">${time}</span></div>`;
-  }).join('');
+  // ——— главная карточка: надзаголовок, состояние, факты, «Данные прогона» ———
+  const locale = L.lang === 'en' ? 'en-GB' : 'ru-RU';
+  const stamp = iso => { const t = toMs(iso); return t == null ? '—'
+    : new Date(t).toLocaleString(locale, {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}); };
+  const curStage = activeStage || failedStage || (fin ? null : stages.find(s => s.status === 'pending'));
+  const facts = [
+    [L.fUpdated, S.updatedAt ? stamp(S.updatedAt) : '—', 'mono'],
+    [L.fStage, fin ? L.doneState : curStage ? esc(stName(curStage)) : '—'],
+    S.mode ? [L.fMode, esc(L.modes[S.mode] || S.mode)] : null,
+    S.depth ? [L.fDepth, esc(L.depths[S.depth] || S.depth)] : null,
+  ].filter(Boolean).map(([k, v, c]) => `<div><dt>${k}</dt><dd${c ? ` class="${c}"` : ''}>${v}</dd></div>`).join('');
+  const runRows = [
+    S.startedAt ? [L.rStarted, esc(stamp(S.startedAt))] : null,
+    S.finishedAt ? [L.rFinished, esc(stamp(S.finishedAt))] : null,
+    (S.dir || S.slug) ? [L.rDir, `<code>.aispa-work/${esc(S.dir || S.slug)}/</code>`] : null,
+    S.briefFile ? [L.rBrief, `<code>${esc(S.briefFile)}</code>`] : null,
+    S.tier ? [L.rTier, esc(S.tier)] : null,
+    S.baseCommit ? [L.rBase, `<code>${esc(S.baseCommit)}</code>`] : null,
+    S.memoryFile ? [L.rMemory, `<code>${esc(S.memoryFile)}</code>`] : null,
+    S.skillVersion ? [L.rSkill, esc(S.skillVersion)] : null,
+  ].filter(Boolean);
   const hero = `<section class="hero ${heroCls} w" aria-live="polite">
-    <div class="hero-top">
-      <div class="hero-main"><div class="state">${stateLine}</div><h2>${h2}</h2>
-        ${lead ? `<p class="lead">${lead}</p>` : ''}${hint}</div>
-      ${big ? `<div class="big"><b>${big}</b><span>${bigSub}</span>
-        <span class="paused" data-idle-note hidden>${L.paused}</span></div>` : ''}
-    </div>
-    <div class="track" role="list">${segs}</div>
+    <div class="hero-top"><p class="hwt">AISpa · ${esc(S.title || '')}</p><div class="state">${stateLine}</div></div>
+    <div class="hero-main"><h2>${h2}</h2>${lead ? `<p class="lead">${lead}</p>` : ''}${hint}</div>
+    <dl class="facts">${facts}</dl>
+    ${runRows.length ? `<details class="runctx" data-key="run"${UI.open.run ? ' open' : ''}><summary>${L.runData}</summary>
+      <dl class="rkv">${runRows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></details>` : ''}
+  </section>`;
+
+  // ——— этап: шаги 01–08 ———
+  const idx = fin ? stages.length - 1 : Math.max(0, stages.indexOf(curStage));
+  const stageCard = `<section class="card stgc w"><div class="rowh"><h3 class="sh">${L.stageHead}</h3>
+      <span>${L.stepOf(idx + 1, stages.length)} · ${esc(stName(stages[idx]))}</span></div>
+    <div class="stgs" role="list">${stages.map((s, i) => {
+      const st = s.status;
+      let cls = '', time = '';
+      if (st === 'done') { cls = 'past'; time = s.startedAt ? timerHTML(s.startedAt, s.finishedAt) : ''; }
+      else if (st === 'active') { cls = 'cur'; time = waiting ? L.waitingSt : (s.startedAt ? timerHTML(s.startedAt, null) : ''); }
+      else if (st === 'failed') { cls = 'fail'; time = L.failedSt; }
+      else if (st === 'skipped') { cls = 'skip'; time = L.skipped; }
+      return `<div class="stg ${cls}" role="listitem"><i></i><div><small>${String(i + 1).padStart(2, '0')}</small><b>${esc(stName(s))}</b></div>${
+        time ? `<span class="s-time">${time}</span>` : ''}</div>`;
+    }).join('')}</div>
+    ${T.length && !fin ? `<p class="stg-foot">${L.inWork(running.length)}</p>` : ''}</section>`;
+
+  // ——— время: прогон и оценка остатка (формула — выше, в «сколько осталось») ———
+  let rLbl = L.estimate, rVal = `<span class="tbig dim">${L.noEta}</span>`, rNote = '';
+  if (fin) { rLbl = L.finishedAt; rVal = `<b class="tbig">${esc(stamp(S.finishedAt))}</b>`; }
+  else if (waiting) { rLbl = L.waitBig; rVal = `<b class="tbig"><span data-since="${esc(waiting.since)}">${fmtClock(spanMs(waiting.since, null))}</span></b>`; rNote = L.etaWhy.waiting; }
+  else if (failedStage) { rNote = L.etaWhy.failed; }
+  else if (eta) {
+    rVal = `<b class="tbig">≈ ${etaText}</b>`;
+    rNote = activeStage.id === 'build' ? L.etaWhy.build(median) : L.etaWhy[activeStage.id] || '';
+  } else rNote = activeStage && activeStage.id === 'build' ? L.etaWhy.firstTask : L.etaWhy.early;
+  const timeCard = `<section class="card timec w">
+    <div class="tcol"><span class="tlb">${L.runTime}</span><b class="tbig">${S.startedAt ? timerHTML(S.startedAt, S.finishedAt) : '—'}</b>
+      ${median ? `<span class="tnote">${L.median(median)}</span>` : ''}<span class="tnote paused" data-idle-note hidden>${L.paused}</span></div>
+    <div class="tcol"><span class="tlb">${rLbl}</span>${rVal}${rNote ? `<span class="tnote">${rNote}</span>` : ''}</div>
   </section>`;
 
   // ——— плитки ———
@@ -1158,15 +1345,14 @@ function render(lang){
     ? `<section class="card tile w"><span class="tk">${L.tBlind}</span><span class="tv">${esc(B.matched)}<small>${L.of} ${esc(B.checked)}</small></span>
         <div class="stack" aria-hidden="true"><i class="f-done" style="flex:${+B.matched||0}"></i><i class="f-now" style="flex:${Math.max(0,(+B.checked||0)-(+B.matched||0))}"></i></div>
         <span class="ts">${L.blindSub((B.mismatches||[]).length)}</span></section>`
-    : `<section class="card tile w"><span class="tk">${L.tTime}</span><span class="tv">${S.startedAt ? timerHTML(S.startedAt, S.finishedAt) : '—'}</span>
-        <span class="ts">${L.timeSub}${median ? ' · ' + L.median(median) : ''}</span></section>`;
+    : '';
 
   // ——— ход сборки ———
   // Полоса показывает СОСТОЯНИЕ, а не долю: горизонтальная заливка в списке
   // задач читается как прогресс всегда. Длительность — цифрой справа.
   // Вид — «Задачи по волнам» из AISpa 0.5. Рисуется только то, что записал ap.py:
   // статус, требования, зона, зависимости, ревью, модель, ремонты, тесты, коммит.
-  const buildHead = `<h3 class="bh">${L.build}</h3><p class="bsub">${L.buildSub}</p>`;
+  const buildHead = `<h3 class="bh">${L.build}</h3><p class="bsub">${L.buildSub}</p>${fin ? '' : '<div class="notice" data-silent role="status" hidden></div>'}`;
   let buildCard = '';
   if (T.length) {
     // Была ли у задачи отдельная проверка: событие ленты, текущий статус или ремонт.
@@ -1264,14 +1450,38 @@ function render(lang){
   const asmBlock = asm.length ? `<div class="need"><div class="nh">${L.assumptions}<span>${asm.length}</span></div>${list('asm', asm, 3)}</div>` : '';
   const needCard = fin
     ? (env.length || ph.length ? `<section class="card prep w"><div class="whead"><h3 class="wt"><i>${ic('flag')}</i>${L.prep}</h3><span>${env.length + ph.length}</span></div>${keysBlock}${phBlock}</section>` : '')
-    : `<section class="card w"><div class="whead"><h3 class="wt">${L.need}</h3></div>${keysBlock + phBlock + asmBlock
+    : `<section class="card w"><div class="whead"><h3 class="wt">${L.need}</h3></div>${keysBlock + phBlock
         || `<p class="muted">${L.needEmpty}</p>`}</section>`;
-  const asmCard = fin && asm.length ? `<section class="card w"><div class="whead"><h3 class="wt">${L.assumptions}</h3><span>${asm.length}</span></div>${list('asm', asm, 3)}</section>` : '';
   const report = S.report || [], concerns = S.concerns || [], additions = S.additions || [];
-  const reportCard = report.length ? `<section class="card w"><div class="whead"><h3 class="wt">${L.report}</h3><span>${report.length}</span></div>${list('report', report, 3)}</section>` : '';
-  const concernsCard = concerns.length ? `<section class="card w"><div class="whead"><h3 class="wt">${L.concerns}</h3><span>${concerns.length}</span></div>
-      <p class="muted" style="margin-bottom:8px">${L.concernsNote}</p>${list('concerns', concerns, 3, located)}</section>` : '';
-  const addCard = additions.length ? `<section class="card w"><div class="whead"><h3 class="wt">${L.additions}</h3><span>${additions.length}</span></div>${list('add', additions, 3)}</section>` : '';
+
+  // ——— остатки: блокеры, не вошедшее, открытые вопросы, замечания ревью ———
+  const remRow = (id, html, small) => `<div class="rem">${id ? `<span class="mono">${esc(id)}</span>` : ''}<div>${html}${small ? `<small>${small}</small>` : ''}</div></div>`;
+  const remGroup = (key, label, rows) => {
+    if (!rows.length) return '';
+    const open = UI.open[key], shown = open ? rows : rows.slice(0, 5);
+    return `<div class="rem-group"><span>${label}</span>${shown.join('')}${rows.length > 5
+      ? `<button type="button" class="btn-soft" data-more="${key}">${open ? L.collapse + ic('up') : L.more(rows.length - 5) + ic('chev')}</button>` : ''}</div>`;
+  };
+  const blockRows = (failedStage ? [remRow('', esc(L.failH2(stName(failedStage))), esc(failedStage.note || ''))] : [])
+    .concat(failedT.map(t => remRow(t.id, esc(t.title), esc((t.concerns || []).join('; ')))));
+  const outRows = reqList.filter(r => r.status === 'deferred' || r.status === 'dropped')
+    .map(r => remRow(r.id, esc(r.text), esc([L.rs[REQ_KIND[r.status]], r.why].filter(Boolean).join(' · '))));
+  const remBody = remGroup('remB', L.rBlock, blockRows) + remGroup('remO', L.rOut, outRows)
+    + remGroup('remR', L.report, report.map(x => remRow('', esc(x))))
+    + remGroup('remC', L.concerns, concerns.map(x => remRow('', located(x))));
+  const remCard = `<section class="card w"><h3 class="bh">${L.remaining}</h3><p class="bsub">${L.remainingNote}</p>
+    ${remBody || `<div class="clean">${fin ? L.noRem : L.remLater}</div>`}</section>`;
+
+  // ——— решения агента: принятые за человека и добавленное сверх брифа ———
+  const decRows = (arr, key) => {
+    const open = UI.open[key], shown = open ? arr : arr.slice(0, 6);
+    return shown.map((x, i) => `<div class="dec"><span>${String(i + 1).padStart(2, '0')}</span><p>${esc(x)}</p></div>`).join('')
+      + (arr.length > 6 ? `<button type="button" class="btn-soft" data-more="${key}">${open ? L.collapse + ic('up') : L.more(arr.length - 6) + ic('chev')}</button>` : '');
+  };
+  const decCard = `<section class="card dark w"><h3 class="bh">${L.decisions}</h3><p class="bsub">${L.decisionsNote}</p>
+    ${asm.length || additions.length ? (asm.length ? `<p class="dec-h">${L.assumptions}</p>${decRows(asm, 'asm')}` : '')
+      + (additions.length ? `<p class="dec-h">${L.additions}</p>${decRows(additions, 'add')}` : '')
+      : `<p class="muted">${L.noDec}</p>`}</section>`;
 
   const blindCard = B ? `<section class="card w"><div class="whead"><h3 class="wt">${L.blind}</h3></div>
       <div class="blind-top"><b>${esc(B.matched)}<small>${L.of} ${esc(B.checked)}</small></b><p>${L.blindNote} ${(B.mismatches||[]).length ? L.blindBad : L.blindOk}</p></div>
@@ -1290,9 +1500,9 @@ function render(lang){
     if (!F.some(f => f[0] === UI.filter)) UI.filter = 'all';
     const picked = rows.filter(r => UI.filter === 'all' || r.k === UI.filter);
     const open = UI.open.words, shown = open ? picked : picked.slice(0, 6);
-    wordsCard = `<section class="card w"><div class="whead"><h3 class="wt">${L.words}</h3><span>${L.wordsSub(rows.length)}</span></div>
-      ${F.length > 2 ? `<div class="chips" role="group">${F.map(([id, lbl, n, sw]) =>
-        `<button type="button" class="chip" data-filter="${id}" aria-pressed="${UI.filter === id}">${sw ? `<i class="${sw}"></i>` : ''}${lbl} <span>${n}</span></button>`).join('')}</div>` : ''}
+    wordsCard = `<section class="card w"><div class="reqh"><div><h3 class="bh">${L.reqHead}</h3><p class="bsub">${L.wordsSub(rows.length)}</p></div>
+      ${F.length > 2 ? `<div class="chips" role="group" aria-label="${L.reqHead}">${F.map(([id, lbl, n, sw]) =>
+        `<button type="button" class="chip" data-filter="${id}" aria-pressed="${UI.filter === id}">${sw ? `<i class="${sw}"></i>` : ''}${lbl} <span>${n}</span></button>`).join('')}</div>` : ''}</div>
       ${shown.map(r => `<div class="req"><div style="min-width:0"><p><span class="rid">${esc(r.id)}</span>${esc(r.text)}</p>${
         r.why ? `<span class="why">${esc(r.why)}</span>` : ''}</div><span class="pill ${REQ_PILL[r.k]}">${L.rs[r.k]}</span></div>`).join('')}
       ${picked.length > 6 ? `<div class="more"><button type="button" class="btn-soft" data-more="words">${open ? L.collapse + ic('up') : L.showAll(picked.length) + ic('chev')}</button></div>` : ''}
@@ -1312,7 +1522,7 @@ function render(lang){
   const g4 = G.G4 ? gate('G4', G.G4.ok ? 'ok' : 'warn', G.G4.ok ? 'check' : 'alert',
       L.g4(esc(G.G4.matched), esc(G.G4.checked), Math.max(0, (+G.G4.checked||0) - (+G.G4.matched||0)))) : later('G4', L.g4later);
   const okGates = ['G1','G2','G3','G4'].filter(g => G[g] && G[g].ok).length;
-  const gatesCard = `<section class="card w"><div class="whead"><h3 class="wt">${L.gates}</h3><span>${L.gatesOf(okGates)}</span></div>${g1}${g2}${g3}${g4}</section>`;
+  const gatesCard = `<section class="card w"><div class="whead"><h3 class="wt">${L.gates}</h3><span>${L.gatesOf(okGates)}</span></div><div class="gates4">${g1}${g2}${g3}${g4}</div></section>`;
 
   // ——— лента ———
   const evText = e => {
@@ -1331,58 +1541,51 @@ function render(lang){
     : e.k === 'ticket' ? ({done:['f-done','check'], review:['f-rev','clock'], repair:['f-fix','rotate'], fail:['f-bad','x']}[e.act] || ['','play'])
     : e.k === 'stage' ? ({done:['f-done','check'], fail:['f-bad','x'], skip:['','chev']}[e.act] || ['','play'])
     : e.k === 'tests' ? [e.failed ? 'f-bad' : 'f-done', e.failed ? 'x' : 'check'] : e.k === 'add' ? ['','plus'] : ['','list'];
-  const feedRows = (S.log || []).filter(e => e.k !== 'tier').slice(-12).reverse().map(e => {
+  const feedRows = (S.log || []).filter(e => e.k !== 'tier').slice().reverse().map(e => {
     const text = evText(e);
     if (!text) return '';
     const [cls, icon] = evTone(e);
     return `<div class="ev"><span class="ei ${cls}">${ic(icon,'xs')}</span><span>${esc(text)}</span>${
       fin ? `<em>${hhmm(e.t)}</em>` : `<em data-ago-short="${esc(e.t)}">${agoShort(e.t)}</em>`}</div>`;
-  }).join('');
-  const feedCard = feedRows ? `<section class="card w"><div class="whead"><h3 class="wt">${L.feed}</h3>${fin ? '' :
-    `<span data-ago="${esc(S.updatedAt || '')}">${S.updatedAt ? agoText(S.updatedAt) : ''}</span>`}</div>${feedRows}</section>` : '';
+  }).filter(Boolean);
+  const histCard = feedRows.length ? `<details class="card hist w" data-key="hist"${UI.open.hist ? ' open' : ''}>
+    <summary><h3>${L.history}</h3><span>${feedRows.length}</span></summary><div class="hlist">${feedRows.join('')}</div></details>` : '';
 
   // ——— раскладка ———
-  // Слева — длинное (слова, ход сборки в отчёте), справа — короткое; «Понадобится»
-  // слева под словами, иначе правая колонка уходит вниз, а левая стоит пустой.
-  const leftCol = fin ? [needCard, blindCard, buildCard, wordsCard] : [wordsCard, needCard];
-  const rightCol = fin ? [gatesCard, reportCard, asmCard, concernsCard, addCard, feedCard]
-                    : [gatesCard, feedCard, reportCard, concernsCard, addCard];
-  const when = S.startedAt ? (fin
-    ? L.startedRange(new Date(S.startedAt).toLocaleString(L.lang === 'en' ? 'en-GB' : 'ru-RU', {day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'}), hhmm(S.finishedAt))
-    : L.started(new Date(S.startedAt).toDateString() === new Date().toDateString()
-        ? `${L.today} ${hhmm(S.startedAt)}`
-        : new Date(S.startedAt).toLocaleString(L.lang === 'en' ? 'en-GB' : 'ru-RU', {day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'}))) : '';
+  // Порядок — как в AISpa 0.5: шапка, главная карточка, проверки, этап, время,
+  // задачи по волнам, требования, остатки и решения, история, подвал.
+  // Блоки, которых в 0.5 не было: плитки — сводкой под временем; «Понадобится
+  // от тебя» — под волнами, а в сданной сборке «Перед запуском» — сразу под шапкой.
+  const ver = S.skillVersion ? String(S.skillVersion) : '';
+  const pre = ver.split('+')[0].split('-').slice(1).join('-');
+  const verText = ver ? (pre ? (/^alpha(?:[.-]|$)/i.test(pre) ? L.verAlpha : L.verPre) + ' · ' : '') + ver : '';
+  const theme = storedTheme() || 'system';
+  const opt = (v, t, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${t}</option>`;
+  const tiles = `<div class="tiles">${tileReq}${tileTk}${tileTests}${tile4}</div>`;
+  const body = fin
+    ? [hero, needCard, gatesCard, stageCard, timeCard, tiles, blindCard, buildCard, wordsCard]
+    : [hero, gatesCard, stageCard, timeCard, tiles, buildCard, needCard, wordsCard];
 
   document.documentElement.lang = L.lang;
   const app = document.getElementById('app');
   app.innerHTML = `
   <header class="top">
-    ${BRAND(L.workshopLink)}
+    <div class="brand-row">${BRAND(L.workshopLink)}${verText ? `<span class="vpill">${esc(verText)}</span>` : ''}</div>
     <div class="tools">
-      ${fin ? '' : `<button type="button" class="iconbtn" data-refresh title="${L.refresh}" aria-label="${L.refresh}">${ic('sync')}</button>`}
-      <div class="tabs" role="group" aria-label="${L.themeLabel}">
-        <button type="button" data-theme="light" title="${L.themeLight}" aria-label="${L.themeLight}" aria-pressed="${effectiveTheme()==='light'}">${ic('sun')}</button>
-        <button type="button" data-theme="dark" title="${L.themeDark}" aria-label="${L.themeDark}" aria-pressed="${effectiveTheme()==='dark'}">${ic('moon')}</button>
-      </div>
-      <div class="tabs" role="group" aria-label="${L.langLabel}">
-        <button type="button" data-lang="ru" aria-pressed="${L.lang==='ru'}">RU</button>
-        <button type="button" data-lang="en" aria-pressed="${L.lang==='en'}">EN</button>
-      </div>
+      <div class="source" data-source><span class="sdot" aria-hidden="true"></span><span data-source-label></span></div>
+      <label><span class="sr-only">${L.langLabel}</span><select class="pref" data-pref="lang" aria-label="${L.langLabel}">${opt('ru', 'RU', L.lang)}${opt('en', 'EN', L.lang)}</select></label>
+      <label><span class="sr-only">${L.themeLabel}</span><select class="pref" data-pref="theme" aria-label="${L.themeLabel}">${
+        opt('system', L.themeSystem, theme)}${opt('light', L.themeLight, theme)}${opt('dark', L.themeDark, theme)}</select></label>
+      <button type="button" class="btn" data-refresh><span>${L.refresh}</span> <span class="arr" aria-hidden="true">→</span></button>
     </div>
   </header>
-  <div class="title">
-    <h1>${esc(S.title)}</h1>
-    <div class="meta">${S.mode ? `<span class="tag">${esc(L.modes[S.mode] || S.mode)}</span>` : ''}${
-      S.depth ? `<span class="tag">${esc(L.depths[S.depth] || S.depth)}</span>` : ''}<span class="when">${when}</span></div>
-  </div>
-  ${hero}
-  <div class="tiles">${tileReq}${tileTk}${tileTests}${tile4}</div>
-  ${fin ? '' : buildCard}
-  <div class="cols"><div class="col">${leftCol.join('')}</div><div class="col">${rightCol.join('')}</div></div>
+  ${body.filter(Boolean).join('\n')}
+  <div class="lower">${remCard}${decCard}</div>
+  ${histCard}
   <footer>
-    <span>${L.filesIn} <code>.aispa-work/${esc(S.dir || S.slug)}/</code></span>
+    <span>${L.footer}</span>
     <span>${fin ? L.frozen : `${L.updated}: <span data-ago="${esc(S.updatedAt || '')}"
-      title="${S.updatedAt ? esc(new Date(S.updatedAt).toLocaleString(L.lang==='en'?'en-GB':'ru-RU')) : ''}">${S.updatedAt ? agoText(S.updatedAt) : '—'}</span>`}</span>
+      title="${S.updatedAt ? esc(new Date(S.updatedAt).toLocaleString(locale)) : ''}">${S.updatedAt ? agoText(S.updatedAt) : '—'}</span>`}</span>
   </footer>`;
 
   // Вкладка подписана проектом: когда репозиторий дорабатывают второй раз, это
@@ -1404,20 +1607,26 @@ function render(lang){
 document.getElementById('app').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
-  if (b.dataset.lang) {
-    try { localStorage.setItem('aispa-lang', b.dataset.lang); } catch(err) {}
-    render(b.dataset.lang);
-  } else if (b.dataset.theme) {
-    const t = b.dataset.theme;
-    try { localStorage.setItem('aispa-theme', t); } catch(err) {}
-    applyTheme(t);
-    document.querySelectorAll('button[data-theme]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.theme === t)));
-  } else if (b.hasAttribute('data-refresh')) {
+  if (b.hasAttribute('data-refresh')) {
     refreshNow(b);
   } else if (b.dataset.filter) {
     UI.filter = b.dataset.filter; UI.open.words = false; render(CUR.lang);
   } else if (b.dataset.more) {
     UI.open[b.dataset.more] = !UI.open[b.dataset.more]; render(CUR.lang);
+  }
+});
+
+// Язык и тема — выпадающие списки, как в 0.5. «Система» снимает явный выбор.
+document.getElementById('app').addEventListener('change', e => {
+  const sel = e.target.closest('select[data-pref]');
+  if (!sel) return;
+  if (sel.dataset.pref === 'lang') {
+    try { localStorage.setItem('aispa-lang', sel.value); } catch(err) {}
+    render(sel.value);
+  } else if (sel.dataset.pref === 'theme') {
+    const t = sel.value === 'system' ? null : sel.value;
+    try { t ? localStorage.setItem('aispa-theme', t) : localStorage.removeItem('aispa-theme'); } catch(err) {}
+    applyTheme(t);
   }
 });
 
@@ -1465,14 +1674,7 @@ setInterval(tick, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { tick(); refreshNow(); } });
 window.addEventListener('pageshow', e => { if (e.persisted) { tick(); refreshNow(); } });
 
-// Пока пользователь не выбрал тему явно, дашборд следует за системной.
-try {
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (storedTheme()) return;
-    document.querySelectorAll('button[data-theme]').forEach(x =>
-      x.setAttribute('aria-pressed', String(x.dataset.theme === effectiveTheme())));
-  });
-} catch(e) {}
+// Пока пользователь не выбрал тему явно («Система»), дашборд следует за системной — это делает CSS.
 </script>
 </body>
 </html>

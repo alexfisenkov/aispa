@@ -13,7 +13,7 @@ The first case needs both marks: two sessions writing one `state.js` overwrite e
 
 **«Доделай ещё вот это» for a flight that already landed**, continuing it rather than starting a new one: the new brief is a new dated file in the same run directory (`phases/1-manifest.md`), and `python3 .aispa-work/ap.py reopen` puts the `--wip` back and reopens the stages from Требования. Phases 1–8 then run for the new brief: its requirements are appended to the manifest with the next free numbers, the spec is amended, new tickets are numbered after the last one — landed tickets stay landed. §5 below runs for it too: small fixes may have landed between the two briefs.
 
-**Nothing here is a question for the user.** Where files live is a process decision.
+**Nothing here is a question for the user** — except the start choice of mode (`phases/0-modes.md`), and only when the call named no mode. Where files live is a process decision.
 
 ## 1. Look before writing
 
@@ -36,7 +36,7 @@ A dirty working tree → say so in one line and continue; never stash, reset or 
 
 ## 4. Instruments
 
-**Read `phases/0-instruments.md`**: copy the template and `ap.py`, run `init` with the memory choice from §3, open the dashboard. The command table there is the whole of the instruments for the rest of the run.
+**Read `phases/0-instruments.md`**: copy the template and `ap.py`, run `init` with the memory choice from §3 and the mode, open the dashboard. The mode is the one named in the call; when none was, the start choice from `phases/0-modes.md` is put **before `init`** and its answer awaited — `init` gets `--mode auto|important|interview|manual`, and the old `full`/`semi` are accepted and stored as `auto`/`important`. The command table there is the whole of the instruments for the rest of the run.
 
 The **slug** is short, kebab-case, latin (`telegram-repair-bot`) and never changes mid-flight. `init` names the run directory `<YYYY-MM-DD>-<slug>--wip` — the date the flight started, the suffix until it lands — and records it as `dir` in `state.js`. **Every path is built from `dir`**, never rebuilt from the slug.
 
@@ -60,11 +60,11 @@ Then it is used, each part once:
 | Part | Where it goes |
 |---|---|
 | Договорились | binds the spec like an ADR — Phase 3 copies it into `interfaces.md` as project rules; a new brief that contradicts it is flagged to the user, not silently obeyed or ignored |
-| Не доделано · Известные баги | **offered, never taken by you** — Phase 2 asks in its first round; in full nothing is taken, and the progress file carries them on |
+| Не доделано · Известные баги | **offered, never taken by you** — Phase 2 asks in its first round; in `auto` nothing is taken, and the progress file carries them on |
 | Изменено после сборки | to the exploring subagent of Phase 3, so `notes.md` describes the code as it is now |
 
 A part with nothing in it is not mentioned.
 
 ## 6. Announce and go
 
-The opening block from `phases/0-modes.md` — mode, depth, dashboard address, memory file, and the `↑` line if `init` printed one. After a landed run, one more line from `carried.md`: «С прошлой сборки: 2 пункта не доделано, 1 баг, 3 правки без AISpa — спрошу на брифинге»; in full, «… — в эту сборку не беру, остаются в списке». It is a hint, not a question: say it, then `python3 .aispa-work/ap.py stage manifest` and go straight into Phase 1.
+The opening block from `phases/0-modes.md` — mode, depth, dashboard address, memory file, and the `↑` line if `init` printed one. After a landed run, one more line from `carried.md`: «С прошлой сборки: 2 пункта не доделано, 1 баг, 3 правки без AISpa — спрошу на брифинге»; in `auto`, «… — в эту сборку не беру, остаются в списке». It is a hint, not a question: say it, then `python3 .aispa-work/ap.py stage manifest` and go straight into Phase 1.

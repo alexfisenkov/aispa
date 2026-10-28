@@ -113,6 +113,70 @@ class Run(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.a, first.replace("--wip", ""), "state.js")))
         self.assertTrue(self.state()["dir"].endswith("second--wip"))
 
+    # ── mode, depth, skill version ─────────────────────────────────────────
+    def init_with(self, *extra):
+        return self.ap("init", "--slug", "repair-bot", "--force", "--skill-dir", SKILL, *extra)
+
+    def test_init_takes_the_four_mode_names(self):
+        for mode in ("auto", "important", "interview", "manual"):
+            code, out = self.init_with("--mode", mode)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.state()["mode"], mode)
+
+    def test_init_understands_the_old_mode_words(self):
+        for old, new in (("full", "auto"), ("semi", "important"), ("FULL", "auto")):
+            code, out = self.init_with("--mode", old)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.state()["mode"], new)
+
+    def test_init_without_a_mode_is_important(self):
+        self.init()
+        self.assertEqual(self.state()["mode"], "important")
+        self.assertEqual(self.state()["depth"], "normal")
+
+    def test_init_refuses_an_unknown_mode_or_depth(self):
+        code, out = self.init_with("--mode", "turbo")
+        self.assertNotEqual(code, 0)
+        self.assertIn("auto", out)
+        self.assertFalse(os.path.exists(os.path.join(self.a, "state.js")))
+        code, out = self.init_with("--depth", "bottomless")
+        self.assertNotEqual(code, 0)
+        self.assertIn("strict", out)
+
+    def test_a_bad_mode_does_not_archive_the_finished_run(self):
+        self.init()
+        self.ap("finish", "--result", "готово")
+        code, out = self.ap("init", "--slug", "second", "--mode", "turbo")
+        self.assertNotEqual(code, 0)
+        self.assertTrue(os.path.exists(os.path.join(self.a, "state.js")))
+        self.assertTrue(self.state()["dir"].endswith("repair-bot"))
+
+    def test_set_mode_and_depth_keep_the_new_names(self):
+        self.init()
+        for given, kept in (("semi", "important"), ("full", "auto"), ("manual", "manual"),
+                            ("interview", "interview"), ("auto", "auto")):
+            code, out = self.ap("set", "mode=" + given)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.state()["mode"], kept)
+        code, out = self.ap("set", "mode=turbo")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.state()["mode"], "auto")
+        self.assertEqual(self.ap("set", "depth=deep")[0], 0)
+        self.assertEqual(self.state()["depth"], "deep")
+        self.assertNotEqual(self.ap("set", "depth=bottomless")[0], 0)
+        self.assertEqual(self.state()["depth"], "deep")
+
+    def test_init_records_the_skill_version(self):
+        self.init()
+        want = re.search(r'^\s*version:\s*"([^"]+)"', read(os.path.join(SKILL, "SKILL.md")), re.M).group(1)
+        self.assertEqual(self.state()["skillVersion"], want)
+
+    def test_skill_version_is_null_when_no_skill_md_is_found(self):
+        code, out = self.ap("init", "--slug", "repair-bot")
+        self.assertEqual(code, 0, out)
+        self.assertIn("skillVersion", self.state())
+        self.assertIsNone(self.state()["skillVersion"])
+
     # ── stages ─────────────────────────────────────────────────────────────
     def test_opening_a_stage_closes_the_previous(self):
         self.init()
@@ -172,10 +236,10 @@ class Run(unittest.TestCase):
         self.write("tickets/03-tablica.md", ticket("03", "Таблица", "R02", "02", ["src/bot/sheets/"], 2))
         self.write("tickets/04-nichei.md", ticket("04", "Ничей", "", "—", [], 1))
         code, out = self.ap("check-plan")
-        self.assertIn("в волне 2, но его зависимости позволяют не раньше 3", out)
-        self.assertIn("таски 02 и 03 в одной волне пишут в src/bot/sheets/", out)
-        self.assertIn("таск 04 ни к чему не привязан", out)
-        self.assertIn("у таска 04 нет зоны", out)
+        self.assertIn("в волне 2, но её зависимости позволяют не раньше 3", out)
+        self.assertIn("задачи 02 и 03 в одной волне пишут в src/bot/sheets/", out)
+        self.assertIn("задача 04 ни к чему не привязана", out)
+        self.assertIn("у задачи 04 нет зоны", out)
 
     def test_check_plan_catches_a_requirement_in_no_ticket(self):
         self.plan()
@@ -189,7 +253,7 @@ class Run(unittest.TestCase):
         self.ap("ticket", "01", "start")
         self.ap("ticket", "01", "done", "--tests", "3/0", "--commit", "1111111aaaa", "--placeholder", "R05")
         m = self.manifest()
-        self.assertRegex(m, r"\| R01 \|[^\n]*\| in-ticket \|")     # ещё и в таске 02
+        self.assertRegex(m, r"\| R01 \|[^\n]*\| in-ticket \|")     # ещё и в задаче 02
         self.assertRegex(m, r"\| R05 \|[^\n]*\| placeholder \|[^\n]*1111111")
         self.ap("ticket", "02", "start")
         self.ap("ticket", "02", "done", "--tests", "5/0", "--commit", "2222222bbbb")
@@ -234,7 +298,7 @@ class Run(unittest.TestCase):
 
     def test_d_rows_are_constraints_not_requirements(self):
         self.plan()
-        self.write("manifest.md", MANIFEST + "| D01 | схема не держит два адреса | in-spec | таск 02 | spec §3 |\n")
+        self.write("manifest.md", MANIFEST + "| D01 | схема не держит два адреса | in-spec | задача 02 | spec §3 |\n")
         code, out = self.ap("check-plan")
         self.assertNotIn("D01", out)
         self.assertEqual(self.state()["requirements"]["total"], 4)
@@ -405,12 +469,12 @@ class Run(unittest.TestCase):
         self.ap("ticket", "02", "done", "--commit", lost)
         events = len(self.state()["log"])
         code, out = self.ap("commits")
-        self.assertIn("коммиты сданных тасков на месте", out)
+        self.assertIn("коммиты сданных задач на месте", out)
         self.git("reset", "-q", "--hard", kept)
         code, out = self.ap("commits")
         self.assertEqual(code, 0, out)
-        self.assertIn("! таск 02: коммита %s нет в истории" % lost, out)
-        self.assertNotIn("таск 01", out)
+        self.assertIn("! задача 02: коммита %s нет в истории" % lost, out)
+        self.assertNotIn("задача 01", out)
         self.assertEqual(self.state()["tickets"][1]["status"], "done")   # сбрасывает оркестратор
         self.assertEqual(len(self.state()["log"]), events)               # проверка — не событие
 
@@ -437,6 +501,56 @@ class Pure(unittest.TestCase):
     def test_skill_declares_a_version(self):
         text = read(os.path.join(SKILL, "SKILL.md"))
         self.assertIsNotNone(self.m._version(text))
+
+    def test_skill_version_next_to_the_packaged_ap_py(self):
+        text = read(os.path.join(SKILL, "SKILL.md"))
+        want = re.search(r'^\s*version:\s*"([^"]+)"', text, re.M).group(1)
+        self.assertEqual(self.m.skill_version(None), want)          # tools/ap.py → ../SKILL.md
+        self.assertEqual(self.m.skill_version(SKILL), want)
+
+    def test_mode_words(self):
+        n = self.m.norm_mode
+        self.assertEqual([n(x) for x in ("auto", "important", "interview", "manual", "full", "semi", " Semi ")],
+                         ["auto", "important", "interview", "manual", "auto", "important", "important"])
+        self.assertIsNone(n("turbo"))
+
+    def test_no_task_slang_in_what_ap_py_prints(self):
+        """«Таск» пользователю не пишется: ни в одной строке, которую ap.py может вывести."""
+        import tokenize
+        with open(AP, encoding="utf-8") as f:
+            toks = list(tokenize.generate_tokens(f.readline))
+        bad = [t.start[0] for t in toks
+               if t.type == tokenize.STRING and "таск" in t.string.lower()]
+        self.assertEqual(bad, [], "строки ap.py со словом «таск»: %s" % bad)
+
+
+class Words(unittest.TestCase):
+    """Слова режимов в SKILL.md и фазах — как в AISpa 0.5, старые понимаются."""
+
+    def test_skill_names_the_four_modes(self):
+        text = read(os.path.join(SKILL, "SKILL.md"))
+        self.assertIn("auto|important|interview|manual", text)
+        for label in ("сам по брифу", "только важное", "интервью", "ручной"):
+            self.assertIn(label, text)
+
+    def test_modes_phase_has_the_start_choice_and_old_words(self):
+        text = read(os.path.join(SKILL, "phases", "0-modes.md"))
+        for label in ("1. Сам по брифу", "2. Только важное", "3. Интервью", "4. Ручной"):
+            self.assertIn(label, text)
+        for old in ("`full`", "`semi`", "«полный автомат»", "«полуавтомат»"):
+            self.assertIn(old, text)
+
+    def test_phases_do_not_name_modes_the_old_way(self):
+        old = re.compile(r"\bsemi\b|\bin full\b(?! check)|\bfull mode\b|\bfull:|^\*\*full\b|\| full \|"
+                         r"|«полный автомат —|полуавтомат", re.I | re.M)
+        for name in sorted(os.listdir(os.path.join(SKILL, "phases"))) + ["../SKILL.md"]:
+            if not name.endswith(".md") or name == "0-modes.md":
+                continue
+            text = read(os.path.join(SKILL, "phases", name))
+            text = text.replace("show it in full", "")
+            # строка соответствия старых слов новым — единственное место, где они названы
+            text = "\n".join(l for l in text.split("\n") if not ("`full`" in l and "`auto`" in l))
+            self.assertEqual(old.findall(text), [], name)
 
 
 if __name__ == "__main__":

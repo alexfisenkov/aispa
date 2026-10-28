@@ -2,7 +2,7 @@
 
 `ap.py stage briefing`. The phase the user is actually needed for. Its job is not to collect wishes: it is to **close what cannot be built as written**, and — where the mode or depth asks — to find out what the brief got wrong while changing it is still free. Every question exists to move a row in the manifest.
 
-**Depth decides how much gets opened up; the mode decides who closes it.** A fork found at `deep` is the same fork in every mode — in full you settle it and label the decision, in interview you put it to the user.
+**Depth decides how much gets opened up; the mode decides who closes it.** A fork found at `deep` is the same fork in every mode — in `auto` you settle it and label the decision, in `interview` you put it to the user.
 
 **When the adversarial pass runs** — mode `interview` or `manual` at any depth, or depth `deep` in any mode — read `phases/2-adversarial.md` and run it **before** the first question. Otherwise skip it.
 
@@ -31,13 +31,13 @@ Before each round goes out: `ap.py ask briefing --note "три вопроса �
 
 | | Which forks reach the user |
 |---|---|
-| **semi** | the ones where the branches lead to a visibly different product; the rest you settle and record |
+| **important** | the ones where the branches lead to a visibly different product; the rest you settle and record |
 | **interview · manual** | all of them, plus everything the adversarial pass opened |
 
 - **Everything else you decide yourself** — error wording, retry policy, defaults, naming, layout — in every mode. But a decision goes back to the user, not to you, if it **costs money or ties them to a vendor**, **changes what they see or can do**, **means rebuilding rather than editing to undo**, or **encodes a rule about their business** — prices, deadlines, who may do what, what happens to someone's data. Unsure which side it falls on → ask.
 - **Nothing open → say so and go:** «Вопросов нет — в брифе всё однозначно, пишу спецификацию», and `ap.py stage briefing skip --note "вопросов не потребовалось"`.
 
-Calibration, not a target: semi usually lands at one or two rounds; interview and manual at three to six on a real project. What makes an interview bad is padding, never length. Say once, if it will be long, that it will be — and do not apologise for the count as you go.
+Calibration, not a target: `important` usually lands at one or two rounds; interview and manual at three to six on a real project. What makes an interview bad is padding, never length. Say once, if it will be long, that it will be — and do not apologise for the count as you go.
 
 In interview and manual the thing to guard against is **drift into process**: «какой стек берём?», «нарезать помельче?», «показать спецификацию?» are questions AISpa answers itself.
 
@@ -53,7 +53,7 @@ In priority order, only what is actually unresolved for this brief:
 6. **Contradictions inside the brief** — quote both halves, ask which wins.
 7. **Scope edges** — what is explicitly *not* needed; the answers become `dropped` rows and save whole tickets.
 
-**What the last run left** — `carried.md` → «Не доделано» and «Известные баги», when the file exists — is **one question in the first round**, whatever else the round holds, and it keeps a round from being skipped: «С прошлой сборки остались: 1) корзина, 2) даты в двух форматах. Взять что-то в эту? Я бы взял 2 — это пять минут». A yes is the user adding a requirement: a `G##` row with their answer and the item it names, and the same words under `## Дополнения`. A no, or no answer to that item, leaves it in the progress file — nothing is dropped for being ignored. In full nothing is offered and nothing taken.
+**What the last run left** — `carried.md` → «Не доделано» and «Известные баги», when the file exists — is **one question in the first round**, whatever else the round holds, and it keeps a round from being skipped: «С прошлой сборки остались: 1) корзина, 2) даты в двух форматах. Взять что-то в эту? Я бы взял 2 — это пять минут». A yes is the user adding a requirement: a `G##` row with their answer and the item it names, and the same words under `## Дополнения`. A no, or no answer to that item, leaves it in the progress file — nothing is dropped for being ignored. In `auto` nothing is offered and nothing taken.
 
 ## Эталон — what it should be like
 
@@ -61,7 +61,7 @@ Whatever the user hands you that the result could be measured against — refere
 
 - **Only what the user gave.** A comparable you chose is your taste with a citation. Nothing named → no file.
 - **A comparable is not a requirement** — it never becomes a row and never gates anything. «Тёмная тема обязательно» is a requirement and goes to the manifest.
-- **One question, only where there is a surface**, folded into a round. In full, `reference.md` holds only what the brief itself carries.
+- **One question, only where there is a surface**, folded into a round. In `auto`, `reference.md` holds only what the brief itself carries.
 
 ## Recording answers
 
@@ -77,9 +77,9 @@ After each round, update the manifest rows at once: a decision into Основа
 
 `G##` is the user's words, `A##` your idea, `D##` what the build proved — never blur them.
 
-## Full mode — the self-briefing
+## Mode `auto` — the self-briefing
 
-No interview: `ap.py stage briefing skip --note "полный автомат — самобрифинг"`. Run the same list against yourself and write the answers into the manifest.
+No interview: `ap.py stage briefing skip --note "сам по брифу — самобрифинг"`. Run the same list against yourself and write the answers into the manifest.
 
 - **Decisions are yours** — stack, structure, provider, data model, layout. Pick what runs on the user's machine **without a third-party account and without money**, and record `ASSUMPTION — принято за пользователя: …` in Основание, plus `ap.py add debt.assumptions "…"` for the dashboard; every one is a line in the report.
 - **Facts about the user are not** — prices, texts, addresses, business rules, brand colours: the missing fact named in Основание, a visibly labelled stub in the code (`[ЦЕНА — впиши]`, never `4990 ₽`), a line in the report.

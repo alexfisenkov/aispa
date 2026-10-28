@@ -75,7 +75,7 @@ Before the block is written:
 
 The same agent writes `memory-proposal.md` instead of the block: what is missing — new commands, variables, traps, pointers — and what in their text is now false, each as a ready-to-paste line. **The «Правка без AISpa» and «История git» subsections from `phases/0-memory.md` are always among them** when their file lacks them: without them a session that is not AISpa never finds `PROGRESS.md`, and its commits cannot be traced to a requirement. Nothing else.
 
-The report asks once, at the end: «Предлагаю дополнить твой `CLAUDE.md`: 4 пункта — команды запуска и две переменные `.env`. Применить?» — in semi, interview and manual. **In full nothing is asked**: the proposal stays a file, and the report names it. On a yes, the additions go into a marked AISpa block at the end of their file; a line of their own text changes only as they approved it.
+The report asks once, at the end: «Предлагаю дополнить твой `CLAUDE.md`: 4 пункта — команды запуска и две переменные `.env`. Применить?» — in `important`, `interview` and `manual`. **In `auto` nothing is asked**: the proposal stays a file, and the report names it. On a yes, the additions go into a marked AISpa block at the end of their file; a line of their own text changes only as they approved it.
 
 ## Moment 4 — the ADRs and the glossary (Phase 8, tier T2+)
 

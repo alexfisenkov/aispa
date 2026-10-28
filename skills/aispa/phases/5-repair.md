@@ -35,7 +35,7 @@ Two counters, both capped at two: `repairs` (дозапросы) and `retries` (
 
 ## BLOCKED for a missing dependency
 
-Not a failure. If the dependency fits a decision the spec already made, add it to «Решения по реализации» and relaunch the ticket with permission to install exactly that (`phases/5-subagents.md`). If it would be a new decision — a paid service, a heavy framework, a different stack — it is the user's question in semi, interview and manual, an `ASSUMPTION` in full.
+Not a failure. If the dependency fits a decision the spec already made, add it to «Решения по реализации» and relaunch the ticket with permission to install exactly that (`phases/5-subagents.md`). If it would be a new decision — a paid service, a heavy framework, a different stack — it is the user's question in `important`, `interview` and `manual`, an `ASSUMPTION` in `auto`.
 
 ## When a ticket fails
 
@@ -52,4 +52,4 @@ Sometimes the code is right and the plan is wrong: a data model that does not ho
 3. **Re-cut only what the change invalidates.** Landed tickets stay; unstarted ones get their references updated; one whose point disappeared is cut and its rows go back to `in-spec`. `ap.py tickets` again.
 4. **Tell the user one line, in every mode:** «Схема из плана не держала два адреса на одну заявку — поправил, требование то же».
 
-A `D##` never drops a requirement — one the code proves impossible is a question for the user (in full, an `ASSUMPTION` and a placeholder). And it is never a route for an idea you had while building — that is an `A##`, with a parent, and forbidden at strict.
+A `D##` never drops a requirement — one the code proves impossible is a question for the user (in `auto`, an `ASSUMPTION` and a placeholder). And it is never a route for an idea you had while building — that is an `A##`, with a parent, and forbidden at strict.

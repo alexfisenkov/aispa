@@ -80,7 +80,7 @@ A fact the user does not have yet — «цены пришлю потом» — d
 - **`deferred` is not `dropped`**, and every `deferred` row reaches the report under «что не вошло».
 - **Silence never cancels anything.** A requirement the user stopped mentioning is still live.
 
-**Implicit requirements** get a trailing `i` (`R06i`) — what the brief plainly implies but never says: «принимает заявки» implies somewhere to read them. Too obvious to state, too big to skip: route them to the briefing as questions; in full they become `ASSUMPTION` decisions in the report.
+**Implicit requirements** get a trailing `i` (`R06i`) — what the brief plainly implies but never says: «принимает заявки» implies somewhere to read them. Too obvious to state, too big to skip: route them to the briefing as questions; in `auto` they become `ASSUMPTION` decisions in the report.
 
 **Discovered constraints** are `D##` — what the **build** proved that the plan did not know. After the briefing, a `D##` is the only row **you** may add, and only through `phases/5-repair.md`; the only other way the manifest grows is a `G##` the user asked for. A `D##` never retires a requirement. Its status is `in-spec` — the amended section — and it is a constraint, not a requirement: it is not counted and needs no ticket of its own.
 
@@ -94,7 +94,7 @@ A fact the user does not have yet — «цены пришлю потом» — d
 
 A failed gate is not a warning — the phase is redone.
 
-- **G1, after the briefing** — every row has a status; anything still `open` has a recorded reason — a fact the user will supply later, named in Основание. In full, no question stays open.
+- **G1, after the briefing** — every row has a status; anything still `open` has a recorded reason — a fact the user will supply later, named in Основание. In `auto`, no question stays open.
 - **G2, after the spec** — zero `open`, **and** an independent reader given only the brief and the spec finds nothing missing (`phases/3-spec.md`).
 - **G3, after the plan** — every `in-spec` row is in a ticket and every ticket traces to a row: `ap.py check-plan` (`phases/4-plan.md`).
 - **G4, at the end** — blind acceptance against the brief, spec withheld (`phases/8-final.md`).

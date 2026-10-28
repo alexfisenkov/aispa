@@ -6,7 +6,7 @@
 
 **After a landed run, `carried.md` comes in twice** (`phases/0-preflight.md` §5). Its «Изменено после сборки» goes to the exploring subagent with the brief «эти места менялись после прошлой сборки — опиши их по коду, как они есть сейчас». Its «Договорились» goes into `interfaces.md` under the project rules, word for word, so every executor and reviewer gets it without reading the history: a spec section that would break one is either rewritten or, if the new brief asks for exactly that, put to the user as one line — never decided by you.
 
-**This phase does not reopen the interview.** What is still unresolved becomes a `placeholder`. One narrow exception: a genuine fork the briefing missed, where the branches are different projects — ask it once, in one line, with a recommendation. In full there is no exception: decide it and record the `ASSUMPTION`.
+**This phase does not reopen the interview.** What is still unresolved becomes a `placeholder`. One narrow exception: a genuine fork the briefing missed, where the branches are different projects — ask it once, in one line, with a recommendation. In `auto` there is no exception: decide it and record the `ASSUMPTION`.
 
 ## Depth — the brief is a silhouette
 
@@ -33,7 +33,7 @@ How far to take it is the user's setting:
 
 Each answer becomes an `R##.n` story with its own acceptance line. The number of stories is an output: seven dimensions that matter give seven stories, two give two, and padding is the same defect as skipping.
 
-**Two roads.** *Propose* when the answer is the user's to give — that was a briefing question. *Decide* when it is craft — error text, retry policy, limits, defaults — write it in and say so in the summary. In full, everything is decided and listed in the report; at strict, nothing is offered beyond what was asked.
+**Two roads.** *Propose* when the answer is the user's to give — that was a briefing question. *Decide* when it is craft — error text, retry policy, limits, defaults — write it in and say so in the summary. In `auto`, everything is decided and listed in the report; at strict, nothing is offered beyond what was asked.
 
 ## Keeping depth attached
 
@@ -129,6 +129,6 @@ Act on it before leaving: *missing* → write the section; *half-covered* → wr
 
 ## Showing it
 
-**full, semi, interview** — two lines: what will be built and what deliberately will not, plus where the file is. Then start. In interview the user is not owed the document for their answers — they chose questions, not gates.
+**auto, important, interview** — two lines: what will be built and what deliberately will not, plus where the file is. Then start. In interview the user is not owed the document for their answers — they chose questions, not gates.
 
 **manual** — the spec is a gate: `ap.py ask spec`, show it in full, wait for an explicit «ок», rewrite on every objection. Silence is not agreement, and neither is work already started.

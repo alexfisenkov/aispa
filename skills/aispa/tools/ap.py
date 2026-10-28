@@ -3,13 +3,14 @@
 
 Агент не правит .aispa-work/state.js руками. Каждое событие прогона — один вызов:
 
-    python3 .aispa-work/ap.py init --slug S --title "…" --mode semi --depth normal \\
+    python3 .aispa-work/ap.py init --slug S --title "…" --mode important --depth normal \\
                                   --memory-file AGENTS.md --memory-owner aispa --skill-dir /abs
     python3 .aispa-work/ap.py stage spec                 # открыть этап (прошлые закроются сами)
-    python3 .aispa-work/ap.py stage briefing skip --note "полный автомат — самобрифинг"
+    python3 .aispa-work/ap.py stage briefing skip --note "сам по брифу — самобрифинг"
     python3 .aispa-work/ap.py set tier=T2 baseCommit=a1b2c3d
-    python3 .aispa-work/ap.py tickets                    # опубликовать таски из <dir>/tickets/*.md
-    python3 .aispa-work/ap.py check-plan                 # гейт G3: трасса манифест ↔ таски
+    python3 .aispa-work/ap.py set mode=manual            # режим сменили по ходу (full/semi тоже понимаются)
+    python3 .aispa-work/ap.py tickets                    # опубликовать задачи из <dir>/tickets/*.md
+    python3 .aispa-work/ap.py check-plan                 # гейт G3: трасса манифест ↔ задачи
     python3 .aispa-work/ap.py ticket 02 03 start         # волна ушла
     python3 .aispa-work/ap.py ticket 02 review
     python3 .aispa-work/ap.py ticket 02 repair --note "пустой адрес проходит — R01.1"
@@ -26,7 +27,7 @@
     python3 .aispa-work/ap.py answered                   # ответил (stage/ticket закрывают сами)
     python3 .aispa-work/ap.py finish --result "Бот принимает заявки и пишет их в таблицу"
     python3 .aispa-work/ap.py reopen                     # второй бриф в сданном прогоне
-    python3 .aispa-work/ap.py commits                    # коммиты сданных тасков ещё в истории?
+    python3 .aispa-work/ap.py commits                    # коммиты сданных задач ещё в истории?
     python3 .aispa-work/ap.py                            # просто синхронизировать
 
 После каждой команды: updatedAt = сейчас (и метка в журнале beats), строка в ленте log,
@@ -75,6 +76,10 @@ WAIT_KINDS = ("briefing", "spec", "plan", "action", "stop")
 # Команды, которые значат «работа пошла дальше»: ожидание пользователя ими закрывается,
 # даже если `answered` забыли.
 MOVES_ON = {"stage", "ticket", "tickets", "check-plan", "coverage", "blind", "tests", "finish", "reopen"}
+# Режимы — имена AISpa 0.5 плюс ручной; старые слова Autopilot понимаются и хранятся новыми.
+MODES = ("auto", "important", "interview", "manual")
+OLD_MODES = {"full": "auto", "semi": "important"}
+DEPTHS = ("strict", "normal", "deep")
 ORDER = ["preflight", "manifest", "briefing", "spec", "plan", "build", "review", "final"]
 # Этап, чей результат лежит на диске, пройден — даже если его забыли отметить.
 ARTIFACT = {"manifest": "manifest.md", "spec": "spec.md", "plan": "tickets/*.md"}
@@ -160,17 +165,40 @@ def run_dir(state):
     return os.path.join(A, state.get("dir") or "")
 
 
+def norm_mode(v):
+    """auto|important|interview|manual; full → auto, semi → important; иначе None."""
+    v = str(v or "").strip().lower()
+    v = OLD_MODES.get(v, v)
+    return v if v in MODES else None
+
+
+def mode_of(v):
+    m = norm_mode(v)
+    if m is None:
+        die("режим: %s (старые full → auto, semi → important), а не «%s»"
+            % (" | ".join(MODES), v))
+    return m
+
+
+def depth_of(v):
+    d = str(v or "").strip().lower()
+    if d not in DEPTHS:
+        die("глубина: %s, а не «%s»" % (" | ".join(DEPTHS), v))
+    return d
+
+
 def fresh_state(a):
     t = now()
     return {
         "version": 2,
         "slug": a["slug"], "dir": "%s-%s--wip" % (t[:10], a["slug"]),
         "title": a.get("title") or a["slug"],
-        "mode": a.get("mode") or "semi", "depth": a.get("depth") or "normal",
+        "mode": mode_of(a.get("mode") or "important"), "depth": depth_of(a.get("depth") or "normal"),
         "tier": None, "briefFile": a.get("brief-file"),
         "memoryFile": a.get("memory-file") or "AGENTS.md",
         "memoryOwner": a.get("memory-owner") or "aispa",
-        "skillDir": a.get("skill-dir"), "baseCommit": None,
+        "skillDir": a.get("skill-dir"), "skillVersion": skill_version(a.get("skill-dir")),
+        "baseCommit": None,
         "startedAt": t, "updatedAt": t, "finishedAt": None,
         "stages": [{"id": "preflight", "status": "active", "startedAt": t}]
                   + [{"id": s, "status": "pending"} for s in ORDER[1:]],
@@ -183,7 +211,7 @@ def fresh_state(a):
     }
 
 
-# ── манифест и таски ────────────────────────────────────────────────────────
+# ── манифест и задачи ────────────────────────────────────────────────────────
 
 ROW_ID = re.compile(r"^[RGD]\d+[a-z]?$")
 PIPE = re.compile(r"(?<!\\)\|")          # «\|» внутри цитаты — не граница колонки
@@ -338,12 +366,12 @@ def publish_tickets(state):
             where.setdefault(r, []).append("T" + t["id"])
     moved = manifest_update(state, {r: ("in-ticket", ", ".join(w)) for r, w in where.items()
                                     if rows.get(r) == "in-spec"})
-    return "тасков опубликовано: %d%s" % (len(out), (" · в манифесте in-ticket: %d" % len(moved)) if moved else "")
+    return "задач опубликовано: %d%s" % (len(out), (" · в манифесте in-ticket: %d" % len(moved)) if moved else "")
 
 
 def check_plan(state):
-    """G3 механически: каждое живое требование — в таске, каждый таск — от требования,
-    у каждого таска зона и волна, в одной волне зоны не пересекаются."""
+    """G3 механически: каждое живое требование — в задаче, каждая задача — от требования,
+    у каждой задачи зона и волна, в одной волне зоны не пересекаются."""
     problems = []
     rows = manifest_rows(state) or []
     publish_tickets(state)
@@ -352,28 +380,28 @@ def check_plan(state):
     base = {r.split(".")[0] for r in named}
     for rid, st in rows:
         if st in ("in-spec", "in-ticket", "placeholder") and not rid.startswith("D") and rid not in base:
-            problems.append("требование %s (%s) не попало ни в один таск" % (rid, st))
+            problems.append("требование %s (%s) не попало ни в одну задачу" % (rid, st))
     known = {rid for rid, _ in rows}
     ids = {t["id"] for t in tickets}
     for t in tickets:
         own = [r for r in t["requirements"] if r.split(".")[0][:1] in "RGD"]
         if not t["requirements"]:
-            problems.append("таск %s ни к чему не привязан — работа, которую никто не заказывал" % t["id"])
+            problems.append("задача %s ни к чему не привязана — работа, которую никто не заказывал" % t["id"])
         for r in own:
             if r.split(".")[0] not in known:
-                problems.append("таск %s ссылается на %s, которого нет в манифесте" % (t["id"], r))
+                problems.append("задача %s ссылается на %s, которого нет в манифесте" % (t["id"], r))
         if not t["zone"]:
-            problems.append("у таска %s нет зоны" % t["id"])
+            problems.append("у задачи %s нет зоны" % t["id"])
         if t["wave"] is None:
-            problems.append("у таска %s нет волны" % t["id"])
+            problems.append("у задачи %s нет волны" % t["id"])
         for b in t["blockedBy"]:
             if b not in ids:
-                problems.append("таск %s зависит от несуществующего %s" % (t["id"], b))
+                problems.append("задача %s зависит от несуществующей задачи %s" % (t["id"], b))
     wave_of = {t["id"]: t["wave"] for t in tickets}
     for t in tickets:
         need = 1 + max([wave_of.get(b) or 0 for b in t["blockedBy"]] or [0])
         if t["wave"] is not None and t["wave"] < need:
-            problems.append("таск %s в волне %s, но его зависимости позволяют не раньше %d"
+            problems.append("задача %s в волне %s, но её зависимости позволяют не раньше %d"
                             % (t["id"], t["wave"], need))
     for i, a in enumerate(tickets):
         for b in tickets[i + 1:]:
@@ -383,7 +411,7 @@ def check_plan(state):
                 for zb in b["zone"]:
                     x, y = za.rstrip("/") + "/", zb.rstrip("/") + "/"
                     if x.startswith(y) or y.startswith(x):
-                        problems.append("таски %s и %s в одной волне пишут в %s"
+                        problems.append("задачи %s и %s в одной волне пишут в %s"
                                         % (a["id"], b["id"], za if len(za) >= len(zb) else zb))
     return problems
 
@@ -634,9 +662,35 @@ def stop_later():
 _VER = re.compile(r"^\s*version:\s*[\"']?(\d+(?:\.\d+)*)", re.M)
 
 
-def _version(text):
+def _version_str(text):
+    """metadata.version из шапки SKILL.md строкой, как написано: «1.0.0»."""
     m = _VER.search(text.split("\n---", 1)[0] if text.startswith("---") else "")
-    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+    return m.group(1) if m else None
+
+
+def _version(text):
+    v = _version_str(text)
+    return tuple(int(x) for x in v.split(".")) if v else None
+
+
+def skill_version(skill_dir):
+    """Версия навыка для state.skillVersion: SKILL.md из --skill-dir, иначе рядом
+    с ap.py — в пакете ap.py лежит в tools/, SKILL.md уровнем выше. Копия ap.py в
+    .aispa-work/ без --skill-dir версии не знает — null, а не выдумка."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    places = [skill_dir] if skill_dir else []
+    places.append(here)
+    if os.path.basename(here) == "tools":
+        places.append(os.path.dirname(here))
+    for d in places:
+        try:
+            with open(os.path.join(d, "SKILL.md"), encoding="utf-8") as f:
+                v = _version_str(f.read())
+        except OSError:
+            continue
+        if v:
+            return v
+    return None
 
 
 def check_update(state):
@@ -675,7 +729,7 @@ README_TEXT = """# Как читать эту папку
   Суффикс `--wip` значит «ещё делается»; когда сборка сдана, он снимается. Внутри:
   - `<дата>-brief.md` — твоя задача слово в слово и «Дополнения» — всё, что ты сказал позже.
   - `manifest.md` — список требований и что с каждым стало.
-  - `spec.md` — спецификация. `tickets/` — таски, на которые разбита сборка.
+  - `spec.md` — спецификация. `tickets/` — задачи, на которые разбита сборка.
 - `PROGRESS.md` — что осталось после последней сборки: не доделано, известные баги,
   о чём договорились. Мелкие правки без AISpa дописываются сюда же.
 
@@ -761,6 +815,8 @@ def tests_pair(v):
 def cmd_init(opt):
     if not opt.get("slug"):
         die("init требует --slug")
+    mode_of(opt.get("mode") or "important")       # неверный режим — отказ до архивации прошлого прогона
+    depth_of(opt.get("depth") or "normal")
     old = read_state()
     notes = []
     if old and not old.get("finishedAt") and not opt.get("force"):
@@ -816,7 +872,7 @@ def cmd_stage(state, pos, opt):
 
 
 def close_requirements(state, tk, opt, t):
-    """Требование закрыто, когда закрыты все таски, где оно названо. --placeholder R05
+    """Требование закрыто, когда закрыты все задачи, где оно названо. --placeholder R05
     помечает его заглушкой вместо done: там стоит видимая метка вместо данных пользователя."""
     ph = set(re.findall(r"[RGD]\d+[a-z]?", str(opt.get("placeholder") or "")))
     rows = dict(manifest_rows(state) or [])
@@ -843,7 +899,7 @@ def cmd_ticket(state, pos, opt):
     for i in ids:
         tk = known.get(i)
         if tk is None:
-            die("таска %s нет — сначала `ap.py tickets`" % i)
+            die("задачи %s нет — сначала `ap.py tickets`" % i)
         tk["status"] = TICKET_STATUSES[act]
         if act == "start":
             tk.setdefault("startedAt", t)
@@ -879,6 +935,10 @@ def cmd_set(state, pos):
         k, _, v = p.partition("=")
         if not _ or k in ("stages", "tickets", "requirements"):
             die("set key=value (скалярные поля верхнего уровня)")
+        if k == "mode":
+            v = mode_of(v)
+        elif k == "depth":
+            v = depth_of(v)
         state[k] = None if v in ("", "null") else v
 
 
@@ -940,7 +1000,7 @@ def cmd_finish(state, opt):
             s["status"], s["note"], s["finishedAt"] = "skipped", s.get("note") or "не понадобился", t
     for tk in state.get("tickets") or []:
         if tk.get("status") in ("in-progress", "review", "repair", "pending"):
-            notes.append("! таск %s закрыт незавершённым (%s)" % (tk["id"], tk["status"]))
+            notes.append("! задача %s закрыта незавершённой (%s)" % (tk["id"], tk["status"]))
     d = state.get("dir") or ""
     if d.endswith("--wip"):
         new = d[: -len("--wip")]
@@ -959,7 +1019,7 @@ def cmd_finish(state, opt):
 
 
 def cmd_reopen(state):
-    """Второй бриф в сданном прогоне: фазы 1–8 идут заново, прежние таски остаются."""
+    """Второй бриф в сданном прогоне: фазы 1–8 идут заново, прежние задачи остаются."""
     d = state.get("dir") or ""
     if not d.endswith("--wip") and git_mv(d, d + "--wip"):
         state["dir"] = d + "--wip"
@@ -979,7 +1039,7 @@ def cmd_reopen(state):
 
 def cmd_commits(state):
     """Возобновление верит state.js, а история могла уйти из-под него: reset, rebase,
-    другая ветка. Сданный таск, чьего коммита нет в HEAD, — строка «!»; сбрасывает
+    другая ветка. Сданная задача, чьего коммита нет в HEAD, — строка «!»; сбрасывает
     его оркестратор, потому что код после rebase может лежать на месте под другим sha."""
     notes = []
     for tk in state.get("tickets") or []:
@@ -989,9 +1049,9 @@ def cmd_commits(state):
         r = subprocess.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", c, "HEAD"],
                            capture_output=True)
         if r.returncode:
-            notes.append("! таск %s: коммита %s нет в истории — `ap.py ticket %s reset`"
+            notes.append("! задача %s: коммита %s нет в истории — `ap.py ticket %s reset`"
                          % (tk["id"], c, tk["id"]))
-    return notes or ["коммиты сданных тасков на месте"]
+    return notes or ["коммиты сданных задач на месте"]
 
 
 def main():

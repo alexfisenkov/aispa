@@ -20,7 +20,7 @@ Five to seven findings is the normal yield; fewer than three on a real project m
 
 ## Where a finding goes — by mode, not by how alarming it looks
 
-| Kind of finding | full | semi | interview · manual |
+| Kind of finding | auto | important | interview · manual |
 |---|---|---|---|
 | only the user can settle it | `ASSUMPTION` in the manifest and the report | asked **only if** the branches give a visibly different product | **asked**, in the second round at the latest |
 | craft — you can settle it | decided, into the spec | same | same |

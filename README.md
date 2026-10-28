@@ -109,17 +109,29 @@ The agent reads the file and takes its contents as the task; your file stays unt
 
 After that, all you do is answer a few questions at the very beginning.
 
-The agent's first reply tells you which mode it's in and what other modes there are, and **it opens the dashboard itself** — no commands to remember, no files to look for:
+If you didn't name a mode, the agent first asks one thing — how to work — and waits for your answer:
 
 ```
-Mode: semi-auto · depth: normal — I'll only ask what the task leaves undecided, then build the rest myself.
+How do we work? Answer with a number or a word:
+1. On my own from the brief (сам по брифу) — I ask nothing; decisions made for you are listed in the report.
+2. Only what matters (только важное) — I ask only what the brief leaves undecided and what changes the result.
+3. Interview (интервью) — I go through the brief with questions to the end, then build it myself.
+4. Manual (ручной) — like interview, plus you approve the spec and the task list.
+```
+
+Named the mode in the command — no such question. An unclear answer means "only what matters".
+
+Then the agent tells you which mode it's in and how to switch, and **it opens the dashboard itself** — no commands to remember, no files to look for:
+
+```
+Mode: only what matters · depth: normal — I'll only ask what the brief leaves undecided, then build the rest myself.
 Dashboard is open and refreshes itself: http://localhost:52814/dashboard.html
 Project memory — AGENTS.md (+ CLAUDE.md pointing to it).
 
 You can switch at any time, just say:
-• "fully automatic" — I ask nothing at all
-• "interview me" — I go through the task with questions to the end, then build it myself
-• "approve every step" — the same, plus you approve the spec and the task list
+• "on my own from the brief" — I ask nothing at all
+• "interview me" — I go through the brief with questions to the end, then build it myself
+• "manual" / "approve every step" — the same, plus you approve the spec and the task list
 • "strictly as written" / "go deep" — less or more elaboration beyond what you said
 ```
 
@@ -129,24 +141,24 @@ Questions come in **rounds**: several at once, numbered, each with the answer th
 
 ## Four modes
 
-After `/aispa` you can add how closely you want to be involved. Add nothing — you get **semi-auto**.
+After `/aispa` you can add how closely you want to be involved. Add nothing — the agent asks it as its first question (the four options above).
 
 | Mode | How to turn it on | What you're asked |
 |---|---|---|
-| **Fully automatic** | `/aispa full ...` or "fully automatic" | Nothing. At the end — a list of decisions made for you |
-| **Semi-auto** *(default)* | nothing to add | Only what the task leaves undecided: usually one or two rounds of questions. If everything is clear — none |
+| **On my own from the brief** (`auto`) | `/aispa auto ...` or "don't ask me anything" | Nothing. At the end — a list of decisions made for you |
+| **Only what matters** (`important`) | `/aispa important ...`; also what an unclear answer to the first question means | Only what the brief leaves undecided: usually one or two rounds of questions. If everything is clear — none |
 | **Interview** | `/aispa interview ...`, "interview me", "ask me everything" | Every fork, plus where the idea might not work. Then it builds on its own |
 | **Manual** | `/aispa manual ...` or "approve every step" | Same as interview, then your "ok" on the spec and on the task list |
 
 ```
-/aispa full a landing page for pizza delivery
+/aispa auto a landing page for pizza delivery
 
 /aispa A Telegram bot for booking manicure appointments
 
 /aispa manual CRM for a car repair shop, I want to approve the spec myself
 ```
 
-The words `full`, `semi`, `interview`, `manual` are written without dashes. You can change the mode along the way — "switch to manual" — it applies from the next stage.
+The words `auto`, `important`, `interview`, `manual` are written without dashes. The old words still work: `full` ("fully automatic") means `auto`, `semi` ("semi-auto") means `important`. You can change the mode along the way — "switch to manual" — it applies from the next stage.
 
 **What no mode changes:** the agent asks before anything irreversible — publishing, payments, messaging people, deleting data. And no mode turns off the check against your original task.
 
@@ -160,14 +172,14 @@ A separate dial, independent of the mode. The mode decides **how much you're ask
 |---|---|---|
 | **Strict** | `/aispa strict ...` or "strictly as written" | Only what you wrote. No features of its own — not even good ones. Errors and empty states are still handled: without them a requirement simply doesn't work |
 | **Normal** *(default)* | nothing to add | Works through the gaps that would clearly spoil the result. It may add things of its own, but each tied to one of your requirements |
-| **Maximum** | `/aispa deep ...` or "go deep", "think it through" | Every requirement goes through the full checklist: first run, empty screen, bad input, failure, dropped connection, growth, permissions, consequences |
+| **Deep** | `/aispa deep ...` or "go deep", "think it through" | Every requirement goes through the full checklist: first run, empty screen, bad input, failure, dropped connection, growth, permissions, consequences |
 
 ```
 /aispa strict a feedback form, exactly as I described
 
 /aispa deep an online ceramics store
 
-/aispa full deep a marketplace for craftspeople
+/aispa auto deep a marketplace for craftspeople
 ```
 
 Word order doesn't matter, both settings are optional. Like the mode, depth can be changed along the way: "less improvising" or "think it through more".
@@ -200,9 +212,9 @@ AISpa's first move is to split your text into **numbered requirements** and writ
 
 In a brief you describe how things work when everything goes well. You don't describe what to show on an empty screen, what happens when the connection drops, what happens if someone presses "send" twice, or what a person sees on the very first run. That's not an oversight — it's just not the level at which people describe a task.
 
-Thinking this through is a large part of AISpa's value, and you set how much of it happens with [depth](#depth). At normal depth the agent closes the gaps that would clearly spoil the result; at maximum depth it runs every requirement through the full checklist. Some things it decides itself (an error message, sensible limits); where the decision really is yours, it turns it into a question.
+Thinking this through is a large part of AISpa's value, and you set how much of it happens with [depth](#depth). At normal depth the agent closes the gaps that would clearly spoil the result; at deep it runs every requirement through the full checklist. Some things it decides itself (an error message, sensible limits); where the decision really is yours, it turns it into a question.
 
-At maximum depth one requirement from the brief unfolds into several worked-out scenarios — as many as it really has sides. That's the difference between "works in the demo" and "works".
+At deep depth one requirement from the brief unfolds into several worked-out scenarios — as many as it really has sides. That's the difference between "works in the demo" and "works".
 
 ---
 
@@ -246,7 +258,7 @@ The file appears **right away**, before the first line of code: the name, the ru
 | | |
 |---|---|
 | Which file | `AGENTS.md` — read by Claude Code, Codex, Cursor and other agents. Next to it goes a `CLAUDE.md` with a single line `@AGENTS.md`: without it Claude Code skips `AGENTS.md` if there's another `CLAUDE.md` somewhere up the folder tree |
-| You already have your own `CLAUDE.md` or `AGENTS.md` | AISpa **doesn't touch it**. At the end it suggests what to add — new commands, variables, pitfalls — and asks whether to apply it. In fully automatic mode the suggestion just stays as a file |
+| You already have your own `CLAUDE.md` or `AGENTS.md` | AISpa **doesn't touch it**. At the end it suggests what to add — new commands, variables, pitfalls — and asks whether to apply it. In `auto` mode the suggestion just stays as a file |
 | Size | Proportional to the project, and short: every line of this file is read in every future session |
 | Your text | Everything you wrote is untouchable. AISpa writes only inside its own markers |
 
@@ -408,7 +420,7 @@ skills/aispa/
 │   ├── 0-memory.md             choosing the project memory file
 │   ├── 1-manifest.md           brief → requirements, secrets filter
 │   ├── 2-briefing.md           questions in rounds, reference
-│   ├── 2-adversarial.md        where the idea might fail — in interview mode and at maximum depth
+│   ├── 2-adversarial.md        where the idea might fail — in interview mode and at deep depth
 │   ├── 3-spec.md               the spec and how deep to work it out
 │   ├── 4-plan.md               splitting into tasks by volume, waves, who gets review and which model
 │   ├── 5-subagents.md          executor agents and the contracts between them

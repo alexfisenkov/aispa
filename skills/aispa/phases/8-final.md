@@ -67,7 +67,7 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 
 | Section | Read from |
 |---|---|
-| Решения, принятые за тебя *(full: first in the report)* | `manifest.md` — every `ASSUMPTION` |
+| Решения, принятые за тебя *(auto: first in the report)* | `manifest.md` — every `ASSUMPTION` |
 | Готово | **the blind checker's verdict**, not the manifest's `done` rows |
 | Что нужно от тебя | `placeholder` rows + `state.js` → `debt` |
 | Что не вошло | `deferred` and `dropped` rows, with their quotes |
@@ -75,7 +75,7 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 | Что пошло не по плану | every `D##` row, every failed ticket |
 | Что осталось после ревью | `state.js` → `report` |
 | Открытые вопросы | `state.js` → `blind`, and `coverage` → `items` that ended up not built |
-| Память проекта *(only when the file is the user's)* | `memory-proposal.md` — one question: «Предлагаю дополнить твой `CLAUDE.md`: N пунктов — применить?»; in full, only a line naming the file |
+| Память проекта *(only when the file is the user's)* | `memory-proposal.md` — one question: «Предлагаю дополнить твой `CLAUDE.md`: N пунктов — применить?»; in `auto`, only a line naming the file |
 | Запустить / Где что лежит | `memoryFile`, `briefFile`, the commands the memory agent verified |
 
 ```markdown
