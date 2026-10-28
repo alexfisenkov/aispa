@@ -479,7 +479,7 @@ tools/install.py                 ← first install from a Release (for the old l
 CHANGELOG.md                     ← what's new, by version
 ```
 
-The agent reads the `phases/` files one at a time, only when the matching phase begins — so its memory always holds exactly what's needed right now. Everything needed only in rare cases — repair, resuming, stress-testing the idea — lives in separate files and isn't opened until that case comes up. The reasons behind the decisions live in `docs/`, not in the instructions: the agent doesn't need them, and paying for them would happen at every step.
+The agent reads the `phases/` files one at a time, only when the matching phase begins — so its memory always holds exactly what's needed right now. Everything needed only in rare cases — repair, resuming, stress-testing the idea — lives in separate files and isn't opened until that case comes up.
 
 It's all plain markdown. You can open it and read it: [skills/aispa/SKILL.md](skills/aispa/SKILL.md).
 

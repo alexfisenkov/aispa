@@ -97,6 +97,7 @@ class Versions(unittest.TestCase):
         for host in ("codex", "claude-code", "cursor", "openclaw", "gemini", "antigravity"):
             self.assertIn('"%s"' % host, runtimes)
 
+    @unittest.skipIf(os.name == "nt", "POSIX find")
     def test_template_search_skips_update_copies(self):
         text = read(os.path.join(SKILL, "phases", "0-instruments.md"))
         pattern = "*/aispa/phases/dashboard-template.html"
@@ -122,6 +123,7 @@ class TemplateSearch(Temp):
                ".gemini/config/skills", ".openclaw/skills", "proj/.claude/skills", "proj/.agents/skills",
                "proj/.cursor/skills", "proj/.gemini/skills")
 
+    @unittest.skipIf(os.name == "nt", "POSIX shell, пути вида /c/…")
     def test_every_layout(self):
         shells = [s for s in ("bash", "zsh") if shutil.which(s)]
         for layout in self.LAYOUTS:

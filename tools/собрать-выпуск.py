@@ -150,6 +150,8 @@ def main():
     report = {"version": manifest["version"], "tag": tag, "commit": manifest["commit"],
               "files": count, "output": str(output), "published": False,
               "sha256": {name: hashlib.sha256(assets[name]).hexdigest() for name in ASSETS}}
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if dirty():
         print("! в рабочей папке есть незакоммиченные правки — в выпуск они не попали", file=sys.stderr)

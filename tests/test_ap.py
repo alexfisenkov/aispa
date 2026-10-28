@@ -61,7 +61,7 @@ class Run(unittest.TestCase):
     def ap(self, *args):
         env = dict(os.environ, AISPA_NO_UPDATE_CHECK="1")
         r = subprocess.run([sys.executable, os.path.join(self.a, "ap.py")] + list(args) + ["--no-serve"],
-                           capture_output=True, text=True, env=env, cwd=self.root)
+                           capture_output=True, text=True, encoding="utf-8", env=env, cwd=self.root)
         return r.returncode, r.stdout
 
     def state(self):
