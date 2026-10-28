@@ -19,8 +19,21 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/aispa/tools"))
-from aispa_core import updates
+from aispa_core import VERSION, updates
 from aispa_core.store import Invalid
+
+
+
+def package_runtimes():
+    """RUNTIMES of the package, read as the installers read it: from the file, without importing."""
+    tree = ast.parse((ROOT / "skills/aispa/tools/aispa_core/project_context.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "RUNTIMES" for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError("project_context.py has no RUNTIMES")
+
+
+RUNTIMES = package_runtimes()
 
 SPEC = importlib.util.spec_from_file_location("aispa_first_install", ROOT / "tools/install.py")
 install = importlib.util.module_from_spec(SPEC)
@@ -650,7 +663,6 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("preview", result.stdout)
 
     def test_new_runtime_preview_uses_native_unicode_destinations_without_installing(self):
-        from aispa_core.project_context import RUNTIMES
         self.configure_release("0.3.0", runtimes=RUNTIMES)
         self.assertEqual(set(install._RUNTIME_DIRS), set(RUNTIMES))
         self.assertEqual(set(install._PROJECT_DIRS), set(RUNTIMES))
@@ -691,7 +703,6 @@ class InstallerTests(unittest.TestCase):
                     self.assertEqual(list(self.cache.glob("aispa-install-*")), [])
 
     def test_new_host_apply_checks_runtime_and_installs_verified_capable_package(self):
-        from aispa_core.project_context import RUNTIMES
         self.configure_release("0.3.0", runtimes=RUNTIMES)
         home = self.root / "agent home"
         home.mkdir()
@@ -732,6 +743,25 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual({p.name: p.read_bytes() for p in agents.iterdir()}, expected)
                 self.assertEqual((root / ".claude/skills/aispa/agents/claude-code/aispa-judge.md").read_bytes(),
                                  expected["aispa-judge.md"])
+
+    def test_one_point_zero_package_puts_its_six_agents_beside_the_claude_code_skill(self):
+        source = ROOT / "skills/aispa/agents/claude-code"
+        expected = {path.name: path.read_bytes() for path in sorted(source.glob("aispa-*.md"))}
+        self.assertEqual(sorted(expected), ["aispa-judge.md", "aispa-mechanic-scripted.md", "aispa-mechanic.md",
+                                            "aispa-researcher.md", "aispa-sensitive-worker.md", "aispa-worker.md"])
+        self.configure_release(VERSION, runtimes=RUNTIMES,
+                               extra={"agents/claude-code/" + name: data for name, data in expected.items()})
+        home = self.root / "home"
+        home.mkdir()
+        with self.network():
+            receipt = install.preview(runtime="claude-code", scope="global", home=home,
+                                      tag=self.tag, cache_dir=self.cache)
+            self.assertEqual(receipt["agents"]["files"], sorted(expected))
+            done = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+        agents = home / ".claude" / "agents"
+        self.assertEqual(done["version"], "1.0.0")
+        self.assertEqual(done["agents"]["status"], "installed")
+        self.assertEqual({p.name: p.read_bytes() for p in agents.iterdir()}, expected)
 
     def test_existing_agent_is_never_overwritten_and_is_named(self):
         expected = self.agent_release()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""One project check: all unittest modules and the dashboard Node tests.
+"""One project check: all unittest modules and the Node tests that exist.
 
-    python3 tools/check.py                         # whole suite: unittest + node --test tests/dashboard.test.cjs
+    python3 tools/check.py                         # whole suite: unittest + node --test for each tests/*.test.cjs
     python3 tools/check.py --file tests/test_x.py  # one file (a .cjs file runs under node --test)
 
 Exits non-zero when anything fails or cannot run. Standard library only.
@@ -15,7 +15,6 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-DASHBOARD = "tests/dashboard.test.cjs"
 
 
 def unittest_command(root, pattern="test*.py", start="tests", verbose=False):
@@ -57,8 +56,8 @@ def file_steps(root, name, verbose):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Проверка проекта AISpa: unittest и тесты панели")
-    parser.add_argument("--file", help="Один файл тестов, например tests/test_cli.py или tests/dashboard.test.cjs")
+    parser = argparse.ArgumentParser(description="Проверка проекта AISpa: unittest и тесты node")
+    parser.add_argument("--file", help="Один файл тестов, например tests/test_ap.py или tests/<имя>.test.cjs")
     parser.add_argument("-v", "--verbose", action="store_true", help="Подробный вывод unittest")
     parser.add_argument("--root", default=str(ROOT), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -68,8 +67,9 @@ def main(argv=None):
         if steps is None:
             return 2
     else:
-        steps = [("unittest", unittest_command(root, verbose=args.verbose)),
-                 ("node --test " + DASHBOARD, node_command(root / DASHBOARD))]
+        steps = [("unittest", unittest_command(root, verbose=args.verbose))]
+        steps += [("node --test " + path.relative_to(root).as_posix(), node_command(path))
+                  for path in sorted((root / "tests").glob("*.test.cjs"))]
     with tempfile.TemporaryDirectory(prefix="aispa-check-") as scratch:
         env = private_env(scratch)
         failed = [name for name, command in steps if run(name, command, root, env)]

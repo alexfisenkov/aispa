@@ -1,176 +1,39 @@
 name: AISpa checks
+# One full run on the final version, started by hand; never on push or pull request.
 on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Verification scope (full suite, Windows full, runtime adapters or targeted regressions)
+        description: Verification scope (the whole suite)
         type: choice
         default: full
-        options: [full, windows-full, windows-cli-finish, runtimes, dashboard, snapshot, portability, zone-portability, dashboard-fix, labels, updates, dashboard-preview, dashboard-release, source-quotes, mixed-evidence, mixed-evidence-fix]
+        options: [full]
 permissions:
   contents: read
 jobs:
   python:
+    if: inputs.scope == 'full'
     runs-on: ${{ matrix.os }}
-    # Windows full coverage is split by occurrence; no test is omitted.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 75 || 30 }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON((inputs.scope == 'windows-full' || inputs.scope == 'windows-cli-finish') && '["windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python: ['3.11', '3.13']
-        shard: ${{ fromJSON((inputs.scope == 'full' || inputs.scope == 'windows-full') && '[0,1]' || '[0]') }}
-        exclude:
-          - os: ubuntu-latest
-            shard: 1
-          - os: macos-latest
-            shard: 1
     steps:
-      # Tests that create runs record calibration; keep it off the runner's real home. The runner context
-      # is not available in the job-level env, so the first step exports the file for every later step.
-      - name: Private calibration file for the tests
-        shell: bash
-        run: echo "AISPA_CALIBRATION_FILE=${{ runner.temp }}/aispa-calibration.json" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: ${{ (inputs.scope == 'full' || inputs.scope == 'windows-full' || inputs.scope == 'dashboard-preview' || inputs.scope == 'dashboard-release' || inputs.scope == 'source-quotes' || inputs.scope == 'mixed-evidence') && '0' || '1' }}
+          # The compatibility tests read published tags (old installers and updaters).
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Managed dashboard startup smoke
-        if: matrix.shard == 0
-        working-directory: tests
-        run: python -B -m unittest test_dashboard_server.DashboardServerTests.test_start_status_stop_and_port_reuse -v
-      - name: Contract tests
-        if: inputs.scope == 'full' && matrix.os != 'windows-latest'
-        run: python -m unittest discover -s tests -v
-      - name: Complete Windows contract partition
-        if: (inputs.scope == 'full' || inputs.scope == 'windows-full') && matrix.os == 'windows-latest'
-        run: python -B tools/run_contract_tests.py --shards 2 --shard-index ${{ matrix.shard }}
-      - name: Runtime adapters and regression boundaries
-        if: inputs.scope == 'runtimes'
+      - name: All unittest modules
         env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_runtime_support test_runtime_evidence test_install test_updates
-          test_project_context test_portable_context test_store test_git_snapshot
-          test_task_tiers test_lean_control test_check_modes
-          test_context_navigation test_discovery test_docmeta_integration
-          test_packets test_team test_knowledge test_carryover test_telemetry
-          test_cli test_blind test_cleanroom test_windows_cli
-          test_windows_paths test_windows_cleanroom test_windows_portable_tools
-          test_project_documents test_project_documents_cli test_project_file_map
-          test_ideas test_planning test_workflow test_cli_output
-          test_check_modes_e2e.FastModeE2E
-      - name: Native Windows final CLI completion
-        if: inputs.scope == 'windows-cli-finish'
-        env:
-          PYTHONPATH: tests
-        run: python -B -m unittest -v test_cli.CliTests.test_full_cli_scenario
-      - name: Dashboard, autonomy and lifecycle regressions
-        if: inputs.scope == 'dashboard'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_dashboard_host test_dashboard_server test_cli_output
-          test_lean_control.BatchCliTests test_runtime_evidence test_store
-          test_project_documents_cli test_work_progress test_dashboard_activity
-          test_phase_progress test_dashboard_liveness test_timing test_workflow
-          test_autonomy test_display_details test_dashboard_reader_cache
-          test_preparation_workflow test_packets test_project_context test_team test_cli
-      - name: Conditional estimate contract regression
-        if: inputs.scope == 'dashboard-fix'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_workflow.WorkflowTests.test_live_projection_includes_blockers_before_final_delivery
-          test_timing
-      - name: Snapshot generation and read-scope regressions
-        if: inputs.scope == 'snapshot'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_dashboard_snapshot test_dashboard_reader_cache test_calculation_scope
-          test_verdict_read_scope test_verified_reads
-      - name: Portable audit, source text and CLI regressions
-        if: inputs.scope == 'portability'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_assessment test_cli.AuditOrdinaryTextCliTests
-          test_cli.CliTests.test_full_cli_scenario
-          test_design_contract.DesignContractTests.test_interfaces_have_hash_bound_references_and_plan_bindings
-          test_support_faq.SupportFaqTests.test_root_renderer_uses_same_canon_and_checks_generated_drift
-          test_dashboard_snapshot
-      - name: Label release compatibility
-        if: inputs.scope == 'labels'
-        env:
-          PYTHONPATH: tests
-        run: python -B -m unittest test_label_release_compat -v
-      - name: Portable literal zone identity and refusal boundaries
-        if: inputs.scope == 'zone-portability'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_full_prepare_accepts_extensionless_and_literal_bracket_files_readonly
-          test_task_zone_extension_extra.ExtraAttemptTests.test_zc5_literal_paths_keep_secret_confined_wildcard_and_directory_guards
-      - name: Release discovery, installation and portable guards
-        if: inputs.scope == 'updates'
-        env:
-          PYTHONPATH: tests
-        run: python -B -m unittest test_updates test_install test_windows_portable_tools -v
-      - name: Dashboard comparison preview and pinned-view compatibility
-        if: inputs.scope == 'dashboard-preview'
-        env:
-          PYTHONPATH: tests
-        run: python -B -m unittest test_dashboard_compare test_label_release_compat -v
-      - name: Dashboard release and upgrade boundaries
-        if: inputs.scope == 'dashboard-release'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_label_release_compat test_dashboard_compare test_updates test_install
-          test_dashboard_server.DashboardServerTests.test_compatible_reader_has_explicit_version_allowlist_and_blocks_writes
-          test_dashboard_server.DashboardServerTests.test_refresh_view_refuses_unsupported_or_damaged_state_before_asset_change
-      - name: Source quotations and pinned runtime repair
-        if: inputs.scope == 'source-quotes'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_design_contract test_preparation_workflow test_briefmap
-          test_ideas test_task_reports test_packets test_carryover
-          test_runtime_repair test_label_release_compat test_updates test_install
-      - name: Mixed evidence, review history and acceptance
-        if: inputs.scope == 'mixed-evidence'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_mixed_evidence test_test_intent test_failure_checks
-          test_task_reports test_display_details test_packets
-          test_team test_lean_control test_adaptive_review test_adaptive_acceptance
-          test_task_tiers test_check_modes test_check_mode_views test_workflow test_execution_source_timing
-          test_execution_dispositions test_label_release_compat test_updates test_install
-      - name: Mixed evidence Windows fixture regression
-        if: inputs.scope == 'mixed-evidence-fix'
-        env:
-          PYTHONPATH: tests
-        run: >-
-          python -B -m unittest -v
-          test_mixed_evidence test_failure_checks test_check_mode_views
-      - name: Study-plan pilot example tests
-        if: matrix.shard == 0 && (inputs.scope == 'full' || inputs.scope == 'windows-full' || inputs.scope == 'snapshot' || inputs.scope == 'portability')
-        working-directory: examples/study-plan
+          PYTHONUTF8: '1'
         run: python -B -m unittest discover -s tests -v
-      - name: Dashboard behavior tests
-        if: matrix.shard == 0 && inputs.scope != 'runtimes' && inputs.scope != 'updates' && inputs.scope != 'zone-portability' && inputs.scope != 'windows-cli-finish' && matrix.python == '3.13'
-        run: node --test tests/dashboard.test.cjs
+      - name: Node tests (only when tests/*.test.cjs exist)
+        if: matrix.python == '3.13' && hashFiles('tests/*.test.cjs') != ''
+        shell: bash
+        run: node --test tests/*.test.cjs

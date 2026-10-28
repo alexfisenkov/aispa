@@ -1107,7 +1107,10 @@ class UpdateTests(unittest.TestCase):
         spec.loader.exec_module(producer)
         repo = self.root / "repo"
         repo.mkdir()
-        self.write_package(repo / "skills/aispa", self.package_content("0.1.0-alpha.3"))
+        skill = b'---\nname: aispa\nmetadata:\n  version: "0.1.0-alpha.3"\n---\n# AISpa\n'
+        content = dict(self.package_content("0.1.0-alpha.3"), **{"SKILL.md": skill})
+        content.update({name: b"fixture\n" for name in producer.REQUIRED if name not in content})
+        self.write_package(repo / "skills/aispa", content)
         (repo / "LICENSE").write_bytes(b"MIT fixture\n")
         for args in (("init", "-q"), ("add", "."), ("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "release")):
             subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
@@ -1117,7 +1120,7 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(Path(first["archive"]).read_bytes(), Path(second["archive"]).read_bytes())
         self.assertEqual(Path(first["manifest"]).read_bytes(), Path(second["manifest"]).read_bytes())
         with zipfile.ZipFile(first["archive"]) as archive:
-            self.assertEqual(archive.read("aispa/SKILL.md"), b"# AISpa\n")
+            self.assertEqual(archive.read("aispa/SKILL.md"), skill)
             self.assertIn("aispa/LICENSE", archive.namelist())
         self.assertFalse(first["published"])
         with self.assertRaises(Invalid):
@@ -1134,7 +1137,10 @@ class UpdateTests(unittest.TestCase):
         spec.loader.exec_module(producer)
         repo = self.root / "stable-repo"
         repo.mkdir()
-        self.write_package(repo / "skills/aispa", self.package_content("0.1.0"))
+        content = dict(self.package_content("0.1.0"),
+                       **{"SKILL.md": b'---\nname: aispa\nmetadata:\n  version: "0.1.0"\n---\n# AISpa\n'})
+        content.update({name: b"fixture\n" for name in producer.REQUIRED if name not in content})
+        self.write_package(repo / "skills/aispa", content)
         (repo / "LICENSE").write_bytes(b"MIT fixture\n")
         (repo / "tools").mkdir()
         installer = (ROOT / "tools/install.py").read_bytes()
