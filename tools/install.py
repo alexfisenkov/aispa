@@ -243,6 +243,12 @@ def _select_release(rows, tag=None):
         _need(row.get("html_url") == expected_url, "Некорректный адрес Release")
         assets = row.get("assets")
         _need(isinstance(assets, list), "Некорректные ресурсы Release")
+        counts = [sum(1 for item in assets if isinstance(item, dict) and item.get("name") == name)
+                  for name in ("aispa-update.json", "aispa.zip")]
+        if tag is None and counts != [1, 1]:
+            # A Release without the package files (v1.0.0, for one) is not an
+            # install source; the newest one that has them is chosen instead.
+            continue
         urls = {}
         for name in ("aispa-update.json", "aispa.zip"):
             matches = [item for item in assets if isinstance(item, dict) and item.get("name") == name]

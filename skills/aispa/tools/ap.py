@@ -713,7 +713,7 @@ def release_check(skill):
     if not os.path.isfile(tool):
         return None
     try:
-        r = subprocess.run([sys.executable, "-B", tool, "update-check"], capture_output=True,
+        r = subprocess.run([sys.executable, "-B", tool, "update-check", "--root", ROOT], capture_output=True,
                            text=True, encoding="utf-8", timeout=15, stdin=subprocess.DEVNULL)
         value = json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -721,14 +721,27 @@ def release_check(skill):
     return value if isinstance(value, dict) else None
 
 
+HELD = {"git_checkout": "папка навыка лежит в git-репозитории",
+        "git_check_failed": "не удалось проверить, лежит ли папка навыка в git",
+        "git_unavailable": "папка навыка лежит в git, а git не запускается",
+        "contains_runs": "внутри папки навыка лежат прогоны",
+        "cwd_inside_package": "терминал открыт внутри папки навыка",
+        "pinned_runtime": "это закреплённая копия прогона"}
+
+
 def release_note(found):
-    """Строка ↑ для копии из выпуска GitHub: обновляет агент после сборки, по слову пользователя."""
+    """Строка ↑ для копии из выпуска GitHub: обновляет агент после сборки, по слову пользователя.
+    Копия, которую обновитель менять не вправе, получает причину и путь, а не чужую команду."""
     if found.get("status") != "available":
         return None
     release = found.get("release") or {}
-    return ("вышла версия AISpa %s (у тебя %s): обновлю после сборки, если скажешь «обнови AISpa» · "
-            "что нового — %s" % (release.get("version"), found.get("installedVersion"),
-                                 release.get("url") or "github.com/%s/releases" % REPO))
+    head = "вышла версия AISpa %s (у тебя %s)" % (release.get("version"), found.get("installedVersion"))
+    tail = " · что нового — %s" % (release.get("url") or "github.com/%s/releases" % REPO)
+    if found.get("installAllowed"):
+        return head + ": обновлю после сборки, если скажешь «обнови AISpa»" + tail
+    why = HELD.get(found.get("installReason"), "эту папку обновитель не меняет (%s)" % found.get("installReason"))
+    return (head + ": сама эта копия не обновится — %s; обнови её там, откуда она взялась, "
+            "или поставь заново: npx skills add %s --skill aispa -g" % (why, REPO) + tail)
 
 
 def check_update(state):
@@ -738,8 +751,29 @@ def check_update(state):
         return None
     skill = state.get("skillDir") or ""
     found = release_check(skill) if skill else None
-    if found and found.get("manager") == "release" and found.get("installAllowed"):
-        return release_note(found)
+    _FOUND[:] = [found or {}]
+    if found and found.get("manager") == "release":
+        return release_note(found)   # копия из выпуска сверяется только с выпусками, не с main
+    return main_note(skill)
+
+
+_FOUND = []   # ответ update-check этого вызова, чтобы не спрашивать GitHub дважды
+
+
+def copies_note():
+    """Строка `!`, если агент увидит рядом вторую AISpa: копию 0.x или лишнюю ~/.codex/skills/aispa.
+    Берёт ответ update-check, полученный в check_update."""
+    found = _FOUND[0] if _FOUND else {}
+    copies = [c for c in found.get("otherCopies") or [] if isinstance(c, dict) and c.get("path")]
+    if not copies:
+        return None
+    return ("! рядом лежит ещё одна AISpa — агент может увидеть навык дважды: %s; "
+            "убрать её — решение пользователя"
+            % "; ".join("%s (%s)" % (c["path"], c.get("version") or "?") for c in copies))
+
+
+def main_note(skill):
+    """Копия из npx skills или клон: сверка версии с SKILL.md в main."""
     try:
         local = _version(open(os.path.join(skill, "SKILL.md"), encoding="utf-8").read())
     except OSError:
@@ -874,10 +908,34 @@ def cmd_init(opt):
     ensure_gitignore()
     register_row(state, "в работе", None)
     notes.append("папка прогона: .aispa-work/%s" % state["dir"])
-    if os.path.isdir(os.path.join(ROOT, ".aispa")):
-        notes.append("! в проекте есть .aispa/ — прогон AISpa 0.x: эта версия его не продолжает, "
-                     "папка не тронута")
+    line = None if old else legacy_note(state)   # после первой сборки 1.x выбор уже сделан
+    if line:
+        notes.append(line)
     return state, notes
+
+
+def legacy_note(state):
+    """Строка `!` только про незаконченный прогон AISpa 0.x; законченная история молчит.
+    Читает его обновитель пакета (`tools/aispa.py legacy-run`) — он знает формат 0.x."""
+    if not os.path.isdir(os.path.join(ROOT, ".aispa")):
+        return None
+    tool = os.path.join(state.get("skillDir") or "", "tools", "aispa.py")
+    old = None
+    if os.path.isfile(tool):
+        try:
+            r = subprocess.run([sys.executable, "-B", tool, "legacy-run", "--root", ROOT], capture_output=True,
+                               text=True, encoding="utf-8", timeout=15, stdin=subprocess.DEVNULL)
+            old = (json.loads(r.stdout) or {}).get("oldRun") if r.returncode == 0 else None
+        except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+            old = None
+    if isinstance(old, dict) and old.get("finished") is True:
+        return None
+    if isinstance(old, dict) and old.get("skill"):
+        return ("! в проекте есть %s прогон AISpa 0.x (%s): доделывает его только его версия — "
+                "%s; папку .aispa/ не трогать"
+                % ("незаконченный" if old.get("finished") is False else "возможно, незаконченный",
+                   old.get("title") or old.get("run"), old["skill"]))
+    return "! в проекте есть .aispa/ — прогон AISpa 0.x, его состояние не прочитать; папку не трогать"
 
 
 def cmd_stage(state, pos, opt):
@@ -1173,6 +1231,10 @@ def main():
         note = check_update(state)
         if note:
             print("  ↑ " + note)
+        if cmd == "init":
+            note = copies_note()
+            if note:
+                print("  " + note)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,9 @@ Runs on every flight — new repo, new feature, resume alike. Every line is idem
 
 ```bash
 A=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)/.aispa-work
-TPL=$(find -L ~/.claude/skills ~/.agents/skills ~/.claude/plugins .claude/skills .agents/skills \
+TPL=$(find -L ~/.claude/skills ~/.agents/skills ~/.codex/skills ~/.cursor/skills ~/.gemini/skills \
+        ~/.gemini/config/skills ~/.openclaw/skills ~/.claude/plugins \
+        .claude/skills .agents/skills .cursor/skills .gemini/skills \
         -maxdepth 6 -path '*/aispa/phases/dashboard-template.html' 2>/dev/null | head -1)
 [ -n "$TPL" ] && TPL=$(cd "$(dirname "$TPL")" && pwd -P)/dashboard-template.html
 command -v cygpath >/dev/null && TPL=$(cygpath -m "$TPL")   # Windows: C:/…, а не /c/…
@@ -18,6 +20,7 @@ cp "${TPL%/phases/*}/tools/ap.py" "$A/ap.py"
 ```
 
 - **`skillDir` is what every subagent contract hangs on** — `prompts/executor.md` and `prompts/review.md` go down as paths built from it. It goes into `init` below and lives in `state.js`, never only in your context.
+- The roots are every place AISpa is installed into — by `npx skills` and by the GitHub Release installer of 0.x (`~/.codex/skills` for Codex, `~/.gemini/config/skills` for Antigravity, …); a root that does not exist is silent.
 - `find -L` and no bare `*` in it: skills are installed through symlinks, which a plain `find` does not follow, and an unmatched glob aborts the whole line in zsh (the quoted `-path` pattern is find's, not the shell's). `-path …/aispa/phases/` keeps out another skill's template and the copies an update leaves beside the skill (`.aispa-backup-*/package/`). Empty output → widen the search once by hand and carry on.
 - **`python3` not a working interpreter** — on Windows it can be the Microsoft Store stub → use `python` or `py -3` wherever this skill says `python3`.
 - `index.html` is a symlink so the server answers `/` with the dashboard instead of a directory listing.
@@ -35,7 +38,9 @@ It creates the run directory `<YYYY-MM-DD>-<slug>--wip/` with `tickets/` inside,
 
 A line starting with **`↑`** means a newer AISpa is out: put it into the opening block as it is — one line, not a question, never an update mid-run. When it says «обнови AISpa», this copy came from a GitHub Release and updates itself after the report — `SKILL.md`, «Updating AISpa».
 
-A line starting with **`!`** about `.aispa/` means the project holds a run of AISpa 0.x (`phases/0-preflight.md`, the old-run case): if the user has not been told yet, say it in the opening block in one line. Never move, edit or delete `.aispa/`.
+A line starting with **`!`** about `.aispa/` comes only on the first run of this version in a project that holds an unfinished run of AISpa 0.x — the user has already chosen to start over (`phases/0-preflight.md`, the old-run case), so it is nothing to say again. A finished 0.x run prints nothing. Never move, edit or delete `.aispa/`.
+
+A line **`! рядом лежит ещё одна AISpa`** names a second copy the agent may load beside this one — an old 0.x copy committed into a project, or `~/.codex/skills/aispa` left next to `~/.agents/skills/aispa`. Say it in the opening block in one line with the path, and offer to remove it after the run; remove it only on the user's yes, and never one that holds the user's own files without saying so.
 
 ## 3. Open it once, yourself
 

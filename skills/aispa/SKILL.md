@@ -133,11 +133,14 @@ Numbers in this skill — tiers, question counts, wave widths — are **calibrat
 Never mid-run. `init --check-update` prints a `↑` line when a newer version is out, and the line names the way for this copy:
 
 - **`npx skills update aispa …`** — the user's own command: say it as it is.
-- **«обнови AISpa»** — this copy came from a GitHub Release and updates itself. After the report, or whenever the user asks outside a run: `python3 "<skillDir>/tools/aispa.py" update-prepare`; show the installed and the new version, the release link and how many files change; ask «Установить обновление» / «Оставить как есть». Only on «установить»: `update-apply --candidate <candidateId> --confirm`, then re-read this file — the next run follows the new version. Undo, also only on the user's word: `update-rollback --backup <backupId> --confirm`.
+- **«обнови AISpa»** — this copy came from a GitHub Release and updates itself. After the report, or whenever the user asks outside a run: `python3 "<skillDir>/tools/aispa.py" update-prepare`; show the installed and the new version, the release link and how many files change; ask «Установить обновление» / «Оставить как есть». Only on «установить»: `update-apply --candidate <candidateId> --confirm`, then re-read this file — the next run follows the new version.
+- **«сама эта копия не обновится»** — a Release copy the updater may not replace (it sits in a git repository, say): say the line as it is; the way it names is the user's.
+
+**Undo**, only on the user's word and in any later session: `python3 "<skillDir>/tools/aispa.py" update-rollback --confirm` restores the copy the last update replaced; `update-backups` lists every copy that can still be restored, newest first, with its version and folder (`--backup <backupId>` picks another one).
 
 A refused or failed step is one line to the user; the installed version keeps working. The folders `.aispa-update-*` and `.aispa-backup-*` beside the skill are the updater's — never touch them.
 
-**Coming from AISpa 0.x.** An agent that has just updated 0.x into this version in the same session: the 0.x commands (`tools/aispa.py init`, `status`, `dashboard`, `resume`, …) are gone — `tools/aispa.py` only updates the package now. Start Phase 0 of this file for the request the user already gave. A `.aispa/` folder in the project is a 0.x run — `phases/0-preflight.md`.
+**Coming from AISpa 0.x.** An agent that has just updated 0.x into this version in the same session: the 0.x commands (`tools/aispa.py init`, `status`, `dashboard`, `resume`, …) are gone here — `tools/aispa.py` only updates the package and answers any old command with what to do. Start Phase 0 of this file for the request the user already gave: a `.aispa/` folder in the project is decided by `phases/0-preflight.md` — an unfinished 0.x build is finished by the 0.x copy pinned inside it, so «продолжи» still continues it. Tell the user once, in one line, where the previous copy of the skill went — the folder the old command's answer names as `backup.package` (`update-backups` shows it too): any files they had edited by hand in the skill are there.
 
 ## When to use it
 

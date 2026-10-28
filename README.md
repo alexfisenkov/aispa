@@ -421,13 +421,13 @@ At the start of every build AISpa compares its version with this repository and,
 
 If AISpa was installed not by `npx skills` but from a GitHub Release (every 0.x version was), it updates itself: at the start of a build it says "a new version is out", and after the report, when you say "обнови AISpa" (update AISpa), it shows what will change and installs the new version only after your "install". It can be rolled back the same way.
 
-The check is one to three requests to GitHub per build, sending no data at all; without internet it stays silent. To turn it off: the environment variable `AISPA_NO_UPDATE_CHECK=1`.
+The check is a couple of short requests to GitHub at the start and at the end of a build, sending no data at all; without internet it stays silent. To turn it off: the environment variable `AISPA_NO_UPDATE_CHECK=1`.
 
 ### If you have AISpa 0.x
 
-Nothing to do. The next time you run `/aispa`, the old version offers the update itself — choose "Установить обновление" (install the update). The agent moves to the new version in the same session and starts the build you asked for; later updates arrive the same way. The previous version stays beside it in a hidden `.aispa-backup-…` folder, so the agent can roll the update back if you ask.
+Nothing to do. The next time you run `/aispa`, the old version offers the update itself — choose "Установить обновление" (install the update). The agent moves to the new version in the same session and starts the build you asked for; later updates arrive the same way. The previous version stays beside it in a hidden `.aispa-backup-…/package` folder — together with anything you had edited in the skill by hand; the agent names that folder in one line and rolls the update back if you ask, in a later session too.
 
-An unfinished build of the old version (an `.aispa/` folder in the project) is not continued by the new one: AISpa says so in one line and starts the build again. It never touches `.aispa/`.
+An unfinished build of the old version is not lost: the old version kept its own copy inside the build (`.aispa/runs/…/runtime/`), and on "continue" the agent finishes the build with it. If you come with a new task instead, AISpa asks once: finish the earlier build or start a new one. Finished 0.x builds simply stay in the history. The new version never touches `.aispa/`.
 
 If the old version refused to update (for example, the skill folder is inside a git repository) or does not offer an update at all, install the new one with one command (Node.js 22 or newer):
 
@@ -435,7 +435,12 @@ If the old version refused to update (for example, the skill folder is inside a 
 npx skills add alexfisenkov/aispa --skill aispa -g -y -a claude-code codex
 ```
 
-It replaces the folder `~/.claude/skills/aispa` whole: if you edited files there by hand, copy them first. If Codex then shows AISpa twice, delete the old folder `~/.codex/skills/aispa`.
+It replaces the folder `~/.claude/skills/aispa` whole: if you edited files there by hand, copy them first. After installing, remove the old copies, or the agent sees AISpa twice:
+
+- `~/.codex/skills/aispa` — Codex reads it as well as the new `~/.agents/skills/aispa`;
+- a 0.x copy committed into a project (`.claude/skills/aispa` or `.agents/skills/aispa` in the project folder) — remove it from the project in a commit of its own, if nobody needs it any more.
+
+AISpa reminds you at the start of a build with the line "рядом лежит ещё одна AISpa" (another AISpa lies beside this one) and removes such a copy only on your word.
 
 ---
 
@@ -509,7 +514,12 @@ Four rules; break one and updates stop for everyone who installed from a Release
 - **A published Release is never re-uploaded.** A mistake means a new version with a new number.
 - **Never delete or rename `skills/aispa/tools/aispa.py` and `skills/aispa/tools/aispa_core/`:** Release copies update through them, and the 0.x installers load them from the tag's commit. The tests check this.
 
-The `v1.0.0` Release was published without files. It does not stop 0.x from updating (the newer one is taken), but the old `install.py` and the `releases/latest/download/install.py` link stumble on it until it is marked pre-release or the Release itself is removed (the tag can stay).
+**Once, together with the `v1.0.1` Release:** the `v1.0.0` Release was published without files. It does not stop 0.x from updating (the newer one is taken), and from 1.0.1 on `install.py` skips Releases without files, so the `releases/latest/download/install.py` link works as soon as `v1.0.1` is Latest. The old `install.py` of `v0.4.0`, if someone kept a copy, stumbles on `v1.0.0` — so mark it as a pre-release:
+
+```bash
+gh release edit v1.0.0 --prerelease --latest=false
+curl -sIL https://github.com/alexfisenkov/aispa/releases/latest/download/install.py | grep -i '^location' | tail -1   # must point at v1.0.1
+```
 
 ## License
 

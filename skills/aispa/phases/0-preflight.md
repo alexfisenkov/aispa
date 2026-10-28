@@ -7,16 +7,26 @@ Configure the repo, pick the project memory, raise the instruments. Decide which
 | `state.js` with `finishedAt: null`, `updatedAt` under five minutes old **and** the server in `.aispa-work/serve.pid` answering | **the run is going on in another window** | nothing — say so in one line and ask which window carries on |
 | `state.js` with `finishedAt: null` | **resume** | read `phases/0-resume.md` and follow it instead of this file |
 | `state.js` with `finishedAt` set | **new feature in a configured repo** | everything below; `init` archives the finished run's state into its own directory |
-| no `.aispa-work/state.js`, but a `.aispa/` folder | **a run of AISpa 0.x** | one honest line, then a new run — below |
+| no `.aispa-work/state.js`, but a `.aispa/` folder | **AISpa 0.x was here** | `legacy-run` decides — below |
 | no `.aispa-work/state.js` | **new run** | everything below, in order |
 
-**A run of AISpa 0.x** (`.aispa/`, often with `.aispa/active.json`) was made by another engine; this version cannot continue it. Say so before the start choices, in one line, and offer to start over: «В проекте есть незаконченный прогон старой AISpa 0.x (`.aispa/`). Эта версия его не продолжает — начну сборку заново; папку не трогаю.» — plus, when the call carried no brief (a bare `/aispa`, «продолжи»), «Что строим? Можно тем же текстом, что в прошлый раз». Then everything below, as a new run. `.aispa/` is never moved, edited or deleted; the brief of the old run is used only if the user asks for it, read from there and treated as their words. A `AISPA_CONTEXT_BEGIN_V1` block in `AGENTS.md` or `CLAUDE.md` is that version's too: the file counts as the user's own (`phases/0-memory.md`).
+**AISpa 0.x was here.** `.aispa/` is the folder of the old engine; ask it what is there — read-only, `<skillDir>` being the folder this `SKILL.md` was read from:
+
+```bash
+python3 "<skillDir>/tools/aispa.py" legacy-run
+```
+
+- **`finished: true`** — the old run was handed over or cancelled. Nothing to say about it: a new run, everything below.
+- **`finished` false or null, with `skill` and `cli` set** — an unfinished build of 0.x. 0.x pinned a full copy of itself into the run (`.aispa/runs/<run>/runtime/`), and that copy finishes it. A call with no brief — a bare `/aispa`, «продолжи», «доделай» — means carry on: one line, «Доделываю прежнюю сборку «<title>» той версией AISpa, на которой она начата», then read the file at `skill` whole and follow it instead of this one, giving every command of the run through `python3 <cli>`; its own update check answers `pinned_runtime` and stays quiet. A call that brings a new brief gets one question first, and its answer awaited: «В проекте есть незаконченная сборка «<title>» (этап <stage>) прежней версии AISpa» — «Доделать её» / «Начать новую». «Начать новую» → a new run here, everything below; the old one stays as it is and is never offered again, since from now on `.aispa-work/` exists. With `finished` null, say «сборка» rather than «незаконченная сборка».
+- **No `skill`** (or no python to ask with) — the old run cannot be carried on. One line, «В проекте есть папка старой AISpa 0.x (`.aispa/`) — её не трогаю», then a new run.
+
+`.aispa/` is never moved, edited or deleted by this version; the brief of an old run is used only if the user asks for it, read from there and treated as their words. A `AISPA_CONTEXT_BEGIN_V1` block in `AGENTS.md` or `CLAUDE.md` is that version's too: the file counts as the user's own (`phases/0-memory.md`).
 
 The first case needs both marks: two sessions writing one `state.js` overwrite each other, and the first to finish freezes the other's dashboard. One mark alone is an ordinary interruption — a resume.
 
 **«Доделай ещё вот это» for a flight that already landed**, continuing it rather than starting a new one: the new brief is a new dated file in the same run directory (`phases/1-manifest.md`), and `python3 .aispa-work/ap.py reopen` puts the `--wip` back and reopens the stages from Требования. Phases 1–8 then run for the new brief: its requirements are appended to the manifest with the next free numbers, the spec is amended, new tickets are numbered after the last one — landed tickets stay landed. §5 below runs for it too: small fixes may have landed between the two briefs.
 
-**Nothing here is a question for the user** — except the two start choices — the mode, then the depth (`phases/0-modes.md`) — each only when the call named none. Where files live is a process decision.
+**Nothing here is a question for the user** — except the two start choices — the mode, then the depth (`phases/0-modes.md`) — each only when the call named none, and the one about an unfinished 0.x build above. Where files live is a process decision.
 
 ## 1. Look before writing
 
