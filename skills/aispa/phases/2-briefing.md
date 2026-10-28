@@ -48,7 +48,7 @@ In priority order, only what is actually unresolved for this brief:
 1. **Blocking externals** — payment, hosting, domain, third-party accounts, data to import.
 2. **What the adversarial pass found**, where it ran — the only questions that can change *what* gets built.
 3. **Implicit requirements** (`R##i`) — «заявки будут падать в таблицу — тебе нужен ещё экран, чтобы их смотреть, или таблицы хватит?»
-4. **Depth only the user can settle** — «клиент отменил через час — деньги возвращаем сами или мастер решает?» At strict, only clarifying what they already said.
+4. **Depth only the user can settle** — «клиент отменил через час — деньги возвращаем сами или мастер решает?» At strict («Быстро»), only clarifying what they already said.
 5. **Untestable wishes** — «красиво», «удобно»: cheapest turned checkable by asking what it should be **like** (below).
 6. **Contradictions inside the brief** — quote both halves, ask which wins.
 7. **Scope edges** — what is explicitly *not* needed; the answers become `dropped` rows and save whole tickets.

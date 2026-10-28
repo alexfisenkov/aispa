@@ -27,7 +27,7 @@ cp "${TPL%/phases/*}/tools/ap.py" "$A/ap.py"
 
 ```bash
 python3 .aispa-work/ap.py init --slug telegram-repair-bot --title "Телеграм-бот для заявок на ремонт" \
-  --mode important --depth normal --memory-file AGENTS.md --memory-owner aispa \
+  --mode important --depth balanced --memory-file AGENTS.md --memory-owner aispa \
   --skill-dir "<skillDir>" --check-update
 ```
 

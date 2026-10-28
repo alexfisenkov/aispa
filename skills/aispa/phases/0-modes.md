@@ -1,8 +1,8 @@
 # Phase 0 — Mode and depth
 
-Read in Phase 0 with `phases/0-preflight.md`. Both dials are decided once, announced in one block, and only *applied* from then on. The mode comes from what the user typed — or, when they typed none, from **the start choice** below; the depth comes only from their words.
+Read in Phase 0 with `phases/0-preflight.md`. Both dials are decided once, announced in one block, and only *applied* from then on. Each comes from what the user typed — or, when they typed none, from its own **start choice** below: the mode first, the depth second, two separate questions.
 
-Everything after `/aispa` splits into **the mode** (`auto`, `important`, `interview`, `manual`, or an old word for one of them), **the depth** (`strict`, `deep`) and **the brief** — everything else. Bare words, any order, both optional; anything unrecognised is brief. `/aispa auto deep интернет-магазин керамики` — сам по брифу, глубокая проработка.
+Everything after `/aispa` splits into **the mode** (`auto`, `important`, `interview`, `manual`, or an old word for one of them), **the depth** (`fast`, `balanced`, `max`, or an old word for one of them) and **the brief** — everything else. Bare words, both optional; anything unrecognised is brief. The mode and depth words count only as **leading tokens**, before the brief text, the way the README examples write them; in the middle of the brief («сайт-визитка, max 3 страницы», "a fast checkout page") they belong to the brief and set nothing. Two depth words among the leading tokens → ask which, in one line; in doubt, ask the depth question instead of guessing. `/aispa auto max интернет-магазин керамики` — сам по брифу, максимальная проработка.
 
 ## Mode — how much the user is asked
 
@@ -30,45 +30,64 @@ Only on a new run (not a resume, not a run going on in another window) and only 
 
 ```
 Как работаем? Ответь цифрой или словом:
-1. Сам по брифу — ничего не спрашиваю, решения за тебя перечислю в отчёте.
+1. Сам по брифу — по брифу ничего не спрашиваю, решения за тебя перечислю в отчёте.
 2. Только важное — спрошу только то, что в брифе не определено и меняет результат.
 3. Интервью — разберу бриф вопросами до конца, дальше соберу сам.
 4. Ручной — как интервью, плюс согласуешь спецификацию и список задач.
 ```
 
-The answer is mapped like a word in the call — a digit, a label, an old word; here the bare label is enough («интервью», «ручной»), while in the call it takes the longer trigger, since a brief may well say «интервью» or «ручной ввод». The depth is not part of this question; a depth word in the answer («только важное, но проработай глубоко») is taken as well.
+The answer is mapped like a word in the call — a digit, a label, an old word; here the bare label is enough («интервью», «ручной»), while in the call it takes the longer trigger, since a brief may well say «интервью» or «ручной ввод». The depth is a separate question (next section); a depth word in this answer («только важное, но максимум») is taken as its answer, and then the depth is not asked.
 
 ## Depth — how much is worked out for the user
 
-| Depth — пользователю | Triggers | Deepening a requirement (`R##.n`) | New capabilities (`A##`) |
-|---|---|---|---|
-| **strict** — «строго по брифу» | `strict`, «строго по брифу», «только то, что сказал», «ничего не добавляй», "strictly as written" | only what the requirement cannot work without | **not allowed** |
-| **normal** — «обычная» **(default)** | nothing said | by judgement, where it plainly helps | allowed, with a parent, within proportion |
-| **deep** — «глубоко» | `deep`, «глубоко», «проработай глубоко», «продумай за меня», "go deep", "think it through" | every dimension of every requirement | encouraged, same limits |
+The user sees three levels: **Быстро / Сбалансированно / Максимум** (English panel: Fast / Balanced / Maximum). Inside `state.js` they are stored as `strict` / `normal` / `deep` — the older names, so runs saved earlier and the dashboard keep reading the same value. `ap.py init --depth` and `ap.py set depth=` accept the new words (`fast`, `balanced`, `max`), the stored ones (`strict`, `normal`, `deep`) and the Russian ones, and write the stored name. In the rest of the skill the stored names are used for the code; the user is always told the new words.
 
-- `strict` does not mean careless: errors and empty states are still handled; what goes is anything not asked for.
+| Stored · user sees | Triggers | Deepening a requirement (`R##.n`) | New capabilities (`A##`) |
+|---|---|---|---|
+| `strict` · **«Быстро»** | `fast`, «быстро, только по брифу», «только то, что сказал», «ничего не добавляй»; old: `strict`, «строго по брифу», "strictly as written" | only what the requirement cannot work without | **not allowed** |
+| `normal` · **«Сбалансированно»** **(default)** | `balanced`, «сбалансированная проработка»; old: `normal`, «обычная»; also the fallback when nothing is said | by judgement, where it plainly helps | allowed, with a parent, within proportion |
+| `deep` · **«Максимум»** | `max`, `maximum`, «проработка по максимуму», «проработай по максимуму», «продумай за меня», "go deep", "think it through"; old: `deep`, «глубоко», «проработай глубоко» | every dimension of every requirement | encouraged, same limits |
+
+In the call a bare «быстро» or «максимум» may belong to the brief, so there it takes the longer trigger, as with the modes; in the answer to the depth question the bare label is enough.
+
+- **The levels change only the elaboration beyond the brief** — not the gates. The manifest gates, the ticket reviews and the blind acceptance run at every depth; the user is told so in the question, so «Быстро» is never read as «без проверок».
+- `strict` («Быстро») does not mean careless: wrong input and failures are still handled where the requirement plainly breaks without them; what goes is anything not asked for.
 - `deep` never lifts the attachment rules — every `A##` names its parent, the proportion holds.
 - **The adversarial pass** (`phases/2-adversarial.md`) runs at `deep` in every mode, and in `interview` and `manual` at every depth.
-- Changeable mid-run («поменьше отсебятины», «продумай глубже») — from the next phase, `ap.py set depth=…`; written spec sections are not retroactively trimmed unless asked.
+- Changeable mid-run («поменьше отсебятины», «давай быстрее», «продумай глубже», «сбалансированно», «максимум») — from the next phase, `ap.py set depth=…`; written spec sections are not retroactively trimmed unless asked.
 
 The rules for each level live in `phases/3-spec.md`.
+
+### The depth start choice
+
+Only on a new run, only when the call named no depth, and **after the mode is settled**. It is asked in every mode, `auto` included: «ничего не спрашивай» and `auto` mean no questions about the brief, not this one choice made before the run starts (a call that names the depth, e.g. `/aispa auto max …`, skips it) — the second question, never merged with the first. Same form: the host's native choice tool if it has one, otherwise three numbered options; then **wait for the answer** — no `init`, no dashboard, no manifest until it comes. The prices are in words and must stay true to what the levels do (nothing about «до PASS» or «без проверок» — see the bullet above).
+
+```
+Сколько прорабатывать сверх брифа? Ответь цифрой или словом:
+1. Быстро — дешевле и быстрее: делаю только то, что ты сказал, и без чего это не заработает. Своих идей не добавляю.
+2. Сбалансированно — по уму: закрою пробелы, которые явно испортят результат, и могу предложить своё в меру. Средняя цена и время.
+3. Максимум — дольше и дороже: каждое требование прогоняю по полному списку (первый запуск, пустой экран, ошибки, обрывы связи, кто что может делать, что будет дальше) и отдельно ищу, где идея может не сработать.
+Проверки и приёмка идут при любом выборе — меняется только объём проработки.
+```
+
+Mapping, like a word in the call: a digit, a label, an old word (`строго`, `обычная`, `глубоко`). **An answer that names none of the three** — «как хочешь», «не знаю», silence after a nudge, something unrelated — resolves to **Сбалансированно**. If the call named a depth, or the answer to the mode question already carried one, this question is skipped.
 
 ## The opening block
 
 Once, before Phase 1, together with the dashboard and the memory file. **A hint, not a question** — say it and go; in a chat there is no `--help`, so this is the only place the user learns the dials can be turned again.
 
 ```
-Режим: только важное · глубина: обычная — спрошу только то, что в брифе не определено, дальше соберу сам.
+Режим: только важное · глубина: сбалансированно — спрошу только то, что в брифе не определено, дальше соберу сам.
 Дашборд открыл — обновляется сам: http://localhost:PORT/dashboard.html
 Память проекта — AGENTS.md (+ CLAUDE.md со ссылкой).
 ↑ Вышла версия AISpa 1.1.0 (у тебя 1.0.0): npx skills update aispa -g   ← только если init её напечатал
 
 Можно переключить в любой момент, просто скажи:
-• «сам по брифу» — не спрашиваю вообще ничего
+• «сам по брифу» — по брифу не спрашиваю ничего
 • «только важное» — спрашиваю только то, что меняет результат
 • «интервью» — разберу бриф вопросами до конца, дальше соберу сам
 • «ручной» — то же плюс согласуешь спецификацию и список задач
-• «строго по брифу» / «глубоко» — меньше или больше проработки сверх сказанного
+• «быстро» / «сбалансированно» / «максимум» — меньше или больше проработки сверх сказанного (в списке только два уровня, которые сейчас не включены)
 ```
 
-The first line names the mode and depth actually set, with the words above; the switch list leaves out the mode already on. No server → the dashboard line names the file: «Дашборд открыл — `.aispa-work/dashboard.html`, обновляется сам.» Never repeated later; a mid-run switch gets one line: «Понял, дальше ручной режим».
+The first line names the mode and depth actually set, with the words above; the switch list leaves out the mode already on, and its depth line names only the two levels not on (at Сбалансированно — «быстро» / «максимум»; at Быстро — «сбалансированно» / «максимум»; at Максимум — «быстро» / «сбалансированно»). No server → the dashboard line names the file: «Дашборд открыл — `.aispa-work/dashboard.html`, обновляется сам.» Never repeated later; a mid-run switch gets one line: «Понял, дальше ручной режим».

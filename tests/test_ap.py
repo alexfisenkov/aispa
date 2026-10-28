@@ -166,6 +166,26 @@ class Run(unittest.TestCase):
         self.assertNotEqual(self.ap("set", "depth=bottomless")[0], 0)
         self.assertEqual(self.state()["depth"], "deep")
 
+    def test_init_understands_the_new_and_old_depth_words(self):
+        for given, kept in (("fast", "strict"), ("balanced", "normal"), ("max", "deep"),
+                            ("strict", "strict"), ("normal", "normal"), ("deep", "deep"),
+                            ("Быстро", "strict"), ("Сбалансированно", "normal"),
+                            ("Максимум", "deep"), ("MAX", "deep"),
+                            ("сбалансированная", "normal"), ("максимальная", "deep"),
+                            ("быстрая", "strict"), ("по максимуму", "deep")):
+            code, out = self.init_with("--depth", given)
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.state()["depth"], kept)
+
+    def test_set_depth_takes_the_new_words(self):
+        self.init()
+        for given, kept in (("fast", "strict"), ("max", "deep"), ("balanced", "normal"),
+                            ("быстро", "strict"), ("максимум", "deep")):
+            self.assertEqual(self.ap("set", "depth=" + given)[0], 0)
+            self.assertEqual(self.state()["depth"], kept)
+        self.assertNotEqual(self.ap("set", "depth=bottomless")[0], 0)
+        self.assertEqual(self.state()["depth"], "deep")
+
     def test_init_records_the_skill_version(self):
         self.init()
         want = re.search(r'^\s*version:\s*"([^"]+)"', read(os.path.join(SKILL, "SKILL.md")), re.M).group(1)

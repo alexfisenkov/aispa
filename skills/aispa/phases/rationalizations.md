@@ -13,8 +13,8 @@
 | «Новое пожелание посреди сборки — оформлю как `D##`» | `D##` — то, что доказала сборка. Слова пользователя — всегда `G##`, плюс строка в «Дополнения» и вслух: беру отдельной задачей, откладываю или в отчёт. |
 | «Сделаю заглушку, уточнит потом» | Оплата, хостинг, аккаунты решаются в брифинге, в первом раунде, до сборки. |
 | «Исполнитель не смог — доделаю сам» / «тут две строки» | Твой контекст тратится один раз и не возвращается. Дозапрос ему или свежий контекст — не твоя клавиатура. |
-| «Бриф краткий — значит, и спецификация краткая» | Бриф — силуэт. Пустые состояния, ошибки и обрывы на обычной и глубокой проработке продумываешь ты. |
-| «Придумал полезную фичу, добавлю» | Углубление заказанного — да. Новая возможность — только с родителем, в пропорции и в отчёт; на `strict` — нельзя. |
+| «Бриф краткий — значит, и спецификация краткая» | Бриф — силуэт. Пустые состояния, ошибки и обрывы на «Сбалансированно» и «Максимум» продумываешь ты. |
+| «Придумал полезную фичу, добавлю» | Углубление заказанного — да. Новая возможность — только с родителем, в пропорции и в отчёт; на `strict` («Быстро») — нельзя. |
 | «Сам по брифу — значит, можно и задеплоить» | Этот режим снимает вопросы о продукте, а не право на необратимое. |
 | «В полном автомате можно додумать за пользователя всё» | Решения — да, все в ASSUMPTIONS. Факты о нём — нет: заглушка и строка в отчёте. |
 | «Покрытие проверю сам — я же спецификацию и писал» | Тот, кто писал, не видит, чего не написал. На G2 и G4 читает субагент, по брифу, без спеки и манифеста. |
@@ -33,7 +33,7 @@
 - `ap.py check-plan` left with `!` lines — a ticket tracing to nothing, a requirement in no ticket.
 - Spec or tickets that exist only in the dialogue.
 - The dashboard disagreeing with the chat — a stage still active after you moved on, a ticket running while the screen says it has not started, `state.js` edited by hand.
-- The announced depth and the spec diverge: a bare restatement of the brief at normal or deep, any `A##` at strict.
+- The announced depth and the spec diverge: a bare restatement of the brief at normal or deep («Сбалансированно», «Максимум»), any `A##` at strict («Быстро»).
 - G2 or G4 judged by you, or a blind checker / coverage checker / memory agent handed the spec, the manifest or the tickets — or left free to open `.aispa-work/`.
 - The report composed from memory instead of from the files and the checkers' returns.
 - A T2+ run that ended with no ADR.

@@ -20,7 +20,7 @@
 
 **T0 is the default for a list of edits in existing code** — eighteen fixes across a codebase are usually under 3K lines, however many files they touch. The executor works through them in one context, like a single dialogue, and the whole-branch review checks the result.
 
-A `deep` spec for a landing page is a long document about one page: still T0. State the volume, tier and count in one line to the user; `ap.py set tier=T2`.
+A `deep` («Максимум») spec for a landing page is a long document about one page: still T0. State the volume, tier and count in one line to the user; `ap.py set tier=T2`.
 
 ## How to cut
 

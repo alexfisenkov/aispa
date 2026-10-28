@@ -216,8 +216,6 @@
   .tbig.dim{font-family:'Onest',-apple-system,sans-serif;font-size:18px;font-weight:600;color:var(--mut);letter-spacing:0}
   .tnote{font-size:12.5px;line-height:1.5;color:var(--quiet);max-width:62ch;text-wrap:pretty}
   .tnote.paused{font-weight:600;color:var(--fix-tx)}
-  /* Предупреждение о тишине — жёлтая плашка 0.5. */
-  .notice{margin-top:16px;padding:12px 15px;border-radius:12px;border:1px solid var(--fix-tx);color:var(--fix-tx);background:var(--fix-soft);font-size:13px;line-height:1.5}
   /* Требования: заголовок слева, фильтры справа, как в 0.5. */
   .reqh{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;margin-bottom:12px}
   .reqh>div:first-child{min-width:0}
@@ -603,7 +601,7 @@ const I18N = {
     stages:{preflight:"Подготовка",manifest:"Требования",briefing:"Брифинг",spec:"Спецификация",
       plan:"План",build:"Разработка",review:"Код-ревью",final:"Приёмка"},
     modes:{auto:"Сам по брифу",important:"Только важное",interview:"Интервью",manual:"Ручной",full:"Сам по брифу",semi:"Только важное"},
-    depths:{strict:"Строго по брифу",normal:"Обычная",deep:"Глубоко"},
+    depths:{strict:"Быстро",normal:"Сбалансированно",deep:"Максимум",fast:"Быстро",balanced:"Сбалансированно",max:"Максимум"},
     verPre:"Предварительная версия",verAlpha:"Альфа",
     src:{live:"Живые данные · локальный сервер",file:"Данные из файла · без сервера",lost:"Нет связи",snap:"Последний снимок"},
     themeSystem:"Система",
@@ -619,7 +617,6 @@ const I18N = {
       early:"Оценка появится на этапе разработки, после первой сданной задачи.",
       waiting:"Сборка ждёт ответа: сколько он займёт, неизвестно, поэтому оценки нет.",
       failed:"Этап не прошёл — оценки нет."},
-    silent:t=>`Новых событий нет уже ${t}.`,silentLink:" Соединение работает; текущий результат агента ещё не записан.",
     reqHead:"Требования",
     remaining:"Остатки",remainingNote:"Остаются обязательствами и сохраняются в учёте.",
     rBlock:"Блокеры",rOut:"Не вошло",noRem:"Остатков нет.",remLater:"Итоги ещё не подведены.",
@@ -736,7 +733,7 @@ const I18N = {
     stages:{preflight:"Preflight",manifest:"Requirements",briefing:"Briefing",spec:"Spec",
       plan:"Plan",build:"Development",review:"Code review",final:"Acceptance"},
     modes:{auto:"On its own from the brief",important:"Only what matters",interview:"Interview",manual:"Manual",full:"On its own from the brief",semi:"Only what matters"},
-    depths:{strict:"Strictly as written",normal:"Normal",deep:"Deep"},
+    depths:{strict:"Fast",normal:"Balanced",deep:"Maximum",fast:"Fast",balanced:"Balanced",max:"Maximum"},
     verPre:"Prerelease",verAlpha:"Alpha",
     src:{live:"Live data · local server",file:"Data from file · no server",lost:"Disconnected",snap:"Last snapshot"},
     themeSystem:"System",
@@ -752,7 +749,6 @@ const I18N = {
       early:"An estimate appears during development, after the first finished task.",
       waiting:"The build is waiting for an answer: how long that takes is unknown, so there is no estimate.",
       failed:"The stage failed — no estimate."},
-    silent:t=>`No new journal events for ${t}.`,silentLink:" The connection works; the agent's current result has not been recorded yet.",
     reqHead:"Requirements",
     remaining:"Remaining",remainingNote:"They remain commitments and are kept on record.",
     rBlock:"Blockers",rOut:"Not included",noRem:"Nothing remaining.",remLater:"Not summed up yet.",
@@ -1011,13 +1007,6 @@ function tick(){
   document.querySelectorAll('[data-ago]').forEach(el => {
     el.textContent = agoText(el.dataset.ago);
     el.classList.toggle('stale', silentFor(el.dataset.ago) != null);
-  });
-  // Жёлтая плашка «Новых событий нет уже N» — по тому же порогу молчания.
-  const quiet = silentFor((window.STATE || {}).updatedAt);
-  document.querySelectorAll('[data-silent]').forEach(el => {
-    el.hidden = quiet == null;
-    if (quiet != null) el.textContent = CUR.silent(fmtDur(Math.floor(quiet / 60000)))
-      + (SERVED && misses === 0 ? CUR.silentLink : '');
   });
   document.querySelectorAll('[data-ago-short]').forEach(el => {
     el.textContent = agoShort(el.dataset.agoShort);
@@ -1352,7 +1341,7 @@ function render(lang){
   // задач читается как прогресс всегда. Длительность — цифрой справа.
   // Вид — «Задачи по волнам» из AISpa 0.5. Рисуется только то, что записал ap.py:
   // статус, требования, зона, зависимости, ревью, модель, ремонты, тесты, коммит.
-  const buildHead = `<h3 class="bh">${L.build}</h3><p class="bsub">${L.buildSub}</p>${fin ? '' : '<div class="notice" data-silent role="status" hidden></div>'}`;
+  const buildHead = `<h3 class="bh">${L.build}</h3><p class="bsub">${L.buildSub}</p>`;
   let buildCard = '';
   if (T.length) {
     // Была ли у задачи отдельная проверка: событие ленты, текущий статус или ремонт.

@@ -3,7 +3,7 @@
 
 Агент не правит .aispa-work/state.js руками. Каждое событие прогона — один вызов:
 
-    python3 .aispa-work/ap.py init --slug S --title "…" --mode important --depth normal \\
+    python3 .aispa-work/ap.py init --slug S --title "…" --mode important --depth balanced \\
                                   --memory-file AGENTS.md --memory-owner aispa --skill-dir /abs
     python3 .aispa-work/ap.py stage spec                 # открыть этап (прошлые закроются сами)
     python3 .aispa-work/ap.py stage briefing skip --note "сам по брифу — самобрифинг"
@@ -79,7 +79,17 @@ MOVES_ON = {"stage", "ticket", "tickets", "check-plan", "coverage", "blind", "te
 # Режимы — имена AISpa 0.5 плюс ручной; старые слова Autopilot понимаются и хранятся новыми.
 MODES = ("auto", "important", "interview", "manual")
 OLD_MODES = {"full": "auto", "semi": "important"}
+# Глубина хранится как strict | normal | deep (так читают старые прогоны и панель); пользователю —
+# «Быстро / Сбалансированно / Максимум». Новые и старые слова, русские в том числе, сводятся к этим трём.
 DEPTHS = ("strict", "normal", "deep")
+DEPTH_WORDS = {
+    "fast": "strict", "быстро": "strict", "быстрая": "strict", "строго": "strict", "строго по брифу": "strict",
+    "balanced": "normal", "сбалансированно": "normal", "сбалансированная": "normal",
+    "сбалансированный": "normal", "обычная": "normal", "обычно": "normal",
+    "max": "deep", "maximum": "deep", "максимум": "deep", "максимальная": "deep", "максимально": "deep",
+    "по максимуму": "deep", "проработка по максимуму": "deep",
+    "глубоко": "deep", "глубокая": "deep", "глубокий": "deep",
+}
 ORDER = ["preflight", "manifest", "briefing", "spec", "plan", "build", "review", "final"]
 # Этап, чей результат лежит на диске, пройден — даже если его забыли отметить.
 ARTIFACT = {"manifest": "manifest.md", "spec": "spec.md", "plan": "tickets/*.md"}
@@ -181,9 +191,11 @@ def mode_of(v):
 
 
 def depth_of(v):
+    """strict|normal|deep; fast → strict, balanced → normal, max → deep (и русские слова)."""
     d = str(v or "").strip().lower()
+    d = DEPTH_WORDS.get(d, d)
     if d not in DEPTHS:
-        die("глубина: %s, а не «%s»" % (" | ".join(DEPTHS), v))
+        die("глубина: fast | balanced | max (хранится как %s), а не «%s»" % (" | ".join(DEPTHS), v))
     return d
 
 

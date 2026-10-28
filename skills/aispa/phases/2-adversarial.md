@@ -1,6 +1,6 @@
 # The adversarial pass
 
-Read only when it runs: mode `interview` or `manual` at any depth, or depth `deep` in any mode. Run it against the brief (`<дата>-brief.md`) and `manifest.md` **before the first question**.
+Read only when it runs: mode `interview` or `manual` at any depth, or depth `deep` («Максимум») in any mode. Run it against the brief (`<дата>-brief.md`) and `manifest.md` **before the first question**.
 
 Everything else in the briefing asks what the brief left undefined. This asks **where the idea itself comes apart** — a brief can be complete and consistent and still describe a thing that will not work, and every later check measures the build against what was asked for, so nothing downstream will notice.
 

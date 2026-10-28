@@ -12,7 +12,7 @@
 
 The user describes what happens when everything goes right. They do not describe the empty list, the dropped network, the double submit, the first launch before any data exists — they do not have those answers, and they are not supposed to. **Working them out is the most valuable thing this phase does**; a spec that restates the brief in tidier words has produced nothing, and the gaps get filled later by whichever executor hits them, differently each time.
 
-How far to take it is the user's setting:
+How far to take it is the user's setting — stored as `strict` / `normal` / `deep`, said to the user as «Быстро» / «Сбалансированно» / «Максимум»:
 
 | Depth | The depth pass | `A##` new capabilities |
 |---|---|---|

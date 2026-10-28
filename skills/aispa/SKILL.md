@@ -2,7 +2,7 @@
 name: aispa
 description: Builds an app, site, bot, or feature end-to-end from a dictated idea — requirements, briefing, spec, tickets, subagents, review, acceptance — with a live dashboard, for users who expect a finished result without reviewing specs or code. Starts only on /aispa; a bare /aispa resumes an interrupted run.
 disable-model-invocation: true
-argument-hint: "[auto|important|interview|manual] [strict|deep] что нужно построить или путь к brief.md"
+argument-hint: "[auto|important|interview|manual] [fast|balanced|max] что нужно построить или путь к brief.md"
 metadata:
   version: "1.0.0"
 ---
@@ -21,7 +21,7 @@ This file is the orchestrator: order, gates, the rules that never lose. Each pha
 
 | Phase | Read | Produces |
 |---|---|---|
-| 0 Preflight | `phases/0-modes.md`, `phases/0-preflight.md`, then `0-memory.md`, `0-instruments.md` | mode chosen and announced, repo configured, dashboard open, `carried.md` after a landed run |
+| 0 Preflight | `phases/0-modes.md`, `phases/0-preflight.md`, then `0-memory.md`, `0-instruments.md` | mode and depth chosen (two separate start questions when not named in the call) and announced, repo configured, dashboard open, `carried.md` after a landed run |
 | 1 Manifest | `phases/1-manifest.md` | `<дата>-brief.md`, `manifest.md` |
 | 2 Briefing | `phases/2-briefing.md` (+ `2-adversarial.md` when it runs) | answers recorded into the manifest |
 | 3 Spec | `phases/3-spec.md` | `notes.md` in existing code, `spec.md`, the boundaries in `interfaces.md` |
@@ -49,9 +49,9 @@ Phase names here are English and never shown. In the chat, on the dashboard and 
 
 ## The flight
 
-Two dials, decided once in Phase 0 (`phases/0-modes.md`): **the mode** — `auto` «сам по брифу», `important` «только важное», `interview` «интервью», `manual` «ручной»; **the depth** — `strict` «строго по брифу», `normal` «обычная» (default), `deep` «глубоко». The old words are understood and stored under the new names: `full`, «полный автомат» → `auto`; `semi`, «полуавтомат» → `important`.
+Two dials, decided once in Phase 0 (`phases/0-modes.md`): **the mode** — `auto` «сам по брифу», `important` «только важное», `interview` «интервью», `manual` «ручной»; **the depth** — «Быстро» (`fast`), «Сбалансированно» (`balanced`, default), «Максимум» (`max`); old mode words are understood and stored under the new names: `full`, «полный автомат» → `auto`; `semi`, «полуавтомат» → `important`. For the depth it is the other way round: the user is told Быстро / Сбалансированно / Максимум, and every depth word, old or new, is stored as `strict` / `normal` / `deep` (`fast`, `strict`, «быстро», «строго по брифу» → `strict`; `balanced`, `normal`, «обычная» → `normal`; `max`, `deep`, «глубоко» → `deep`).
 
-**A mode not named in the call is asked once, before `init`** — one choice of four, the host's native choice tool or four numbered options (`phases/0-modes.md`), then wait for the answer. A mode named in the call is never asked again; an answer that names none of the four is `important`. The depth is never asked: it comes from the user's words, `normal` when they say nothing.
+**A mode not named in the call is asked once, before `init`** — one choice of four, the host's native choice tool or four numbered options (`phases/0-modes.md`), then wait for the answer. A mode named in the call is never asked again; an answer that names none of the four is `important`. **A depth not named in the call is asked once, as a second, separate question** after the mode — three numbered options with the price in words, wait for the answer before `init` (`phases/0-modes.md`, «The depth start choice»). A depth named in the call, or in the answer to the mode question, is never asked again; an answer that names none of the three is «Сбалансированно». The levels change how much is worked out beyond the brief, not whether the gates and reviews run.
 
 | Phase | auto | important | interview | manual |
 |---|---|---|---|---|

@@ -102,7 +102,7 @@ AISpa starts **only on this command**. It never starts by itself, even if you wr
 ```
 
 ```
-/aispa deep docs/idea.md but no card payments
+/aispa max docs/idea.md but no card payments
 ```
 
 The agent reads the file and takes its contents as the task; your file stays untouched, and a copy goes into `.aispa-work/` — that copy is what the result is checked against at the end. Words written after the path are added to the same task.
@@ -113,7 +113,7 @@ If you didn't name a mode, the agent first asks one thing — how to work — an
 
 ```
 How do we work? Answer with a number or a word:
-1. On my own from the brief (сам по брифу) — I ask nothing; decisions made for you are listed in the report.
+1. On my own from the brief (сам по брифу) — I ask nothing about the brief; decisions made for you are listed in the report.
 2. Only what matters (только важное) — I ask only what the brief leaves undecided and what changes the result.
 3. Interview (интервью) — I go through the brief with questions to the end, then build it myself.
 4. Manual (ручной) — like interview, plus you approve the spec and the task list.
@@ -121,18 +121,30 @@ How do we work? Answer with a number or a word:
 
 Named the mode in the command — no such question. An unclear answer means "only what matters".
 
+Next, if you didn't name a depth, comes a second question — how much to work out beyond what you wrote (details in [Depth](#depth)). The agent asks it in the language of your task:
+
+```
+How much to work out beyond the brief? Answer with a number or a word:
+1. Fast (быстро) — cheaper and quicker: only what you said and what it can't work without. No ideas of my own.
+2. Balanced (сбалансированно) — sensibly: I close the gaps that would clearly spoil the result and may suggest something of my own, in moderation. Middle price and time.
+3. Maximum (максимум) — slower and more expensive: every requirement goes through the full checklist (first run, empty screen, errors, dropped connection, who may do what, what happens next) and I separately look for where the idea might fail.
+Checks and acceptance run whichever you pick — only the amount of elaboration changes.
+```
+
+The question is asked in every mode, `auto` included; naming the depth in the command skips it. An unclear answer means Balanced.
+
 Then the agent tells you which mode it's in and how to switch, and **it opens the dashboard itself** — no commands to remember, no files to look for:
 
 ```
-Mode: only what matters · depth: normal — I'll only ask what the brief leaves undecided, then build the rest myself.
+Mode: only what matters · depth: balanced — I'll only ask what the brief leaves undecided, then build the rest myself.
 Dashboard is open and refreshes itself: http://localhost:52814/dashboard.html
 Project memory — AGENTS.md (+ CLAUDE.md pointing to it).
 
 You can switch at any time, just say:
-• "on my own from the brief" — I ask nothing at all
+• "on my own from the brief" — I ask nothing about the brief
 • "interview me" — I go through the brief with questions to the end, then build it myself
 • "manual" / "approve every step" — the same, plus you approve the spec and the task list
-• "strictly as written" / "go deep" — less or more elaboration beyond what you said
+• "fast" / "maximum" — less or more elaboration beyond what you said
 ```
 
 Questions come in **rounds**: several at once, numbered, each with the answer the agent would pick itself. Agree with all — reply "ok"; disagree with one — "2 — a spreadsheet, the rest ok".
@@ -145,7 +157,7 @@ After `/aispa` you can add how closely you want to be involved. Add nothing — 
 
 | Mode | How to turn it on | What you're asked |
 |---|---|---|
-| **On my own from the brief** (`auto`) | `/aispa auto ...` or "don't ask me anything" | Nothing. At the end — a list of decisions made for you |
+| **On my own from the brief** (`auto`) | `/aispa auto ...` or "don't ask me anything" | Nothing about the brief (only the one start question about depth, if you didn't name it in the command). At the end — a list of decisions made for you |
 | **Only what matters** (`important`) | `/aispa important ...`; also what an unclear answer to the first question means | Only what the brief leaves undecided: usually one or two rounds of questions. If everything is clear — none |
 | **Interview** | `/aispa interview ...`, "interview me", "ask me everything" | Every fork, plus where the idea might not work. Then it builds on its own |
 | **Manual** | `/aispa manual ...` or "approve every step" | Same as interview, then your "ok" on the spec and on the task list |
@@ -166,23 +178,27 @@ The words `auto`, `important`, `interview`, `manual` are written without dashes.
 
 ## Depth
 
-A separate dial, independent of the mode. The mode decides **how much you're asked**; depth decides **how much is thought through for you**.
+A separate dial, independent of the mode. The mode decides **how much you're asked**; depth decides **how much is thought through for you beyond the brief**. Name it in the command, or the agent asks it as a second question right after the mode (three options, each with its price in words).
 
-| Depth | How to turn it on | What the agent does |
-|---|---|---|
-| **Strict** | `/aispa strict ...` or "strictly as written" | Only what you wrote. No features of its own — not even good ones. Errors and empty states are still handled: without them a requirement simply doesn't work |
-| **Normal** *(default)* | nothing to add | Works through the gaps that would clearly spoil the result. It may add things of its own, but each tied to one of your requirements |
-| **Deep** | `/aispa deep ...` or "go deep", "think it through" | Every requirement goes through the full checklist: first run, empty screen, bad input, failure, dropped connection, growth, permissions, consequences |
+| Depth | How to turn it on | What the agent does | Cost |
+|---|---|---|---|
+| **Fast** | `/aispa fast ...` or "fast, only what I wrote" | Only what you wrote, plus whatever the requirement cannot work without (wrong input, failures). No features of its own — not even good ones | Cheaper and faster |
+| **Balanced** *(default)* | `/aispa balanced ...`; also what an unclear answer means | Works through the gaps that would clearly spoil the result. It may add things of its own, but each tied to one of your requirements | Middle |
+| **Maximum** | `/aispa max ...` or "think it through", "go deep" | Every requirement goes through the full checklist: first run, empty screen, bad input, failure, dropped connection, growth, permissions, consequences. Plus a separate pass for where the idea might fail | Slower and more expensive |
+
+The old words still work: `strict` means Fast, `normal` means Balanced, `deep` means Maximum.
 
 ```
-/aispa strict a feedback form, exactly as I described
+/aispa fast a feedback form, exactly as I described
 
-/aispa deep an online ceramics store
+/aispa max an online ceramics store
 
-/aispa auto deep a marketplace for craftspeople
+/aispa auto max a marketplace for craftspeople
 ```
 
 Word order doesn't matter, both settings are optional. Like the mode, depth can be changed along the way: "less improvising" or "think it through more".
+
+**Depth changes only how much is worked out, not the checks.** The manifest gates, the review of every task and the blind acceptance run at every level — Fast does not skip them.
 
 **One rule holds at every depth:** anything the agent adds on its own is tied to one of your requirements and listed separately in the final report. A feature not tied to anything gets cut.
 
@@ -212,9 +228,9 @@ AISpa's first move is to split your text into **numbered requirements** and writ
 
 In a brief you describe how things work when everything goes well. You don't describe what to show on an empty screen, what happens when the connection drops, what happens if someone presses "send" twice, or what a person sees on the very first run. That's not an oversight — it's just not the level at which people describe a task.
 
-Thinking this through is a large part of AISpa's value, and you set how much of it happens with [depth](#depth). At normal depth the agent closes the gaps that would clearly spoil the result; at deep it runs every requirement through the full checklist. Some things it decides itself (an error message, sensible limits); where the decision really is yours, it turns it into a question.
+Thinking this through is a large part of AISpa's value, and you set how much of it happens with [depth](#depth). At Balanced the agent closes the gaps that would clearly spoil the result; at Maximum it runs every requirement through the full checklist. Some things it decides itself (an error message, sensible limits); where the decision really is yours, it turns it into a question.
 
-At deep depth one requirement from the brief unfolds into several worked-out scenarios — as many as it really has sides. That's the difference between "works in the demo" and "works".
+At Maximum depth one requirement from the brief unfolds into several worked-out scenarios — as many as it really has sides. That's the difference between "works in the demo" and "works".
 
 ---
 
@@ -420,7 +436,7 @@ skills/aispa/
 │   ├── 0-memory.md             choosing the project memory file
 │   ├── 1-manifest.md           brief → requirements, secrets filter
 │   ├── 2-briefing.md           questions in rounds, reference
-│   ├── 2-adversarial.md        where the idea might fail — in interview mode and at deep depth
+│   ├── 2-adversarial.md        where the idea might fail — in interview mode and at Maximum depth
 │   ├── 3-spec.md               the spec and how deep to work it out
 │   ├── 4-plan.md               splitting into tasks by volume, waves, who gets review and which model
 │   ├── 5-subagents.md          executor agents and the contracts between them
