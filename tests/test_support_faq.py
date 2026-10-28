@@ -228,9 +228,9 @@ class SupportFaqTests(unittest.TestCase):
         self.assertEqual((ROOT / "docs/support-faq.md").read_bytes(), rendered["text"].encode("utf-8"),
                          "docs/support-faq.md пересобирается только tools/render_support_faq.py")
 
-    def run_renderer(self, *extra, output, receipt):
+    def run_renderer(self, *extra, output, receipt, package=PACKAGE, version=VERSION):
         renderer = ROOT / "tools/render_support_faq.py"
-        argv = [sys.executable, "-B", str(renderer), "--package", str(PACKAGE), "--version", VERSION,
+        argv = [sys.executable, "-B", str(renderer), "--package", str(package), "--version", version,
                 "--output", str(output), "--receipt", str(receipt), *extra]
         return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", timeout=30)
 
@@ -248,6 +248,63 @@ class SupportFaqTests(unittest.TestCase):
             checked = self.run_renderer("--check", output=written, receipt=receipt)
             self.assertNotEqual(checked.returncode, 0, "Расхождение должно падать, а не молча перезаписываться")
             self.assertEqual(written.read_text(encoding="utf-8"), "правка руками")
+
+    # ── штатная пересборка привязок: --rebind ──
+
+    def rebind_fixture(self, root):
+        """Пакет с двумя привязанными файлами; возвращает путь к канону."""
+        value, canon = self.fixture(root)
+        (root / "SKILL.md").write_text("текст\n", encoding="utf-8")
+        value["source"]["files"].append({"path": "SKILL.md", "sha256": sha((root / "SKILL.md").read_bytes())})
+        canon.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return canon
+
+    def test_rebind_restores_a_stale_canon_after_a_bound_file_changed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "pkg"
+            canon = self.rebind_fixture(root)
+            out, receipt = Path(tmp) / "faq.md", Path(tmp) / "receipt.json"
+            (root / "SKILL.md").write_text("изменённый текст\n", encoding="utf-8")
+            with self.assertRaisesRegex(Invalid, "stale package source: SKILL.md"):
+                support_faq.select(root, version="1.0.0")
+            plain = self.run_renderer(output=out, receipt=receipt, package=root, version="1.0.0")
+            self.assertNotEqual(plain.returncode, 0)
+            self.assertIn("stale package source", plain.stderr)
+            made = self.run_renderer("--rebind", output=out, receipt=receipt, package=root, version="1.0.0")
+            self.assertEqual(made.returncode, 0, made.stderr)
+            files = json.loads(canon.read_bytes())["source"]["files"]
+            self.assertEqual([row["path"] for row in files], ["tools/aispa_core/__init__.py", "SKILL.md"])
+            self.assertEqual(files[1]["sha256"], sha((root / "SKILL.md").read_bytes()))
+            self.assertEqual(len(support_faq.select(root, version="1.0.0")["entries"]), 2)
+            self.assertEqual(self.run_renderer("--check", output=out, receipt=receipt, package=root,
+                                               version="1.0.0").returncode, 0)
+
+    def test_rebind_refuses_a_missing_or_linked_path_and_leaves_the_canon_untouched(self):
+        for kind in ("missing", "link"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "pkg"
+                canon = self.rebind_fixture(root)
+                before = canon.read_bytes()
+                (root / "SKILL.md").unlink()
+                if kind == "link":
+                    (root / "SKILL.md").symlink_to(root / "tools/aispa_core/__init__.py")
+                made = self.run_renderer("--rebind", output=Path(tmp) / "faq.md", receipt=Path(tmp) / "r.json",
+                                         package=root, version="1.0.0")
+                self.assertEqual(made.returncode, 2)
+                self.assertIn("SKILL.md", made.stderr)
+                self.assertEqual(canon.read_bytes(), before)
+                self.assertFalse((Path(tmp) / "faq.md").exists())
+
+    def test_rebind_on_a_fresh_canon_changes_nothing_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "aispa"
+            shutil.copytree(PACKAGE, root, ignore=shutil.ignore_patterns("__pycache__"))
+            canon = root / "references/support-faq.json"
+            before = canon.read_bytes()
+            made = self.run_renderer("--rebind", output=Path(tmp) / "faq.md", receipt=Path(tmp) / "r.json",
+                                     package=root)
+            self.assertEqual(made.returncode, 0, made.stderr)
+            self.assertEqual(canon.read_bytes(), before)
 
     def test_aispa_faq_command_returns_json_for_1_0_0(self):
         result = subprocess.run([sys.executable, "-B", str(PACKAGE / "tools/aispa.py"), "faq", "--version", "1.0.0"],
