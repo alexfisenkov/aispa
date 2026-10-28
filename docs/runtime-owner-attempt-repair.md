@@ -71,10 +71,15 @@ manifest, CAS, отсутствии разрешения, ссылке и оши
 
 | Файл | Источник | Новая копия |
 | --- | --- | --- |
-| `tools/aispa.py` | `7bcfa1146363fcfc85c1c5a7afe684ea249919ac386a1724fb28075d0041a465` | `18373d83315de53a71a3c56b065831c6fe1e1fbe5ef4acaaa681cc7c679eceaf` |
-| `tools/aispa_core/team.py` | `0788ad62d24aafa866a9472aa5e7bb819c7674af1ebf35736225b4a366c247bc` | `1763f4957292946e6b1381584f0d77ef88ef50bc02cfda3d1da3de65ab51b453` |
-| `tools/aispa_core/workflow.py` | `7c53f2f7ca48ccc80962d8123144dd9dd47344ac65142f4950c998982c3b678d` | `0ac372f9676893419a954a98bd61be3cdf7fd570cf14be7154416ce2111e3392` |
+| `tools/aispa.py` | `6f0687a763ebaed6bff88d8c5910a188452e03f635232643ffa9f2884389b440` | `18373d83315de53a71a3c56b065831c6fe1e1fbe5ef4acaaa681cc7c679eceaf` |
+| `tools/aispa_core/team.py` | `443414cf5e20cfc512c59221b10acfa67e4b342953233f4679825ebafbf5b4eb` | `1763f4957292946e6b1381584f0d77ef88ef50bc02cfda3d1da3de65ab51b453` |
+| `tools/aispa_core/workflow.py` | `1626a3976025d1051fc3cf08830eaa881f857acb960e80fb8f0c98df68501a0f` | `0ac372f9676893419a954a98bd61be3cdf7fd570cf14be7154416ce2111e3392` |
 | `tools/aispa_core/owner_task_attempt.py` | `27cf4c2c480b65fb233c7db5dac4296186344b8722faf8bd81558346adba0b9a` | тот же SHA |
+
+Прежние наборы источников (`HISTORICAL_SOURCE_HASHES`) остаются допустимыми
+для уже подготовленных manifest: `aispa.py` `6bbd46c0…`, `7bcfa114…`;
+`team.py` `0788ad62…`; `workflow.py` `0d7606ce…`, `7c53f2f7…`. Совпадение
+таблицы и закреплённых файлов пакета проверяет `tests/test_runtime_repair_pins.py`.
 
 Ожидаемый digest полного нового runtime:
 `e7018aecae8a61f9b766b676013e01a2b2ef6f23090007b1691b2f433bf77211`.

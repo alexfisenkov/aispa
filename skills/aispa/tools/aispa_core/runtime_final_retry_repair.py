@@ -22,7 +22,9 @@ OLD_DIGEST = "e7018aecae8a61f9b766b676013e01a2b2ef6f23090007b1691b2f433bf77211"
 EVENT = "runtime-repaired:final-owner-retry-0.4.0"
 STEM = "final-owner-retry-0.4.0-"
 FILE = "tools/aispa_core/workflow.py"
-SOURCE_HASHES = {FILE: "0d7606ce9273b1f79933489aad98818d11badd705461320051c6a0ae833dfe03"}
+SOURCE_HASHES = {FILE: "1626a3976025d1051fc3cf08830eaa881f857acb960e80fb8f0c98df68501a0f"}
+# Earlier reviewed source of the same seams; manifests prepared from it stay valid.
+HISTORICAL_SOURCE_HASHES = ({FILE: "0d7606ce9273b1f79933489aad98818d11badd705461320051c6a0ae833dfe03"},)
 OLD_HASHES = {FILE: "0ac372f9676893419a954a98bd61be3cdf7fd570cf14be7154416ce2111e3392"}
 NEW_HASHES = {FILE: "a271ee1701bfa2440f13e417dad9e22895300e564089f168d7219c3dca5b6d1c"}
 CHANGED = frozenset({FILE})
@@ -265,7 +267,8 @@ def _manifest(store, ref):
           and type(value["beforeSequence"]) is int and value["beforeSequence"] > 0
           and value["kind"] == EVENT and value["run"] == store.run.name
           and value["version"] == zone.VERSION and value["sourceBaseline"] == zone.SOURCE_BASELINE
-          and value["oldRuntimeDigest"] == OLD_DIGEST and value["sourceHashes"] == SOURCE_HASHES
+          and value["oldRuntimeDigest"] == OLD_DIGEST
+          and value["sourceHashes"] in (SOURCE_HASHES, *HISTORICAL_SOURCE_HASHES)
           and re.fullmatch(STEM + r"[0-9a-f]{32}", value["id"])
           and value["runtimePath"] == "runtime-repairs/" + value["id"] + "/runtime"
           and ref["file"] == "runtime-repairs/" + value["id"] + "/manifest.json",
