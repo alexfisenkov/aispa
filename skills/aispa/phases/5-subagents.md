@@ -38,7 +38,7 @@ Phase 4 gave every ticket a wave and a zone. **Launch a whole wave in one messag
 - **A dependent never launches on an uncommitted parent.**
 - `ap.py ticket 02 03 start` goes **before** the launch — one call for the whole wave, **in the same message as the Agent calls**: Bash first, the launches after it.
 - **One event, one message.** Every call of yours re-reads your whole context — at 200K, one call costs about as much as a small subagent's first steps. What one event needs goes out together: the `ap.py` mark, the commit, the next launch, the line to the user. Never a call that only marks, then a call that only launches.
-- **Waiting for the wave is ending your turn** — a background subagent wakes you when it returns. Never spawn an agent, or run a loop, just to wait.
+- **Waiting for the wave is ending your turn** — a background subagent wakes you when it returns. Never spawn an agent, or run a loop, just to wait. Where a background subagent does not wake you by itself (Codex, a headless run), wait for it with the wait tool in the same turn; the turn ends only with a handover, a question the mode allows, or a stop condition.
 
 **One working tree, several writers.** Parallel executors share the checkout. Each touches only its zone (and `.env.example`), and you commit by zone. A check that fails **only in files of zones still being written** is a neighbour's unfinished work, not this ticket's defect: the ticket may land on its own tests green, and the full check runs again when the neighbour lands.
 

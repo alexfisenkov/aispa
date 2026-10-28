@@ -23,6 +23,7 @@ The first case needs both marks: two sessions writing one `state.js` overwrite e
 - **Existing code at all** — an existing codebase is explored before the spec (`phases/3-spec.md`).
 - `CONTEXT.md`, `GLOSSARY.md`, `docs/adr/` — the project's vocabulary and settled decisions. The spec and tickets speak that vocabulary and flag, not silently override, anything that contradicts a recorded decision.
 - `.aispa-work/PROGRESS.md` — what the last run left open and what the user settled; §5.
+- **Subagents are switched off in this environment** → a stop condition: `ap.py ask stop`, then one line to the person with the text for their environment. Codex: «Включи субагентов в настройках Codex». Claude Code: «Разреши инструмент Agent». Environment unknown: both hints. This does not let you write the code yourself (`SKILL.md` rule 5).
 
 ## 2. Git
 

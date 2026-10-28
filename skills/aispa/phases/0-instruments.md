@@ -42,6 +42,8 @@ Immediately after `init`, before Phase 1 asks anything.
 
 **Path A — the pane beside the chat (preferred), over http.** In Claude Code: `preview_start({url: "http://localhost:PORT"})`, then `navigate` to `/dashboard.html`. A bare `navigate` to localhost without `preview_start` is refused, and so is `127.0.0.1`. Never hand the pane a `file://` path: it loads the page as `data:`, which cannot fetch `state.js` — the snapshot shows, the clocks never move. If `preview_start` is not in your tool list, search for it before concluding there is no pane.
 
+**In Codex** — open the address in Codex's built-in browser, in one action. If the panel is already open, do not open it a second time. If there is no built-in browser, give the person the address and carry on.
+
 **Say the address in the chat too** — some clients show the pane only as a card with an «Open» button.
 
 **Path B — no pane:** `open`, `xdg-open` or `start` on `.aispa-work/dashboard.html`; a real browser polls `state.js` from `file://` by itself.

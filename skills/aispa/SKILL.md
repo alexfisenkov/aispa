@@ -1,6 +1,6 @@
 ---
 name: aispa
-description: Builds an app, site, bot, or feature end-to-end from a dictated idea — requirements, briefing, spec, tickets, subagents, review, acceptance — with a live dashboard, for users who expect a finished result without reviewing specs or code. Starts only on /aispa; a bare /aispa resumes an interrupted run.
+description: Builds an app, site, bot, or feature end-to-end from a dictated idea — requirements, briefing, spec, tickets, subagents, review, acceptance — with a live dashboard, for users who expect a finished result without reviewing specs or code. Starts only on /aispa in Claude Code and $aispa in Codex; a call without a task resumes an interrupted run.
 disable-model-invocation: true
 argument-hint: "[full|semi|interview|manual] [strict|deep] что нужно построить или путь к brief.md"
 metadata:
