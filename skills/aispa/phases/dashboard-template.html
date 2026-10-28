@@ -1215,7 +1215,7 @@ function render(lang){
   // Вкладка подписана проектом: когда репозиторий дорабатывают второй раз, это
   // единственное место, где видно, что на экране прошлый прогон. Пока сборка ждёт
   // человека, вкладка говорит об этом — её видно, даже когда дашборд в фоне.
-  document.title = (waiting ? L.tabWait + ' — ' : '') + (S.title ? `${S.title} — aispa` : 'aispa');
+  document.title = (waiting ? L.tabWait + ' — ' : '') + (S.title ? `${S.title} — AISpa` : 'AISpa');
 
   if (!booted) {
     booted = true;
