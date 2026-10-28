@@ -310,6 +310,26 @@ class SkillRuleTests(unittest.TestCase):
         self.assertNotIn("не чинятся", text)
         self.assertNotIn("запрещают `finish`", text)
 
+    def test_environment_blocked_check_goes_to_a_project_script(self):
+        # B2: a check the host's tool forbids is first run by a project script through `verify --task`;
+        # otherwise the item is recorded unchecked with its reason. UI scenarios are scripted, not clicked.
+        self.assert_all("phases/04-build.md", "инструмент среды", "через `verify --task`", "не обход запрета",
+                        "временный профиль браузера", "непроверенным с причиной",
+                        "координатор не ведёт встроенный браузер по шагам",
+                        "ручные клики — только когда скрипт невозможен")
+        self.assert_all("SKILL.md", "инструмент среды запрещает проверку", "скриптом проекта через `verify --task`",
+                        "непроверенным с причиной", "кнопки и другие сценарии интерфейса проверяет скрипт")
+        self.assert_all("phases/05-accept.md", "не пустила проверить", "`blocked` с причиной",
+                        "«принято» невозможно")
+
+    def test_environment_blocked_without_script_stops_honestly(self):
+        # D09: in 0.5.0 the engine does not deliver past an environment-blocked task, so the texts keep
+        # «сдача невозможна» and tell the coordinator to name the blocker instead of spinning turns.
+        self.assert_all("SKILL.md", "запиши пункт непроверенным с причиной, назови блокер человеку и не крути "
+                        "ходы впустую", "сдача невозможна")
+        self.assert_all("phases/05-accept.md", "сдача невозможна", "координатор записывает пункт непроверенным "
+                        "с причиной, называет блокер человеку и не крутит ходы впустую")
+
     def test_targeted_replan_and_engine_texts(self):
         for name in ("phases/02-product.md", "phases/03-plan.md"):
             self.assert_all(name, "сам вернёт в работу задачи, у которых изменились требования, и их потомков",

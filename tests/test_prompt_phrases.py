@@ -15,6 +15,10 @@ PHRASES = {
         "тесты своей зоны", "один раз — в `clean-verify`", "не отдаётся модели", "`scriptCheck`",
         "`prechangeExecution`", "единственная поздняя ревизия", "`productFlows`", "`ownerDecision`",
         "точечный переплан", "доказательства её прошлой попытки не считаются", "model-routing.md",
+        # B2: a check the environment's tool forbids goes to a project script; UI scenarios too.
+        "не пускает инструмент среды", "одной командой `verify --task` с записью наблюдения",
+        "а не клики по шагам", "Это не обход запрета", "временный профиль браузера можно",
+        "пункт непроверенный с причиной, не выдуманный",
     ),
     "prompts/task-critic.md": (
         "`blockingClass`", "`brief_drift`", "`broken_scenario`", "`security`", "`data_loss`", "`failing_tests`",
@@ -28,6 +32,7 @@ PHRASES = {
         "`placement`", "`persistence`", "`positiveCase`", "обработчика в чистом клоне",
         "тестовым сообщением от каждой роли", "в реальные чаты ничего не отправляй", "`recheckOf`",
         "расходившиеся пункты", "Никогда не даёт «принято»", "`remaining.checks`",
+        "повторяемым скриптом одной командой", "ручные клики — только если скрипт невозможен",
     ),
     "prompts/brief-analyst.md": (
         "Одна проверяемая просьба", "одно требование", "не добавляй требований, которых в брифе нет",
@@ -42,6 +47,8 @@ PHRASES = {
     "references/product-development.md": (
         "`placement`", "`persistence`", "`acceptsInput`", "`positiveCase`", "дописывает их в карточку сам",
         "Непройденный обязательный поток никогда не даёт «принято»",
+        "Сценарии интерфейса", "проверяет скрипт", "координатор не ведёт встроенный браузер по шагам",
+        "Ручные клики — только когда скрипт невозможен",
     ),
     "references/task-tiers.md": ("`focusedReview`", "вычисляет движок", "`scriptCheck`"),
     "references/process.md": ("`focusedReview`", "`task-open", "`task-close`", "Блокирует короткий список"),
