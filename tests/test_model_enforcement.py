@@ -271,6 +271,17 @@ class CapabilityBlockTests(RoutedFixture):
                                        "participant-assigned:brief-reviewer"])
         self.assertFalse([event for event in flow.events if event.startswith("model-capability-cleared")])
 
+    def test_an_assignment_in_another_runtime_lifts_the_blocker_of_the_same_role_and_task(self):
+        # The work of the role no longer waits once it is seated, whichever host runtime seated it.
+        flow = self.JournalFlow(self, self.sources())
+        self.block(flow, "brief-reviewer", "missing")
+        self.assertEqual(len(self.store.load()["modelBlocks"]), 1)
+        codex = model_routes.ROUTES["judge"]["codex"]
+        self.state["runtime"] = "codex"
+        model_routes.enforce(self.store, self.state, "brief-reviewer", "codex", "codex-judge", "host-session",
+                             codex["model"], codex["effort"], None)
+        self.assertEqual(self.state["modelBlocks"], [])
+
     def test_enforce_alone_changes_state_but_saves_nothing(self):
         flow = self.JournalFlow(self, self.sources())
         self.block(flow, "brief-reviewer", "missing")

@@ -251,12 +251,12 @@ def enforce(store, state, role, runtime, native_id, session, model, reasoning, e
                 if save is not None:
                     save("model-capability-blocked:" + role)
             raise Invalid(block["message"])
-    _lift_blocks(state, role, runtime.strip().casefold(), task)
+    _lift_blocks(state, role, task)
     return route
 
 
-def _lift_blocks(state, role, runtime, task):
-    """An assignment by the table lifts the blocker of the same role, runtime and task: the work no longer waits.
+def _lift_blocks(state, role, task):
+    """An assignment by the table lifts the blocker of the same role and task, in any runtime: the work no longer waits.
 
     Changes ``state`` only and saves nothing: the lift reaches the journal with
     the caller's own assignment event, after the assignment is recorded.
@@ -266,7 +266,7 @@ def _lift_blocks(state, role, runtime, task):
         return
     task_id = task.get("id") if isinstance(task, dict) else None
     kept = [row for row in rows if not (isinstance(row, dict) and row.get("role") == role
-                                        and row.get("runtime") == runtime and row.get("task") == task_id)]
+                                        and row.get("task") == task_id)]
     if len(kept) != len(rows):
         state[MODEL_BLOCKS] = kept
 

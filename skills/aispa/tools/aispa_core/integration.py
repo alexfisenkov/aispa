@@ -218,7 +218,8 @@ def _frozen_mode(state, store=None):
         try:
             candidate = context(store, state)["basis"]
         except (Invalid, OSError, ValueError, KeyError, TypeError):
-            pass
+            # The candidate is unknown: never lend it the previous candidate's mode; the current mode decides.
+            return None
     first = next((row for row in rows if row.get("integrationBasis") == candidate), None)
     return _lens_mode(first) if first else None
 

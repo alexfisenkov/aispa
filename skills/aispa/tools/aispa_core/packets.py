@@ -431,7 +431,7 @@ def build(store, state, pipeline, kind, task_id=None, role=None, *, source_paths
         from . import integration
         # The whole branch is read once at the end by the lens reviewers, not by this task's critic.
         packet["projectReviewRole"] = "integration-reviewer"
-        packet["projectReviewLenses"] = integration.lenses(state)
+        packet["projectReviewLenses"] = integration.lenses(state, store)
     elif kind == "task" and task_id == state.get("integrationTask") and state.get("policy", {}).get("integrationReview"):
         from . import integration
         packet["branchReview"] = integration.context(store, state, task_id)

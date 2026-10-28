@@ -136,5 +136,24 @@ class IntegrationReviewTests(unittest.TestCase):
         self.assertFalse(integration.record_valid(self.store, self.state, "T03", "critic2", self.saved_record(changed)))
 
 
+class FocusedLensFallbackTests(unittest.TestCase):
+    """F6: a failure to find the candidate never lends it the lens set of the previous candidate."""
+
+    def test_a_context_failure_gives_the_lenses_of_the_current_mode_not_of_the_previous_candidate(self):
+        from aispa_core import focused_review
+        with tempfile.TemporaryDirectory(prefix="aispa-lens-fallback-") as temp:
+            store = Journal(Path(temp).resolve())
+            state = store.create("lens-fallback", "Lens fallback")
+            state.update(policy={"focusedReview": True, "leanControl": True, "integrationReview": True},
+                         checkMode="max")
+            # The previous candidate was reviewed in balanced mode; the owner has since switched to max.
+            state["projectIntegrationReviewHistory"] = [
+                {"integrationBasis": "previous-candidate", "lens": ["behavior", "data_security"],
+                 "checkMode": "balanced"}]
+            with patch.object(integration, "context", side_effect=Invalid("кандидат не вычислен")):
+                got = integration.lenses(state, store)
+            self.assertEqual(got, [list(lens) for lens in focused_review.LENSES["max"]])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 """Final-repair seats (0.5.0): the route table binds them like every subagent,
 and a lost worker or checker is replaced by a fresh one without losing history."""
+import argparse
 import contextlib
 import copy
 import io
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import test_final_repairs
+from test_participants import host_model_source
 import aispa
 from aispa_core import final_repairs, model_routes
 from aispa_core.store import Invalid, Journal
@@ -109,6 +111,71 @@ class RouteTableTests(RepairSeatFixture):
                                        session="s-free")
         self.assertIsNone(receipt["route"])
         self.assertNotIn("routeClass", self.state["finalRepairs"][0]["worker"])
+
+
+class SeatFlow:
+    """The saving seam of `final-repair`: every event goes to the journal and to ``events``."""
+
+    def __init__(self, test, sources=None):
+        self.test, self.sources, self.events = test, sources or {}, []
+
+    def build_ready(self):
+        pass
+
+    def save(self, event):
+        self.events.append(event)
+        self.test.store.append(self.test.state, event)
+
+    def read_input(self, name):
+        return json.dumps(self.sources[name])
+
+
+class SeatRefusalTests(RepairSeatFixture):
+    def assign_args(self, role, model, reasoning, evidence=None):
+        return argparse.Namespace(repair_action="assign", role=role, runtime="codex", native_id="n-" + role,
+                                  session="s-" + role, model=model, reasoning=reasoning, model_evidence=evidence)
+
+    def missing(self, model):
+        return {"offered": host_model_source(self.store, self.state, runtime="codex", provider="openai",
+                                             requested=model, native="n-worker", session="s-worker")}
+
+    def test_a_missing_approved_model_for_a_repair_seat_is_a_journaled_blocker(self):
+        self.open_repair()
+        self.store.append(self.state, "fixture-repair-opened")
+        flow = SeatFlow(self, self.missing("gpt-5-codex"))
+        with self.assertRaisesRegex(Invalid, "BLOCKED_MODEL_CAPABILITY.*" + WORKER["model"]):
+            final_repairs.execute(self.store, self.state, flow,
+                                  self.assign_args("worker", WORKER["model"], WORKER["effort"], "offered"))
+        self.assertEqual(flow.events, ["model-capability-blocked:worker"])
+        saved = self.store.load()["modelBlocks"]
+        self.assertEqual([(row["role"], row["task"], row["model"]) for row in saved],
+                         [("worker", "F01", WORKER["model"])])
+        self.assertIsNone(self.state["finalRepairs"][0]["worker"])
+
+    def test_other_refusals_write_no_blocker_even_with_evidence(self):
+        self.open_repair()
+        self.store.append(self.state, "fixture-repair-opened")
+        flow = SeatFlow(self, self.missing("gpt-5-codex"))
+        for model, reasoning in (("gpt-6-astra", WORKER["effort"]), ("fable", WORKER["effort"]),
+                                 ("inherit", WORKER["effort"]), (WORKER["model"], "xhigh"),
+                                 ("gpt-5-codex", WORKER["effort"]), (JUDGE["model"], JUDGE["effort"])):
+            with self.subTest(model=model, reasoning=reasoning):
+                with self.assertRaises(Invalid):
+                    final_repairs.execute(self.store, self.state, flow,
+                                          self.assign_args("worker", model, reasoning, "offered"))
+        self.assertEqual(flow.events, [])
+        self.assertNotIn("modelBlocks", self.store.load())
+
+    def test_the_refusal_names_the_seat_it_is_for(self):
+        self.open_repair()
+        with self.assertRaisesRegex(Invalid, "^Исполнитель финального ремонта: .*" + WORKER["model"]):
+            final_repairs.assign(self.store, self.state, "worker", runtime="codex", native_id="w", session="s",
+                                 model="gpt-5-codex", reasoning=WORKER["effort"])
+        worker = self.seat("worker")
+        self.submit(worker["actor"])
+        with self.assertRaisesRegex(Invalid, "^Проверяющий финального ремонта: .*" + JUDGE["model"]):
+            final_repairs.assign(self.store, self.state, "checker", runtime="codex", native_id="c", session="s",
+                                 model=WORKER["model"], reasoning=WORKER["effort"])
 
 
 class ReplacementTests(RepairSeatFixture):

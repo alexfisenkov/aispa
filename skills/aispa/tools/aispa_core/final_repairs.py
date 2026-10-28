@@ -15,7 +15,7 @@ import copy
 import json
 
 from .contracts import nonempty, require
-from .store import canonical_zone, digest, timestamp
+from .store import Invalid, canonical_zone, digest, timestamp
 
 MAX_ROUNDS = 2
 MAX_BLIND_REPAIRS = 2
@@ -187,14 +187,24 @@ def _route_task(repair):
             "requirements": list(repair["items"]) if repair["kind"] == "blind" else []}
 
 
-def _enforce(store, state, role, repair, *, runtime, native_id, session, model, reasoning):
-    """modelRoutes: the repair seats obey the route table like every subagent; nothing is written on refusal."""
+SEAT_NAMES = {"worker": "Исполнитель финального ремонта", "checker": "Проверяющий финального ремонта"}
+
+
+def _enforce(store, state, role, repair, *, runtime, native_id, session, model, reasoning, evidence=None, save=None):
+    """modelRoutes: the repair seats obey the route table like every subagent.
+
+    A refusal writes nothing, except the capability blocker (the approved model
+    is not offered), which ``save`` journals. The refusal text names the seat.
+    """
     from . import model_routes
     if not model_routes.enabled(state):
         return {}, None
     task = _route_task(repair) if role == "worker" else None
-    route = model_routes.enforce(store, state, ROUTE_ROLES[role], runtime, native_id, session, model, reasoning,
-                                 None, task=task)
+    try:
+        route = model_routes.enforce(store, state, ROUTE_ROLES[role], runtime, native_id, session, model, reasoning,
+                                     evidence, task=task, save=save)
+    except Invalid as error:
+        raise Invalid(SEAT_NAMES[role] + ": " + str(error)) from error
     return route, model_routes.route(state, ROUTE_ROLES[role], task)
 
 
@@ -205,7 +215,8 @@ def _owes(state, repair, role, person):
     return any(row["task"] == repair["id"] and row["role"] == role for row in open_work(state, pid))
 
 
-def assign(store, state, role, *, runtime, native_id, session, model=None, reasoning=None):
+def assign(store, state, role, *, runtime, native_id, session, model=None, reasoning=None, model_evidence=None,
+           save=None):
     """Seat the worker or this round's checker; a seated one who still owes the seat is replaced by a fresh one.
 
     The replaced person stays in ``replaced`` (and in used_identities); rounds
@@ -226,7 +237,7 @@ def assign(store, state, role, *, runtime, native_id, session, model=None, reaso
         require(previous is None or _owes(state, repair, "checker", previous), "Проверяющий этого круга уже назначен")
     identity = _identity(state, role, runtime, native_id, session, model, reasoning, repair)
     route, advice = _enforce(store, state, role, repair, runtime=runtime, native_id=native_id, session=session,
-                             model=model, reasoning=reasoning)
+                             model=model, reasoning=reasoning, evidence=model_evidence, save=save)
     if route:
         identity["routeClass"] = route["routeClass"]
     person = _seal(store, identity)
@@ -467,8 +478,10 @@ def execute(store, state, flow, args):
         flow.save("final-repair-opened:" + receipt["repair"]["id"])
         return receipt
     if action == "assign":
+        path = getattr(args, "model_evidence", None)
         receipt = assign(store, state, args.role, runtime=args.runtime, native_id=args.native_id,
-                         session=args.session, model=args.model, reasoning=args.reasoning)
+                         session=args.session, model=args.model, reasoning=args.reasoning,
+                         model_evidence=json.loads(flow.read_input(path)) if path else None, save=flow.save)
         flow.save("final-repair-assigned:" + receipt["repair"])
         return receipt
     report = json.loads(flow.read_input(args.file))

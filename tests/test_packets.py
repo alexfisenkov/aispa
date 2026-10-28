@@ -257,6 +257,24 @@ class FocusedPacketTests(FocusedFixture):
         self.submit("T01")
         self.assertIn(self.packet("T01", "critic1")["zoneChangesScope"], named)
 
+    def test_branch_lenses_of_the_packet_are_the_ones_the_review_context_names(self):
+        # The previous candidate was reviewed in balanced mode; code and check mode changed before the new
+        # candidate's first lens, so the engine's current mode (max) decides for both the packet and the context.
+        from aispa_core import focused_review, integration
+        self.configure(dict(POLICY, integrationReview=True), "balanced")
+        self.complete("T01", [("a.txt", "a by T01")])
+        self.start("T02")
+        self.write("b.txt", "b by T02")
+        self.submit("T02")
+        self.state.update(integrationTask="T02", checkMode="max")
+        self.state["projectIntegrationReviewHistory"] = [
+            {"integrationBasis": "previous-candidate", "lens": ["behavior", "data_security"], "checkMode": "balanced"}]
+        with patch.object(integration, "context", return_value={"basis": "new-candidate"}):
+            packet = self.packet("T02", "critic1")
+            named = integration.lenses(self.state, self.store)
+        self.assertEqual(named, [list(lens) for lens in focused_review.LENSES["max"]])
+        self.assertEqual(packet["projectReviewLenses"], named)
+
 
 if __name__ == "__main__":
     unittest.main()
