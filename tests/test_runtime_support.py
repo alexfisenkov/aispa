@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/aispa/tools"))
 import aispa
-from aispa_core import project_context as context, task_tiers
+from aispa_core import model_routes, project_context as context, task_tiers
 from aispa_core.store import Invalid, Journal
 import test_team
 
@@ -23,6 +23,12 @@ HOOKS = {
     "gemini": ["AGENTS.md", "GEMINI.md"],
     "antigravity": ["AGENTS.md", "GEMINI.md", ".agents/rules/aispa.md"],
 }
+
+
+def route_args(runtime, cls):
+    """--model/--reasoning of a subagent: the route table in claude-code and codex, a host model elsewhere."""
+    row = model_routes.ROUTES[cls].get(runtime) or {"model": runtime + "-host-model", "effort": "medium"}
+    return ["--model", row["model"], "--reasoning", row["effort"]]
 
 
 class RuntimeSupportTests(unittest.TestCase):
@@ -56,12 +62,14 @@ class RuntimeSupportTests(unittest.TestCase):
                                       "--native-id", "synthetic-coordinator", "--session", "fixture-session")["receipt"]["actor"]
                     self.assertEqual(store.load()["participants"][actor]["runtime"], runtime)
                     writer = self.call(pinned, root, "knowledge-assign", "--runtime", runtime,
-                                       "--native-id", "synthetic-writer", "--session", "fixture-session")["receipt"]["actor"]
+                                       "--native-id", "synthetic-writer", "--session", "fixture-session",
+                                       *route_args(runtime, "research"))["receipt"]["actor"]
                     self.assertEqual(writer["runtime"], runtime)
                     self.assertEqual(store.load()["knowledge"]["writer"]["id"], writer["id"])
                     # A new host must hit the same unsealed-brief gate, not bypass it.
                     denied = self.call(pinned, root, "assign", "T01", "--role", "worker", "--runtime", runtime,
-                                       "--native-id", "synthetic-worker", "--session", "fixture-session", expected=2)
+                                       "--native-id", "synthetic-worker", "--session", "fixture-session",
+                                       *route_args(runtime, "worker"), expected=2)
                     self.assertIn("Бриф изменён", denied.stderr)
                     wrong = "gemini" if runtime != "gemini" else "codex"
                     denied = self.call(pinned, root, "project-context", "--runtime", wrong, expected=2)

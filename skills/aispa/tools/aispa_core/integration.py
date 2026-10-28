@@ -181,23 +181,60 @@ def focused(state):
     return state.get("policy", {}).get("focusedReview") is True
 
 
-def lenses(state):
-    """Lenses of the branch review in the owner's current mode: 1, 2 or 3 reviewers."""
+def lenses(state, store=None):
+    """Lenses of the branch review: 1, 2 or 3 reviewers.
+
+    The mode is the owner's current one until the first lens of the reviewed
+    candidate is recorded; from then on that candidate keeps the lens set of
+    the mode its first lens was recorded in, so a later check-mode switch
+    neither reopens a closed branch review nor leaves it incomplete. The
+    candidate is the chain base after a repair, otherwise the current one
+    (with ``store``) or the latest reviewed one.
+    """
     from . import check_modes, focused_review
-    return [list(lens) for lens in focused_review.LENSES[check_modes.current(state)]]
+    mode = (_frozen_mode(state, store) if focused(state) else None) or check_modes.current(state)
+    return [list(lens) for lens in focused_review.LENSES[mode]]
 
 
-def _lens(state, value, *, historical=False):
-    """The canonical lens of the current mode; a sealed record may carry a lens of an earlier mode."""
+def _lens_mode(row):
+    """Mode a lens record was written in: its own field, or the only mode that has this lens."""
+    from . import focused_review
+    if row.get("checkMode") in focused_review.LENSES:
+        return row["checkMode"]
+    value = sorted(row.get("lens") or [])
+    return next((mode for mode, rows in focused_review.LENSES.items()
+                 if any(sorted(lens) == value for lens in rows)), None)
+
+
+def _frozen_mode(state, store=None):
+    rows = [row for row in state.get("projectIntegrationReviewHistory") or [] if isinstance(row, dict) and row.get("lens")]
+    if not rows:
+        return None
+    chain = state.get("candidateChain") or []
+    candidate = rows[-1].get("integrationBasis")
+    if chain and isinstance(chain[0], dict):
+        candidate = chain[0].get("integrationBasis")
+    elif store is not None:
+        try:
+            candidate = context(store, state)["basis"]
+        except (Invalid, OSError, ValueError, KeyError, TypeError):
+            pass
+    first = next((row for row in rows if row.get("integrationBasis") == candidate), None)
+    return _lens_mode(first) if first else None
+
+
+def _lens(state, value, *, historical=False, store=None):
+    """The canonical lens of the candidate's mode; a sealed record may carry a lens of an earlier mode."""
     from . import focused_review
     _need(isinstance(value, list) and value and all(isinstance(axis, str) for axis in value),
           "отчёту проверки ветки нужна линза lens: список направлений")
-    choices = [list(lens) for rows in focused_review.LENSES.values() for lens in rows] if historical else lenses(state)
+    allowed = lenses(state, store)
+    choices = [list(lens) for rows in focused_review.LENSES.values() for lens in rows] if historical else allowed
     for lens in choices:
         if sorted(lens) == sorted(value):
             return lens
     raise Invalid("AISpa integration: линза не из режима; допустимы: " + "; ".join(
-        "+".join(lens) for lens in lenses(state)))
+        "+".join(lens) for lens in allowed))
 
 
 def _branch_findings(report, lens, failures):
@@ -248,7 +285,7 @@ def lenses_complete(store, state):
     if not focused(state):
         return True
     recorded = {tuple(row["lens"]) for row in branch_records(store, state)}
-    return {tuple(lens) for lens in lenses(state)} <= recorded
+    return {tuple(lens) for lens in lenses(state, store)} <= recorded
 
 
 def branch_reviewed(store, state):
@@ -256,7 +293,7 @@ def branch_reviewed(store, state):
     from . import findings
     try:
         recorded = {tuple(row["lens"]) for row in branch_records(store, state)}
-        return {tuple(lens) for lens in lenses(state)} <= recorded and not findings.open_items(state)
+        return {tuple(lens) for lens in lenses(state, store)} <= recorded and not findings.open_items(state)
     except (Invalid, OSError, ValueError, KeyError, TypeError, RecursionError):
         return False
 
@@ -454,10 +491,11 @@ def project_context(store, state, actor=None):
         from . import findings
         done = [row["lens"] for row in _project_history(store, state) if row.get("integrationBasis") == view["basis"]
                 and row.get("lens")]
-        pending = [lens for lens in lenses(state) if lens not in done]
+        allowed = lenses(state, store)
+        pending = [lens for lens in allowed if lens not in done]
         lens = pending[0] if pending else None
         axes = lens or []
-        extra = {"lenses": lenses(state), "recordedLenses": done, "pendingLenses": pending,
+        extra = {"lenses": allowed, "recordedLenses": done, "pendingLenses": pending,
                  "openFindings": findings.open_items(state)}
         template_extra = {"lens": lens, "findings": []}
         if lens and "behavior" in lens:
@@ -488,7 +526,7 @@ def _project_report(store, report, state=None, *, historical=False):
     _need(state is not None and scale.enabled(state) or len(json.dumps(report, ensure_ascii=False).encode("utf-8")) <= MAX_REPORT_BYTES,
           "слишком большой отчёт общего ревью")
     if lens_mode:
-        lens = _lens(state, report["lens"], historical=historical)
+        lens = _lens(state, report["lens"], historical=historical, store=None if historical else store)
         artifacts, failures = _review_fields(store, report["branchReview"], state, axes=tuple(lens))
         _branch_findings(report, lens, failures)
         return artifacts, failures
@@ -559,7 +597,7 @@ def project_review(store, state, report, actor=None):
     lens, decisions = None, []
     if focused(state):
         _need(not state.get("finalRepairs"), "проверка ветки закрыта: изменения после неё проверяет final-repair")
-        lens = _lens(state, report["lens"])
+        lens = _lens(state, report["lens"], store=store)
         _need((view["basis"], tuple(lens)) not in {(row["integrationBasis"], tuple(row.get("lens") or ()))
                                                    for row in history},
               "линза этого кандидата уже записана; заменять её вердикт нельзя")
@@ -580,7 +618,10 @@ def project_review(store, state, report, actor=None):
         "passed": report["verdict"] == "PASS", "at": timestamp(),
         "previous": history[-1]["record"]["sha256"] if history else None}
     if lens is not None:
+        from . import check_modes
         body["lens"] = lens
+        # The lens set of this candidate stays the one of this mode (lenses).
+        body["checkMode"] = _frozen_mode(state, store) or check_modes.current(state)
     record = _seal(store, body)
     state["projectIntegrationReviewHistory"] = copy.deepcopy([*history, record])
     state["projectIntegrationReview"] = record

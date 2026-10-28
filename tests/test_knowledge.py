@@ -88,6 +88,20 @@ class KnowledgeTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             knowledge.assign(self.store, self.state, "fixture", "new-writer", "session", fresh=False)
 
+    def test_final_repair_participants_cannot_write_project_knowledge(self):
+        """Workers and checkers of final repairs, replaced ones too, are not fresh knowledge authors."""
+        def person(native):
+            return {"id": "id-" + native, "nativeId": native, "session": "repair-session"}
+        self.state["finalRepairs"] = [{"id": "F01", "kind": "findings", "status": "passed",
+                                       "worker": person("repair-worker"),
+                                       "rounds": [{"number": 1, "checker": person("repair-checker")}],
+                                       "replaced": [{"role": "worker", "person": person("lost-repair-worker")}]}]
+        for native in ("repair-worker", "repair-checker", "lost-repair-worker"):
+            with self.subTest(native=native), self.assertRaisesRegex(Invalid, "автор знаний должен отличаться"):
+                knowledge.assign(self.store, copy.deepcopy(self.state), "fixture", native, "knowledge-session")
+        self.assertEqual(knowledge.assign(self.store, copy.deepcopy(self.state), "fixture", "unrelated-writer",
+                                          "knowledge-session")["nativeId"], "unrelated-writer")
+
     def test_acceptance_current_verification_and_settled_tasks_required(self):
         with self.assertRaises(Invalid):
             knowledge.record(self.store, self.state, self.report())

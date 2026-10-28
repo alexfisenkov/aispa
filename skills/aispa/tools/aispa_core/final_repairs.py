@@ -153,50 +153,97 @@ def _identity(state, role, runtime, native_id, session, model, reasoning, repair
     require(all(nonempty(v) for v in (runtime, native_id, session)), "Нужны реальные runtime, native ID и session")
     runtime, native_id, session = runtime.strip().casefold(), native_id.strip(), session.strip()
     participants.require_unused_identity(state, runtime, native_id)
-    require(native_id not in used_identities(state), "Участник уже работал в ремонтах этого прогона; нужен свежий")
-    return {"id": digest([runtime, native_id, session]), "runtime": runtime, "nativeId": native_id,
+    ident = digest([runtime, native_id, session])
+    used = used_identities(state)
+    require(native_id not in used and ident not in used, "Участник уже работал в ремонтах этого прогона; нужен свежий")
+    return {"id": ident, "runtime": runtime, "nativeId": native_id,
             "session": session, "role": "final-repair-" + role, "model": model, "reasoning": reasoning,
             "repair": repair["id"], "run": state["run"], "at": timestamp(), "identityEvidence": "host-declared"}
 
 
 def used_identities(state):
-    """IDs and native IDs of every repair participant: they may not review the branch or accept the result."""
+    """IDs and native IDs of every repair participant, replaced ones included.
+
+    They may not review the branch, accept the result, write project knowledge
+    or sit in another repair seat.
+    """
     used = set()
     for repair in state.get("finalRepairs") or []:
         people = [repair.get("worker")] + [row.get("checker") for row in repair.get("rounds", [])]
+        people += [row.get("person") for row in repair.get("replaced", []) if isinstance(row, dict)]
         for person in people:
             if isinstance(person, dict):
                 used.update(value for value in (person.get("id"), person.get("nativeId")) if isinstance(value, str))
     return used
 
 
-def _route(state, role):
+# Route-table roles of the repair seats: the worker is a task worker, the checker a judge.
+ROUTE_ROLES = {"worker": "worker", "checker": "integration-reviewer"}
+
+
+def _route_task(repair):
+    """The worker's class follows the repair like a task's: sensitive zones (or blind items) need sensitive_worker."""
+    return {"id": repair["id"], "title": "", "zones": list(repair["zones"]), "dependsOn": [],
+            "requirements": list(repair["items"]) if repair["kind"] == "blind" else []}
+
+
+def _enforce(store, state, role, repair, *, runtime, native_id, session, model, reasoning):
+    """modelRoutes: the repair seats obey the route table like every subagent; nothing is written on refusal."""
     from . import model_routes
-    try:
-        return model_routes.route(state, "worker" if role == "worker" else "integration-reviewer")
-    except Exception:  # advice only; the table may not cover this runtime
-        return None
+    if not model_routes.enabled(state):
+        return {}, None
+    task = _route_task(repair) if role == "worker" else None
+    route = model_routes.enforce(store, state, ROUTE_ROLES[role], runtime, native_id, session, model, reasoning,
+                                 None, task=task)
+    return route, model_routes.route(state, ROUTE_ROLES[role], task)
+
+
+def _owes(state, repair, role, person):
+    """A seated person may be replaced only while still owing this seat (preflight's rule for a lost participant)."""
+    from .preflight import open_work
+    pid = person.get("id") if isinstance(person, dict) else None
+    return any(row["task"] == repair["id"] and row["role"] == role for row in open_work(state, pid))
 
 
 def assign(store, state, role, *, runtime, native_id, session, model=None, reasoning=None):
+    """Seat the worker or this round's checker; a seated one who still owes the seat is replaced by a fresh one.
+
+    The replaced person stays in ``replaced`` (and in used_identities); rounds
+    and the round count do not change.
+    """
     from .team import _seal
     repair = unfinished(state)
     require(repair is not None, "Нет открытого ремонта")
     require(role in ("worker", "checker"), "Роль ремонта: worker или checker")
     if role == "worker":
-        require(repair["worker"] is None, "Исполнитель ремонта уже назначен")
+        previous = repair["worker"]
+        require(previous is None or _owes(state, repair, "worker", previous),
+                "Исполнитель ремонта уже назначен и сдал работу; заменить его можно только пока ремонт открыт")
     else:
         current = repair["rounds"][-1] if repair["rounds"] else None
         require(current is not None and current.get("check") is None, "Проверяющего назначают после сдачи ремонта")
-        require(current.get("checker") is None, "Проверяющий этого круга уже назначен")
-    person = _seal(store, _identity(state, role, runtime, native_id, session, model, reasoning, repair))
+        previous = current.get("checker")
+        require(previous is None or _owes(state, repair, "checker", previous), "Проверяющий этого круга уже назначен")
+    identity = _identity(state, role, runtime, native_id, session, model, reasoning, repair)
+    route, advice = _enforce(store, state, role, repair, runtime=runtime, native_id=native_id, session=session,
+                             model=model, reasoning=reasoning)
+    if route:
+        identity["routeClass"] = route["routeClass"]
+    person = _seal(store, identity)
+    if previous is not None:
+        repair.setdefault("replaced", []).append({
+            "role": role, "round": repair["rounds"][-1]["number"] if role == "checker" else None,
+            "person": previous, "replacement": person["id"], "at": timestamp()})
     if role == "worker":
         repair["worker"] = person
         packet = _worker_packet(store, state, repair)
     else:
         repair["rounds"][-1]["checker"] = person
         packet = _checker_packet(store, state, repair)
-    return {"repair": repair["id"], "role": role, "actor": person["id"], "route": _route(state, role), "packet": packet}
+    receipt = {"repair": repair["id"], "role": role, "actor": person["id"], "route": advice, "packet": packet}
+    if previous is not None:
+        receipt["replaced"] = previous["id"]
+    return receipt
 
 
 def _item_rows(store, state, repair):
@@ -379,10 +426,11 @@ def blind_exhausted(state):
 def blind_settled(state):
     """Focused finish may deliver a failed acceptance with its list: both cycles spent, or nothing to repair.
 
-    A failure without requirement-bound items (only unmapped requests or
-    observations tied to no requirement) has no item a blind repair could fix,
-    so it goes to the remainder at once instead of leaving the run without an
-    outcome. Product-flow and other gate vetoes are checked by the caller.
+    A failure without requirement-bound items (only unmapped requests,
+    observations tied to no requirement, or a blocked core task) has no item a
+    blind repair could fix, so it goes to the remainder at once instead of
+    leaving the run without an outcome. Product-flow and other gate vetoes are
+    checked by the caller.
     """
     if not enabled(state) or unfinished(state) is not None or pending_recheck(state) is not None:
         return False
@@ -393,7 +441,14 @@ def blind_settled(state):
         return False
     loose = [f for f in gate.get("failures", []) if isinstance(f, dict) and f.get("requirement") is None
              and f.get("kind") != "product-flow"]
-    return bool(gate.get("unmapped") or loose)
+    return bool(gate.get("unmapped") or loose or blocked_core(state))
+
+
+def blocked_core(state):
+    """Blocked tasks of the obligatory core: acceptance fails on them, yet a blind repair has no item to fix."""
+    core = set(state.get("core") or [])
+    return sorted(t["id"] for t in state.get("tasks", [])
+                  if t.get("status") == "blocked" and core & set(t.get("requirements") or []))
 
 
 def remaining_findings(state):

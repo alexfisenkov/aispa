@@ -79,6 +79,11 @@ def _open_work(state, aid):
     return rows
 
 
+def open_work(state, aid):
+    """Public form of the open-work rule: final_repairs replaces a lost repair seat only while it is still owed."""
+    return _open_work(state, aid)
+
+
 def _repair_people(state):
     """Distinct seated workers and checkers of final repairs (sealed identity records)."""
     seen, people = set(), []

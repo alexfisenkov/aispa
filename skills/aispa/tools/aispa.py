@@ -704,15 +704,19 @@ def execute(args):
         elif action == "clean-prepare":
             flow.running()
             flow.handoff_ready()
-            flow.focused_stage("blind")
             state["cleanroom"] = cleanroom.prepare(store, state)
             state.pop("cleanrun", None)
             receipt = state["cleanroom"]
+            # Focused: a failed preparation is a saved receipt with its blocker, never a success;
+            # the blind stage does not begin, since no blind acceptance can follow it.
+            ok = receipt.get("passed") is not False
+            if ok:
+                flow.focused_stage("blind", save=False)
             flow.save("clean-clone-prepared")
         elif action == "blind":
             flow.running()
-            flow.focused_stage("blind")
             receipt = blind.record(store, state, json.loads(flow.read_input(args.file)))
+            flow.focused_stage("blind", save=False)  # only an accepted record begins the stage
             flow.save("blind-observations-recorded")
         elif action == "clean-verify":
             flow.running()
@@ -828,8 +832,9 @@ def execute(args):
         elif action == "integration-review":
             if args.file:
                 flow.build_ready()
-                flow.focused_stage("integration")
                 receipt = integration.project_review(store, state, json.loads(flow.read_input(args.file)), actor=args.actor)
+                # Only an accepted lens begins the stage; a refused report changes neither workProgress nor the journal.
+                flow.focused_stage("integration", save=False)
                 # Focused: the stage (and its completion event) ends with the last lens of the mode.
                 flow.save("project-integration-reviewed" if integration.lenses_complete(store, state)
                           else "project-integration-lens-reviewed")

@@ -756,6 +756,47 @@ class CliTests(unittest.TestCase):
         stages = {row["stage"] for row in saved.get("stageSamples", [])}
         self.assertTrue({"branchReview", "blind", "finalRepair"} <= stages, stages)
 
+    def test_focused_check_mode_switch_after_the_final_repair_still_reaches_finish(self):
+        """balanced -> max after the findings repair: the reviewed candidate keeps its two lenses up to finish."""
+        from aispa_core.store import Journal
+        (self.root / "USAGE.md").write_text("Usage: run app.py\n", encoding="utf-8", newline="\n")
+        self.git("add", "USAGE.md")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "usage note")
+        proof, participant, _coordinator = self.deliver_one_task()
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        self.branch_review({1: [{"id": "N1", "severity": "warning", "criterion": "Выводит ready",
+                                 "text": "The usage note does not say what the command prints"}]})
+        self.final_repair("findings", "switch", "Usage: run app.py; it prints ready\n")
+        switched = self.call("check-mode", "max", "--file", self.input("Владелец: дальше проверяй по максимуму", "max.md"))
+        self.assertEqual(switched["receipt"]["mode"], "max")
+        self.call("verify", "--", sys.executable, "tests/check_output.py")
+        self.handoff()
+        self.call("clean-prepare")
+        clean = self.call("clean-verify", "--", sys.executable, "-B", "tests/check_output.py")["receipt"]
+        self.blind_actor = participant("blind")
+        blind = self.context("blind")
+        self.call("blind", "--file", self.input({"basis": blind["basis"], "reviewer": self.blind_actor, "independent": True,
+                  "observations": [{"brief": "B001", "quote": "Команда выводит ready", "status": "passed",
+                                    "note": "Synthetic: observed in the clean clone",
+                                    "artifact": clean["output"]["file"]}]}, "blind-switch.json"))
+        self.assertTrue(self.call("acceptance", "--file", self.input(proof("acceptance", "R01"), "acceptance-switch.json"))["ok"])
+        from aispa_core.store import file_hash
+        writer = self.call("knowledge-assign", "--runtime", "codex", *route_args("knowledge-writer"),
+                           "--native-id", "synthetic-knowledge-switch", "--session", "fresh-knowledge-switch")["receipt"]["actor"]
+        learned = self.context("knowledge")
+        run_receipt = self.call("verify", "--purpose", "run", "--", sys.executable, "app.py")["receipt"]
+        self.call("knowledge-record", "--file", self.input({"writer": writer["id"], "basis": learned["basis"],
+            "entries": [{"key": "cli.ready", "kind": "command", "text": "Synthetic: stdout check of this CLI.",
+                         "sources": [{"path": "app.py", "sha256": file_hash(self.root / "app.py")}],
+                         "command": [sys.executable, "app.py"],
+                         "verification": {"kind": "execution", "sha256": run_receipt["sha256"]}}],
+            "uncertainties": {k: "Synthetic fixture did not establish additional knowledge in this category."
+                              for k in ("trap", "decision", "glossary")}}, "knowledge-switch.json"))
+        self.assertEqual(self.call("finish", timeout=60)["status"], "accepted")
+        saved = Journal(self.root).load()
+        self.assertEqual(saved["checkMode"], "max")
+        self.assertEqual(len([row for row in saved["projectIntegrationReviewHistory"] if row.get("lens")]), 2)
+
     def focused_to_blind(self, status):
         """Standard 0.5.0 policy through the CLI up to the first blind acceptance with the given status."""
         (self.root / "USAGE.md").write_text("Usage: run app.py\n", encoding="utf-8", newline="\n")

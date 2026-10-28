@@ -101,6 +101,8 @@ def _used_identities(state):
     for review in [*state.get("blindHistory", []), state.get("blindReview")]:
         if isinstance(review, dict) and isinstance(review.get("reviewer"), str):
             used.add(review["reviewer"])
+    from .final_repairs import used_identities  # final-repair workers and checkers, replaced ones too
+    used |= used_identities(state)
     return used
 
 

@@ -71,25 +71,28 @@ class Workflow:
             except (OSError, Invalid) as error:
                 raise Invalid("Событие записано, но память проекта не обновилась. Выполните context-refresh без повтора операции") from error
 
-    def progress_begin(self, phase):
+    def progress_begin(self, phase, *, save=True):
         from . import work_progress
         self.running()
         at = timestamp()
-        if work_progress.begin(self.s, phase, at):
+        if work_progress.begin(self.s, phase, at) and save:
             self.save("work-progress-began:" + phase, at)
         return work_progress.view(self.s, at)
 
-    def focused_stage(self, phase):
+    def focused_stage(self, phase, *, save=True):
         """Focused runs: the branch review and the blind acceptance start their measured stage by themselves.
 
         measured_estimate times the stages branchReview and blind by workProgress
         of the phases integration and blind; the engine begins them at the first
-        branch context or review and at clean-prepare or blind. Idempotent while
-        the phase runs; a waiting or closed run starts nothing.
+        branch context or review and at a successful clean-prepare or blind.
+        Callers begin the stage only after the step was accepted; with
+        ``save=False`` the step's own event records the begin, so a refused
+        step changes neither workProgress nor the journal. Idempotent while the
+        phase runs; a waiting or closed run starts nothing.
         """
         if not self._focused() or self.s.get("status") != "running" or timing.waiting(self.s):
             return None
-        return self.progress_begin(phase)
+        return self.progress_begin(phase, save=save)
 
     def resource_admitted(self, kind, at=None):
         """Caller holds the journal lock; persist admission before native work."""
@@ -656,7 +659,7 @@ class Workflow:
             return
         require(integration.branch_reviewed(self.store, self.s),
                 "До сдачи нужна проверка всей ветки: integration-review по каждой линзе режима ("
-                + "; ".join("+".join(lens) for lens in integration.lenses(self.s))
+                + "; ".join("+".join(lens) for lens in integration.lenses(self.s, self.store))
                 + "), ревьюер линзы behavior разбирает все открытые предупреждения")
         require(final_repairs.findings_settled(self.s),
                 "Подтверждённые находки ветки ещё не исправлены: final-repair open --file (kind findings)")
@@ -789,7 +792,8 @@ class Workflow:
         execution_results = execution_obligations.evaluate(self.store, self.s, at)
         execution_remaining = [row for row in execution_results if row["status"] != "passed"]
         leftover = final_repairs.remaining_findings(self.s) if self._focused() else []
-        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited or execution_remaining or inherited_execution or leftover else "accepted"
+        model_blocks = self._model_blocks()
+        self.s["status"] = "delivered_with_remaining" if residuals or excluded or blocked or inherited or execution_remaining or inherited_execution or leftover or model_blocks else "accepted"
         self.s["remaining"] = {"checks": residuals, "excluded": excluded, "blockedTasks": blocked,
                                "deferredTasks": sorted(check_modes.deferred_ids(self.s, self.store)),
                                "inherited": [{"id": item["id"], "status": item["status"], "text": item.get("requirement", {}).get("text", "")} for item in inherited]}
@@ -803,6 +807,8 @@ class Workflow:
             self.s["remaining"]["inheritedExecution"] = inherited_execution
         if self._focused():
             self.s["remaining"]["findings"] = leftover
+        if model_blocks:
+            self.s["remaining"]["modelBlocks"] = model_blocks
         if check_modes.enabled(self.s):
             gate = self.s["gates"]["acceptance"]
             # Focused: a failure after both blind repair cycles is delivered with its list in every mode.
@@ -814,6 +820,12 @@ class Workflow:
             self.s["remaining"]["checkModeChanges"] = check_modes.history_view(self.store, self.s)
         timing.stop(self.s, at, completed=True)
         self.save("delivery-recorded", at)
+
+    def _model_blocks(self):
+        """modelRoutes blockers still standing at delivery: which model is missing, for which role and task."""
+        keys = ("code", "role", "runtime", "routeClass", "task", "model", "effort", "message", "options", "at")
+        return [{key: copy.deepcopy(row[key]) for key in keys if key in row}
+                for row in self.s.get("modelBlocks") or [] if isinstance(row, dict)]
 
     def close(self, status, note):
         require(status in ("paused", "blocked", "cancelled"), "Неизвестная причина остановки")

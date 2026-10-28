@@ -37,10 +37,15 @@ class WindowsCliEncodingTests(unittest.TestCase):
             requirements.write_text(json.dumps([{"id": "R01", "text": "Приветствие", "brief": "B001",
                 "quote": "Покажи приветствие.", "core": True, "acceptance": ["Виден русский текст"]}], ensure_ascii=False), encoding="utf-8-sig", newline="\n")
             call("requirements", "--file", str(requirements))
+            from aispa_core import model_routes
+            route = model_routes.ROUTES["judge"]["codex"]  # brief roles are judges in the route table
+            judge = ("--model", route["model"], "--reasoning", route["effort"])
             analyst = call("participant", "--role", "brief-analyst", "--runtime", "codex",
-                           "--native-id", "native-читатель-🙂", "--session", "unicode-session")["receipt"]["actor"]
+                           "--native-id", "native-читатель-🙂", "--session", "unicode-session",
+                           *judge)["receipt"]["actor"]
             reviewer = call("participant", "--role", "brief-reviewer", "--runtime", "codex",
-                            "--native-id", "native-проверяющий-🙂", "--session", "unicode-session")["receipt"]["actor"]
+                            "--native-id", "native-проверяющий-🙂", "--session", "unicode-session",
+                            *judge)["receipt"]["actor"]
             from tests import alpha10_fixtures as fixtures
             source = call("brief-source")
             self.assertEqual(source["briefs"][0]["units"][0]["text"], "Покажи приветствие.")
