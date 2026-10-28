@@ -823,6 +823,22 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (project / ".agents").iterdir()), ["skills"])
         self.assertFalse((project / ".claude").exists())
 
+    def test_old_installers_accept_the_one_point_zero_package_for_every_runtime(self):
+        package = ROOT / "skills/aispa"
+        stub = ast.parse((package / "tools/aispa_core/project_context.py").read_text(encoding="utf-8"))
+        # The 0.4/0.5 installers parse this file; it must stand alone without the 0.5 engine.
+        self.assertEqual([node for node in ast.walk(stub) if isinstance(node, (ast.Import, ast.ImportFrom))], [])
+        for tag in ("v0.4.0", "aispa-0.5.0-engine"):
+            source = self.root / (tag + "-install.py")
+            source.write_bytes(subprocess.run(["git", "-C", str(ROOT), "show", tag + ":tools/install.py"],
+                                              check=True, capture_output=True).stdout)
+            spec = importlib.util.spec_from_file_location("aispa_install_" + tag.replace(".", "_").replace("-", "_"), source)
+            old = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(old)
+            for runtime in ("gemini", "openclaw", "antigravity", "codex", "claude-code", "cursor"):
+                with self.subTest(tag=tag, runtime=runtime):
+                    old._require_runtime(package, runtime)
+
     def test_pinned_verifier_has_isolated_import_name(self):
         source = self.root / "source"
         package = source / "skills/aispa/tools/aispa_core"

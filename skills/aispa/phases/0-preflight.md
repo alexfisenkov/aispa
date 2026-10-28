@@ -4,6 +4,7 @@ Configure the repo, pick the project memory, raise the instruments. Decide which
 
 | On disk | Case | What happens |
 |---|---|---|
+| no `.aispa-work/`, but `.aispa/active.json` | **maybe a run of the previous AISpa** | one call that does not change the run, `<run>` being the `run` field of `active.json`: `python3 .aispa/runs/<run>/runtime/tools/aispa.py status`. Status not `accepted`, `delivered_with_remaining` or `cancelled` → it is unfinished: read its `runtime/SKILL.md` and carry on only with that copy's commands, the dashboard too — never from the installed package; start no new run here until the person says «закончи старую» or «начни новую». A final status → the rows below |
 | `state.js` with `finishedAt: null`, `updatedAt` under five minutes old **and** the server in `.aispa-work/serve.pid` answering | **the run is going on in another window** | nothing — say so in one line and ask which window carries on |
 | `state.js` with `finishedAt: null` | **resume** | read `phases/0-resume.md` and follow it instead of this file |
 | `state.js` with `finishedAt` set | **new feature in a configured repo** | everything below; `init` archives the finished run's state into its own directory |

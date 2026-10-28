@@ -144,6 +144,11 @@ Numbers in this skill — tiers, question counts, wave widths — are **calibrat
 4. **An irreversible or outward-facing action is a question** — deploy, publish, pay, message a third party, delete data, rewrite history.
 5. **The orchestrator does not write the project's code.** Its keyboard reaches `.aispa-work/`, the memory files, `.gitignore`, `.env.example` and git; everything else goes to a subagent (`phases/5-subagents.md`).
 
+## Outside a run
+
+- **«Обнови AISpa»** → `python3 "<skillDir>/tools/aispa.py" update-check`; a newer release → `update-prepare`, show both versions, and only after the person's «да» `update-apply --candidate <candidateId> --confirm`, then re-read this file. Never mid-run.
+- **A question about AISpa itself** → `python3 "<skillDir>/tools/aispa.py" faq --version <the version asked about>`; answer in the words of the entries it returns.
+
 ## When to use it
 
 The user dictates what to build and expects the finished thing; they will not read specs or review code. «Собери под ключ», "just build it". Wanting the idea taken apart question by question and the build done without them is still AISpa — `interview`; wanting to approve the spec and the tickets is `manual`.
