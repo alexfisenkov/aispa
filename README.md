@@ -148,7 +148,7 @@ You can switch at any time, just say:
 
 Questions come in **rounds**: up to four at once, on one topic, numbered, each with the answer the agent would pick itself. Agree with all — reply "ok"; disagree with one — "2 — a spreadsheet, the rest ok". Where the answer decides what you get, the question is marked ⚑ with options а/б/в — that letter you pick yourself; "ok" does not stand in for it.
 
-Hard to read several questions in a row? Say **"one at a time"** (in the command, in the answer to the first question, or at any moment): the agent asks one question per message, still with its own answer. "In rounds" switches back.
+When there are more questions than one round, AISpa first asks how you prefer them: in batches of 3–4 or one at a time. You can also say **"one at a time"** (in the command, in the answer to the first question, or at any moment): the agent asks one question per message, still with its own answer. "In rounds" switches back.
 
 In interview and manual mode there are many questions — several dozen on an ordinary project: the agent walks the brief requirement by requirement until every fork is closed. Before the first question it shows the topics and roughly how many questions there are, and every round says how many are left. Had enough — say **"decide the rest yourself"**: it settles the rest and lists those decisions in the report.
 

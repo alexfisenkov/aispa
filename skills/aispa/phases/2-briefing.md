@@ -54,16 +54,21 @@ For each row, three passes:
 
 Then order the map: blocking externals first, the adversarial findings no later than the end of the second round (in the one-at-a-time form: the second group, see below), then themes in the order the brief tells them, scope edges last. Answers open new questions — add them to the map and recount; the count you say is honest and approximate, never a promise.
 
-**Open with the map, in one message, before the first round** — the user sees how much there is and how to steer it:
+**Open with the map, in one message, before the first round** — the user sees how much there is and how to steer it — and **end it with the first question: how to ask**. Nothing else is asked in that message; wait for the answer, then `ap.py set questions=one` or `questions=rounds`:
 
 ```
 Пройду твой бриф по темам, чтобы ничего не потерялось:
 1. Заявки · 2. Оплата · 3. Уведомления · 4. Кабинет мастера · 5. Чего не нужно
-Это примерно 35 вопросов, по 3–4 за раз — у каждого мой вариант.
+Это примерно 35 вопросов — у каждого мой вариант.
 Отвечай коротко: «ок» — согласен с моими вариантами, «2 — таблица» — поправить один.
 Устанешь — скажи «дальше решай сам»: остальное решу сам и перечислю в отчёте.
-Удобнее по одному вопросу — скажи «по одному».
+
+Сначала один вопрос: как тебе удобнее?
+1. Пачками — по 3–4 вопроса в сообщении, так быстрее. Я бы так.
+2. По одному — один вопрос за раз, спокойнее читать.
 ```
+
+The form question is skipped when the form is already known — said in the call, in the answer to the start question, or stored in the run (`questions` in `state.js`); then the map ends with «Буду спрашивать по одному — скажи «можно пачкой», если надоест» or the rounds equivalent. An answer that names neither → rounds. In `important` the form is asked the same way only when more than four questions are coming; for one round it is not worth a message of its own.
 
 Every round after it opens with one line: «Тема 2 из 5 — оплата · осталось примерно 20 вопросов».
 
