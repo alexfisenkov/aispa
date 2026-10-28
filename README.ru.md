@@ -18,8 +18,6 @@ AISpa — фреймворк разработки, skill, который бер�
 
 Работает сам по себе: ставить что-то ещё не нужно.
 
-AISpa построена на Autopilot 2.2.0 (Nick Vels, MIT).
-
 <p align="center">
   <a href="assets/ru/aispa-dashboard.png"><img src="assets/ru/dash-now.png" width="380" alt="Шапка: что происходит сейчас, сколько осталось, восемь этапов"></a>
   <a href="assets/ru/aispa-dashboard.png"><img src="assets/ru/dash-tasks.png" width="380" alt="Задачи по волнам: у каждой задачи цветная полоса состояния и шаги"></a>
