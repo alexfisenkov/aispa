@@ -87,8 +87,8 @@ class ForbiddenWordsTests(unittest.TestCase):
 
     def test_agents_yaml_phases_and_prompts_have_none(self):
         paths = list(AGENTS.iterdir()) + [PACKAGE / "agents/openai.yaml"]
-        paths += sorted((PACKAGE / "phases").glob("[0-9]-*.md"))
-        paths += [PACKAGE / "prompts/executor.md", PACKAGE / "prompts/review.md"]
+        paths += sorted((PACKAGE / "phases").glob("*.md"))
+        paths += sorted((PACKAGE / "prompts").glob("*.md"))
         for path in paths:
             with self.subTest(file=path.name):
                 self.assertTrue(path.is_file())

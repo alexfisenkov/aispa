@@ -86,27 +86,27 @@
       },
       {
         "path": "agents/claude-code/aispa-judge.md",
-        "sha256": "e76a1e393cd49352d9fbe3075b59f20cc7c9c2777550438dc748cfad3db438c5"
+        "sha256": "6c63faeb06619ff2d269db8b5634694a9373754fc7510fa7642d2b5ba380c57e"
       },
       {
         "path": "agents/claude-code/aispa-sensitive-worker.md",
-        "sha256": "27068ff932d85e466d037bf27a8343ed12de852e77f97a60ae7e0fc1895ee1bc"
+        "sha256": "69076a15e77860bf5da2149242ec80f6c6717c28dd32c78f8b5ea558cd816078"
       },
       {
         "path": "agents/claude-code/aispa-worker.md",
-        "sha256": "84cfc9c29136390cbf882a6588b38b66ff364c475dd3914ea262ae4bd9e4da85"
+        "sha256": "b5e4fc2c33e7c2a421c66f581d6d4a7c8df0b9dbba9f177d1f831f2109dba6f6"
       },
       {
         "path": "agents/claude-code/aispa-mechanic-scripted.md",
-        "sha256": "6015a5689ac760026ab4125f7de6910198b8662a04eff70f8f0b84ee6b438bd2"
+        "sha256": "e3e8ea492d7816ea2a079bf9e26ee7f6738aa57bfc87e453a248115a73d7fa0f"
       },
       {
         "path": "agents/claude-code/aispa-mechanic.md",
-        "sha256": "2cb1f5e879e4d4e14e99a3bcacb12cb8c68b456932968ab21a4809ed49153345"
+        "sha256": "f8d5e10da68bbf7e3e51116dd254a127b6065a39f941335e71f6e24df262dc96"
       },
       {
         "path": "agents/claude-code/aispa-researcher.md",
-        "sha256": "a85ca351bc6abc463d475ef590dbe3c4aa21aef83cf2b887d5d95f63d79af487"
+        "sha256": "e5e9568363d5ea55dee129f006e00131c6dc094688694e3c7a99b39030d7d21e"
       }
     ]
   },

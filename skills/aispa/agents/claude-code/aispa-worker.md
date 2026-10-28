@@ -1,6 +1,6 @@
 ---
 name: aispa-worker
-description: "AISpa: исполнитель обычной задачи прогона. Координатор AISpa вызывает этого агента по имени из карточки роли."
+description: "AISpa: исполнитель обычного шага прогона. Координатор AISpa вызывает этого агента по имени из таблицы ролей в SKILL.md."
 model: sonnet
 effort: medium
 ---
