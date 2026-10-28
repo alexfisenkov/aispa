@@ -76,7 +76,7 @@ WAIT_KINDS = ("briefing", "spec", "plan", "action", "stop")
 # Команды, которые значат «работа пошла дальше»: ожидание пользователя ими закрывается,
 # даже если `answered` забыли.
 MOVES_ON = {"stage", "ticket", "tickets", "check-plan", "coverage", "blind", "tests", "finish", "reopen"}
-# Режимы — имена AISpa 0.5 плюс ручной; старые слова Autopilot понимаются и хранятся новыми.
+# Режимы — имена AISpa 0.5 плюс ручной; старые слова (full, semi) понимаются и хранятся новыми.
 MODES = ("auto", "important", "interview", "manual")
 OLD_MODES = {"full": "auto", "semi": "important"}
 # Глубина хранится как strict | normal | deep (так читают старые прогоны и панель); пользователю —

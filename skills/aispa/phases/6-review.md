@@ -5,7 +5,7 @@ Two moments, both done by someone who did not write the code:
 - **Point review during the build** — for tickets whose file says `Ревью: да` (the foundation and the narrow list of risks, `phases/4-plan.md`), and for a ticket whose contract reports one of its own requirements as not done. **After the commit, never before it**: the ticket lands on a green check, the next wave flies, and the review runs beside it. At T0 there is none: the whole-branch review is that ticket's review.
 - **The whole-branch review** — once, after the last ticket, as the `review` stage. **Always**, at every tier and in every mode.
 
-Every other ticket is reviewed only as part of the branch. Why this shape, with the measurements behind it: `docs/autopilot/design.md` in the skill's repository.
+Every other ticket is reviewed only as part of the branch.
 
 ## Three axes, reported separately
 

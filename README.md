@@ -18,8 +18,6 @@ AISpa is a development framework packaged as a skill. It takes your idea, asks q
 
 It works on its own: nothing else to install.
 
-AISpa is built on Autopilot 2.2.0 (Nick Vels, MIT).
-
 <p align="center">
   <a href="assets/aispa-dashboard.png"><img src="assets/dash-now.png" width="380" alt="The header: what is happening now, how much is left, the eight stages"></a>
   <a href="assets/aispa-dashboard.png"><img src="assets/dash-tasks.png" width="380" alt="Tasks by wave: every task with a coloured state bar and its steps"></a>
@@ -475,7 +473,6 @@ skills/aispa/
     ├── aispa.py                the updater of copies installed from a GitHub Release (and the bridge from 0.x)
     └── aispa_core/             its code: release checks, checksums, replace with undo
 
-docs/autopilot/design.md     ← why it's built this way, with measurements
 tools/measure-run.py             ← measuring a real run from Claude Code logs
 tools/собрать-выпуск.py          ← the release files for GitHub: aispa.zip, aispa-update.json, install.py
 tools/install.py                 ← first install from a Release (for the old latest/download/install.py link)
@@ -490,7 +487,7 @@ It's all plain markdown. You can open it and read it: [skills/aispa/SKILL.md](sk
 
 ## How to change it yourself
 
-This repository is an exact copy of the base with AISpa branding, so you can change it point by point. Every file is plain text: the rules of each phase live in `skills/aispa/phases/`, the prompts for subagents in `skills/aispa/prompts/`, the orchestrator in `skills/aispa/SKILL.md`, the instruments in `skills/aispa/tools/ap.py`, the dashboard page in `skills/aispa/phases/dashboard-template.html`. Change one rule or one file, run `python3 -B -m unittest discover -s tests`, raise the version (where — below), commit and push to `main`, then update the install with `npx skills update aispa -g`. Without a new version `update` answers "already up to date": it compares versions, not files.
+AISpa can be changed point by point. Every file is plain text: the rules of each phase live in `skills/aispa/phases/`, the prompts for subagents in `skills/aispa/prompts/`, the orchestrator in `skills/aispa/SKILL.md`, the instruments in `skills/aispa/tools/ap.py`, the dashboard page in `skills/aispa/phases/dashboard-template.html`. Change one rule or one file, run `python3 -B -m unittest discover -s tests`, raise the version (where — below), commit and push to `main`, then update the install with `npx skills update aispa -g`. Without a new version `update` answers "already up to date": it compares versions, not files.
 
 ### How to release a new version
 

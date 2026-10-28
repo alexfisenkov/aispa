@@ -103,7 +103,7 @@ class Versions(unittest.TestCase):
         self.assertIn("-path '%s'" % pattern, text)
         with tempfile.TemporaryDirectory() as tmp:
             skills = os.path.join(tmp, ".claude", "skills")
-            for rel in (".aispa-backup-x1/package", "autopilot", "aispa"):
+            for rel in (".aispa-backup-x1/package", "other-skill", "aispa"):
                 write(os.path.join(skills, rel, "phases", "dashboard-template.html"), "x")
             out = subprocess.run(["find", "-L", skills, "-maxdepth", "6", "-path", pattern],
                                  capture_output=True, text=True).stdout.split()

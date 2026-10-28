@@ -473,7 +473,6 @@ skills/aispa/
     ├── aispa.py                обновитель копий, поставленных из выпуска GitHub (и мост с 0.x)
     └── aispa_core/             его код: проверка выпуска, контрольные суммы, замена с откатом
 
-docs/autopilot/design.md     ← почему устроено именно так, с замерами
 tools/measure-run.py             ← замер реального прогона по логам Claude Code
 tools/собрать-выпуск.py          ← файлы для выпуска на GitHub: aispa.zip, aispa-update.json, install.py
 tools/install.py                 ← первый установщик из выпуска (для старой ссылки latest/download/install.py)
@@ -488,7 +487,7 @@ CHANGELOG.md                     ← что нового по версиям
 
 ## Как менять самому
 
-Этот репозиторий — точная копия основы с брендингом AISpa, поэтому его можно менять точечно. Все файлы — обычный текст: правила каждой фазы лежат в `skills/aispa/phases/`, промпты субагентам — в `skills/aispa/prompts/`, оркестратор — в `skills/aispa/SKILL.md`, инструменты — в `skills/aispa/tools/ap.py`, страница дашборда — в `skills/aispa/phases/dashboard-template.html`. Поменяйте одно правило или один файл, запустите `python3 -B -m unittest discover -s tests`, поднимите версию (ниже — где), закоммитьте и отправьте в `main`, затем обновите установку командой `npx skills update aispa -g`. Без новой версии `update` ответит «всё уже обновлено»: он сверяет версию, а не файлы.
+AISpa можно менять точечно. Все файлы — обычный текст: правила каждой фазы лежат в `skills/aispa/phases/`, промпты субагентам — в `skills/aispa/prompts/`, оркестратор — в `skills/aispa/SKILL.md`, инструменты — в `skills/aispa/tools/ap.py`, страница дашборда — в `skills/aispa/phases/dashboard-template.html`. Поменяйте одно правило или один файл, запустите `python3 -B -m unittest discover -s tests`, поднимите версию (ниже — где), закоммитьте и отправьте в `main`, затем обновите установку командой `npx skills update aispa -g`. Без новой версии `update` ответит «всё уже обновлено»: он сверяет версию, а не файлы.
 
 ### Как выпустить новую версию
 

@@ -13,7 +13,7 @@ Everything after `/aispa` splits into **the mode** (`auto`, `important`, `interv
 | **interview** — «интервью» | `interview`, «режим интервью», «погриль меня», «допроси», «задай все вопросы», «разбери задачу со мной», "interview me", "ask me everything" | questions, all of them |
 | **manual** — «ручной» | `manual`, «ручной режим», «согласовывай каждый шаг», "approve every step" | the same questions + the spec + the tickets |
 
-`auto` works as Autopilot's old `full`, `important` as its old `semi`. The old words are understood everywhere — in the call, in the start choice, mid-run — and stored under the new names: `ap.py init --mode` and `ap.py set mode=` accept `full` and `semi` and write `auto` and `important`.
+`auto` is the old `full`, `important` the old `semi`. The old words are understood everywhere — in the call, in the start choice, mid-run — and stored under the new names: `ap.py init --mode` and `ap.py set mode=` accept `full` and `semi` and write `auto` and `important`.
 
 `interview` asks about the *product*; `manual` is `interview` plus approval of the two *process* artifacts, and nothing else.
 
