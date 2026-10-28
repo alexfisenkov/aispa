@@ -408,6 +408,13 @@ def check(package, *, timeout=5):
         result.update(status="offline", message="Проверка недоступна; продолжайте с установленной версией.")
     except (Invalid, ValueError, TypeError, KeyError, RecursionError):
         result.update(status="invalid_release", message="Метаданные выпуска не прошли проверку; текущая версия сохранена.")
+    try:
+        agents = agents_status(package)
+    except (Invalid, OSError) as exc:
+        agents = {"status": "unknown", "directory": _agents_directory_hint(package), "missing": [],
+                  "different": [], "message": "Не удалось проверить файлы агентов: " + str(exc)}
+    if agents is not None:
+        result["agents"] = agents
     return result
 
 
@@ -601,6 +608,16 @@ def _agents_directory(package, target):
     return None
 
 
+def _agents_directory_hint(package):
+    """The agents directory from the given path alone (no resolving); None if unknown."""
+    try:
+        path = Path(package).absolute()
+    except OSError:
+        return None
+    directory = _agents_directory(path, path)
+    return None if directory is None else str(directory)
+
+
 def _agent_sources(package):
     source = package / "agents" / "claude-code"
     if is_link(source) or not source.is_dir():
@@ -622,8 +639,15 @@ def _sha(data):
 
 
 def _write_new(path, data):
-    with path.open("xb") as stream:
-        stream.write(data)
+    """Create `path` exclusively; an interrupted write leaves no partial file behind."""
+    stream = path.open("xb")
+    try:
+        with stream:
+            stream.write(data)
+    except BaseException:
+        # The name was created by this call (O_EXCL), so removing it is safe.
+        path.unlink(missing_ok=True)
+        raise
 
 
 def _replace_file(path, data):
@@ -650,8 +674,8 @@ def _agents_plan(package, target, old_package, new_package):
         if current == data:
             view["skipped"].append({"file": name, "reason": "identical"})
         elif current is None or (current is not _FOREIGN and current == old.get(name)):
-            view["changes"].append({"file": name, "data": data,
-                                    "previous": current, "previousSha256": current and _sha(current),
+            view["changes"].append({"file": name, "data": data, "previous": current,
+                                    "previousSha256": None if current is None else _sha(current),
                                     "sha256": _sha(data)})
         else:
             view["skipped"].append({"file": name, "reason": "different"})
@@ -661,33 +685,63 @@ def _agents_plan(package, target, old_package, new_package):
     return dict(view, status="conflict" if different else "installed")
 
 
-def _apply_agents(plan, backup):
+def _apply_agents(plan, backup, undo):
+    """Write planned agent files; every completed write is recorded in `undo` first.
+
+    The caller reverts `undo` with _undo_agents on any later failure, including
+    one after this function returned (the final receipt write).
+    """
     directory = Path(plan["directory"])
     done = []
-    try:
-        for item in plan["changes"]:
-            path = directory / item["file"]
-            if _agent_current(path) != item["previous"]:
-                raise Invalid("Файл агента изменён во время обновления: " + item["file"])
-            if item["previous"] is None:
-                directory.mkdir(mode=0o755, exist_ok=True)
-                _write_new(path, item["data"])
-            else:
-                (backup / "agents").mkdir(exist_ok=True)
-                _write_new(backup / "agents" / item["file"], item["previous"])
-                _replace_file(path, item["data"])
-            done.append(item)
-    except BaseException:
-        for item in reversed(done):
-            path = directory / item["file"]
-            if item["previous"] is None:
-                path.unlink(missing_ok=True)
-            else:
-                _replace_file(path, item["previous"])
-        raise
+    for item in plan["changes"]:
+        path = directory / item["file"]
+        if _agent_current(path) != item["previous"]:
+            raise Invalid("Файл агента изменён во время обновления: " + item["file"])
+        if item["previous"] is None:
+            if not directory.exists():
+                directory.mkdir(mode=0o755)
+                undo.append({"directoryCreated": directory})
+            _write_new(path, item["data"])
+        else:
+            (backup / "agents").mkdir(exist_ok=True)
+            _write_new(backup / "agents" / item["file"], item["previous"])
+            _replace_file(path, item["data"])
+        undo.append({"path": path, "previous": item["previous"]})
+        done.append(item)
     plan["installed"] = [item["file"] for item in done]
     plan["changes"] = [{key: item[key] for key in ("file", "previousSha256", "sha256")} for item in done]
     return plan
+
+
+def _undo_agents(undo):
+    """Return agent files written by this call: created ones removed, replaced ones restored.
+
+    Best effort: one failed file does not stop the others. Returns the names
+    that could not be returned to their previous state.
+    """
+    failed = []
+    for entry in reversed(undo):
+        try:
+            if "directoryCreated" in entry:
+                try:
+                    entry["directoryCreated"].rmdir()  # only if still empty
+                except OSError:
+                    pass
+            elif entry["previous"] is None:
+                entry["path"].unlink(missing_ok=True)
+            else:
+                _replace_file(entry["path"], entry["previous"])
+        except Exception:
+            failed.append(entry["path"].name)
+    undo.clear()
+    return sorted(failed)
+
+
+def _note_unrestored(error, files, where):
+    """Attach to the original failure which agent files stayed changed and where their copies are."""
+    if files:
+        error.add_note("Файлы агентов не возвращены в прежнее состояние: " + ", ".join(files)
+                       + ". Их копии: " + str(where) + ".")
 
 
 def _agents_rollback_plan(package, target, backup, receipt):
@@ -717,30 +771,111 @@ def _agents_rollback_plan(package, target, backup, receipt):
     return {"directory": str(directory), "restore": restore, "skipped": skipped}
 
 
-def _rollback_agents(plan, backup):
+def _rollback_agents(plan, backup, undo):
+    """Put prior agent files back; each displaced file is recorded in `undo` first.
+
+    The caller reverts `undo` with _unrollback_agents on any later failure,
+    including one after this function returned (the final receipt write).
+    """
     directory = Path(plan["directory"])
     aside = backup / "replaced-agents"
-    done = []
-    try:
-        for item in plan["restore"]:
-            path, moved = directory / item["file"], aside / item["file"]
-            aside.mkdir(exist_ok=True)
-            if moved.exists() or is_link(moved):
-                raise Invalid("Каталог сохранения агентов уже занят")
-            os.replace(path, moved)
-            done.append((item, False))
-            if item["previous"] is not None:
-                _write_new(path, item["previous"])
-                done[-1] = (item, True)
-    except BaseException:
-        for item, written in reversed(done):
-            path = directory / item["file"]
-            if written:
-                path.unlink(missing_ok=True)
-            os.replace(aside / item["file"], path)
-        raise
+    for item in plan["restore"]:
+        path, moved = directory / item["file"], aside / item["file"]
+        aside.mkdir(exist_ok=True)
+        if moved.exists() or is_link(moved):
+            raise Invalid("Каталог сохранения агентов уже занят")
+        os.replace(path, moved)
+        undo.append({"path": path, "aside": moved})
+        if item["previous"] is not None:
+            _write_new(path, item["previous"])
     return {"directory": plan["directory"], "restored": [item["file"] for item in plan["restore"]],
             "skipped": plan["skipped"]}
+
+
+def _unrollback_agents(undo):
+    """Return agent files to their state before rollback from replaced-agents/.
+
+    Best effort, like _undo_agents; returns the names that stayed as rolled back.
+    """
+    failed = []
+    for entry in reversed(undo):
+        try:
+            # os.replace overwrites the prior copy written by rollback, if any.
+            os.replace(entry["aside"], entry["path"])
+        except Exception:
+            failed.append(entry["path"].name)
+    undo.clear()
+    return sorted(failed)
+
+
+AGENTS_COMMAND = "update-agents --confirm"
+NEW_SESSION_MESSAGE = ("Новые агенты подхватятся только в новом сеансе Claude Code: "
+                       "закройте этот сеанс и откройте новый.")
+
+
+def _agents_message(missing, different):
+    parts = []
+    if missing:
+        parts.append("В Claude Code не хватает файлов агентов AISpa: " + ", ".join(missing)
+                     + ". Без них субагенты работают с усилием сессии и тратят больше токенов. "
+                     "С согласия пользователя поставьте их командой " + AGENTS_COMMAND
+                     + "; существующие файлы она не меняет. После установки "
+                     + NEW_SESSION_MESSAGE[0].lower() + NEW_SESSION_MESSAGE[1:])
+    if different:
+        parts.append("Эти файлы агентов отличаются от версии пакета и не будут перезаписаны: "
+                     + ", ".join(different) + ".")
+    return " ".join(parts) or None
+
+
+def agents_status(package):
+    """Read-only: which Claude Code agent files of this package are missing beside the skill.
+
+    None when the package is not a Claude Code skill install (*/.claude/skills/aispa)
+    or ships no agent files.
+    """
+    alias, target = _canonical(package)
+    # The current package is both "old" and "new": only missing files are writable.
+    plan = _agents_plan(alias, target, target, target)
+    if plan is None:
+        return None
+    view = {"directory": plan["directory"]}
+    if plan["status"] == "skipped":
+        return dict(view, status="skipped", missing=[], different=[], message=plan["reason"])
+    missing = [item["file"] for item in plan["changes"]]
+    different = [item["file"] for item in plan["skipped"] if item["reason"] == "different"]
+    status = "missing" if missing else "conflict" if different else "complete"
+    return dict(view, status=status, missing=missing, different=different,
+                message=_agents_message(missing, different))
+
+
+def install_agents(package, *, confirmed=False):
+    """Put missing agent files of the installed package beside it; never overwrite one."""
+    _confirmed(confirmed)
+    alias, target = _canonical(package)
+    if _runtime_path(alias) or _runtime_path(target):
+        raise Invalid("Агентов для закреплённой копии прогона не ставят")
+    _version(target)
+    with _lock(target):
+        plan = _agents_plan(alias, target, target, target)
+        if plan is None:
+            raise Invalid("Файлы агентов ставятся только для навыка Claude Code в .claude/skills/aispa")
+        if plan["status"] == "skipped":
+            raise Invalid(plan["reason"])
+        replaced = [item["file"] for item in plan["changes"] if item["previous"] is not None]
+        if replaced:
+            # This command only adds files; a replacement means the package changed meanwhile.
+            raise Invalid("Команда ставит только недостающие файлы агентов, а план требует заменить: "
+                          + ", ".join(replaced) + ". Ничего не изменено; повторите проверку обновлений.")
+        written = []
+        try:
+            _apply_agents(plan, None, written)
+        except BaseException as error:
+            _note_unrestored(error, _undo_agents(written), plan["directory"])
+            raise
+        message = NEW_SESSION_MESSAGE if plan["installed"] else "Все файлы агентов уже на месте; ничего не изменено."
+        return {"status": plan["status"], "directory": plan["directory"],
+                "installed": plan["installed"], "skipped": plan["skipped"], "reason": plan["reason"],
+                "message": message}
 
 
 def _confirmed(confirmed):
@@ -784,6 +919,7 @@ def apply(package, candidate_id, *, confirmed=False):
                    "expectedCurrentDigest": digest, "backupDigest": review["expectedCurrentDigest"]}
         atomic_json(backup / "receipt.json", receipt)
         old_moved = new_moved = False
+        written = []
         try:
             os.replace(target, backup / "package")
             old_moved = True
@@ -795,14 +931,21 @@ def apply(package, candidate_id, *, confirmed=False):
             if _snapshot(target)[1] != digest:
                 raise Invalid("Установленный пакет не прошёл проверку")
             if agents is not None:
-                receipt["agents"] = _apply_agents(agents, backup) if agents["changes"] else agents
+                receipt["agents"] = _apply_agents(agents, backup, written) if agents["changes"] else agents
             receipt["status"] = "installed"
             atomic_json(backup / "receipt.json", receipt)
-        except BaseException:
-            if new_moved:
-                os.replace(target, staged)
-            if old_moved:
-                os.replace(backup / "package", target)
+        except BaseException as error:
+            # Package and agents stay one version: agents written here go back first,
+            # and the package returns even if an agent file cannot.
+            unrestored = []
+            try:
+                unrestored = _undo_agents(written)
+            finally:
+                if new_moved:
+                    os.replace(target, staged)
+                if old_moved:
+                    os.replace(backup / "package", target)
+            _note_unrestored(error, unrestored, backup / "agents")
             raise
         review["status"] = "applied"
         # The receipt is authoritative; stale review status cannot replay apply
@@ -833,6 +976,7 @@ def rollback(package, backup_id, *, confirmed=False):
         if displaced.exists() or is_link(displaced):
             raise Invalid("Каталог сохранения текущей версии уже занят")
         old_moved = new_moved = False
+        moved_agents = []
         try:
             os.replace(target, displaced)
             old_moved = True
@@ -843,13 +987,20 @@ def rollback(package, backup_id, *, confirmed=False):
             if _snapshot(target)[1] != receipt["backupDigest"]:
                 raise Invalid("Восстановленный пакет не прошёл проверку")
             if agents is not None:
-                receipt["agentsRollback"] = _rollback_agents(agents, backup)
+                receipt["agentsRollback"] = _rollback_agents(agents, backup, moved_agents)
             receipt["status"] = "rolled_back"
             atomic_json(backup / "receipt.json", receipt)
-        except BaseException:
-            if new_moved:
-                os.replace(target, prior)
-            if old_moved:
-                os.replace(displaced, target)
+        except BaseException as error:
+            # Package and agents stay one version: agents go back to the updated state
+            # first, and the package returns even if an agent file cannot.
+            unrestored = []
+            try:
+                unrestored = _unrollback_agents(moved_agents)
+            finally:
+                if new_moved:
+                    os.replace(target, prior)
+                if old_moved:
+                    os.replace(displaced, target)
+            _note_unrestored(error, unrestored, backup / "replaced-agents")
             raise
         return receipt

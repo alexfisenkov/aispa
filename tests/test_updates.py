@@ -819,6 +819,262 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(updates._snapshot(self.package)[1], review["expectedCurrentDigest"])
         self.assertEqual(self.agents_state(agents), before)
 
+    SIX_AGENTS = ("aispa-judge.md", "aispa-mechanic-scripted.md", "aispa-mechanic.md",
+                  "aispa-researcher.md", "aispa-sensitive-worker.md", "aispa-worker.md")
+
+    def interrupted_open(self, name):
+        """Path.open whose exclusive write of `name` stores half the bytes and then fails."""
+        original_open = Path.open
+
+        class Interrupted:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def write(self, data):
+                self.stream.write(data[:len(data) // 2])
+                self.stream.flush()
+                raise OSError("simulated interrupted agent write")
+
+            def __getattr__(self, key):
+                return getattr(self.stream, key)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.stream.close()
+                return False
+
+        def open_(path, mode="r", *args, **kwargs):
+            stream = original_open(path, mode, *args, **kwargs)
+            return Interrupted(stream) if path.name == name and "x" in mode else stream
+        return patch.object(Path, "open", open_)
+
+    def test_check_names_missing_agents_and_confirmed_command_installs_them(self):
+        # An install updated by the 0.4.0 apply has the new package but no agent files.
+        agents = self.claude_install(list(self.SIX_AGENTS))
+        edited = b"---\nname: aispa-worker\nmodel: opus\n---\nmy own worker\n"
+        (agents / "aispa-worker.md").write_bytes(edited)
+        before_package = updates._snapshot(self.package)[1]
+        with self.network([]):
+            result = updates.check(self.package)
+        view = result["agents"]
+        self.assertEqual(view["status"], "missing")
+        self.assertEqual(view["directory"], str(agents))
+        missing = [n for n in self.SIX_AGENTS if n != "aispa-worker.md"]
+        self.assertEqual(view["missing"], missing)
+        self.assertEqual(view["different"], ["aispa-worker.md"])
+        for name in missing + ["aispa-worker.md"]:
+            self.assertIn(name, view["message"])
+        self.assertIn("update-agents --confirm", view["message"])
+        self.assertEqual(sorted(p.name for p in agents.iterdir()), ["aispa-worker.md", "other.md"])
+        with self.assertRaises(Invalid):
+            updates.install_agents(self.package)
+        self.assertEqual(sorted(p.name for p in agents.iterdir()), ["aispa-worker.md", "other.md"])
+        receipt = updates.install_agents(self.package, confirmed=True)
+        self.assertEqual(receipt["status"], "conflict")
+        self.assertEqual(receipt["installed"], missing)
+        self.assertEqual(receipt["skipped"], [{"file": "aispa-worker.md", "reason": "different"}])
+        self.assertIn("aispa-worker.md", receipt["reason"])
+        for name in self.SIX_AGENTS:
+            self.assertTrue((agents / name).is_file())
+        for name in missing:
+            self.assertEqual((agents / name).read_bytes(), self.agent_bytes(name, "old"))
+        self.assertEqual((agents / "aispa-worker.md").read_bytes(), edited)
+        self.assertEqual((agents / "other.md").read_bytes(), b"unrelated agent\n")
+        self.assertEqual(updates._snapshot(self.package)[1], before_package)
+        with self.network([]):
+            again = updates.check(self.package)["agents"]
+        self.assertEqual((again["status"], again["missing"], again["different"]),
+                         ("conflict", [], ["aispa-worker.md"]))
+        (agents / "aispa-worker.md").write_bytes(self.agent_bytes("aispa-worker.md", "old"))
+        with self.network([]):
+            self.assertEqual(updates.check(self.package)["agents"]["status"], "complete")
+        self.assertEqual(updates.install_agents(self.package, confirmed=True)["installed"], [])
+
+    def test_receipt_write_failure_after_agents_restores_agents_and_package(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        (agents / "aispa-judge.md").write_bytes(self.agent_bytes("aispa-judge.md", "old"))
+        before = self.agents_state(agents)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        original = updates.atomic_json
+        calls = []
+
+        def atomic_json(path, value, *args, **kwargs):
+            if Path(path).name == "receipt.json":
+                calls.append(value.get("status"))
+                if len(calls) == 2:
+                    raise OSError("simulated receipt write failure")
+            return original(path, value, *args, **kwargs)
+
+        with patch.object(updates, "atomic_json", side_effect=atomic_json), self.assertRaises(OSError):
+            updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.agents_state(agents), before)
+        self.assertEqual(updates._snapshot(self.package)[1], review["expectedCurrentDigest"])
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
+
+    def test_interrupted_new_agent_write_leaves_no_partial_file_and_retry_installs_it(self):
+        agents = self.claude_install([])
+        before = self.agents_state(agents)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        with self.interrupted_open("aispa-worker.md"), self.assertRaises(OSError):
+            updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(self.agents_state(agents), before)
+        self.assertEqual(updates._snapshot(self.package)[1], review["expectedCurrentDigest"])
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(receipt["agents"]["installed"], ["aispa-judge.md", "aispa-worker.md"])
+        self.assertEqual(receipt["agents"]["skipped"], [])
+        self.assertEqual((agents / "aispa-worker.md").read_bytes(), self.agent_bytes("aispa-worker.md", "new"))
+
+    def test_empty_current_agent_has_hex_previous_sha_and_rolls_back(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        (self.package / "agents/claude-code/aispa-judge.md").write_bytes(b"")
+        (agents / "aispa-judge.md").write_bytes(b"")
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        change = {item["file"]: item for item in receipt["agents"]["changes"]}["aispa-judge.md"]
+        self.assertEqual(change["previousSha256"], hashlib.sha256(b"").hexdigest())
+        saved = json.loads((self.package.parent / receipt["backupId"] / "receipt.json").read_text())
+        self.assertEqual(saved["status"], "installed")
+        self.assertEqual((agents / "aispa-judge.md").read_bytes(), self.agent_bytes("aispa-judge.md", "new"))
+        updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual((agents / "aispa-judge.md").read_bytes(), b"")
+        self.assertFalse((agents / "aispa-worker.md").exists())
+
+    def failing_receipt(self, status):
+        """atomic_json that fails when a receipt with `status` is written; `state["failed"]` marks it."""
+        original = updates.atomic_json
+        state = {"failed": False}
+
+        def atomic_json(path, value, *args, **kwargs):
+            if Path(path).name == "receipt.json" and value.get("status") == status and not state["failed"]:
+                state["failed"] = True
+                raise OSError("simulated receipt write failure")
+            return original(path, value, *args, **kwargs)
+        return patch.object(updates, "atomic_json", side_effect=atomic_json), state
+
+    def test_failed_agent_undo_still_restores_package_and_names_unrestored_files(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        (agents / "aispa-judge.md").write_bytes(self.agent_bytes("aispa-judge.md", "old"))
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt_patch, state = self.failing_receipt("installed")
+        original_replace = updates._replace_file
+
+        def replace_file(path, data):
+            if state["failed"]:
+                raise OSError("simulated disk full during undo")
+            return original_replace(path, data)
+
+        with receipt_patch, patch.object(updates, "_replace_file", side_effect=replace_file), \
+             self.assertRaises(OSError) as caught:
+            updates.apply(self.package, review["candidateId"], confirmed=True)
+        self.assertEqual(str(caught.exception), "simulated receipt write failure")
+        notes = "\n".join(getattr(caught.exception, "__notes__", []))
+        self.assertIn("aispa-judge.md", notes)
+        self.assertNotIn("aispa-worker.md", notes)
+        self.assertEqual(updates._snapshot(self.package)[1], review["expectedCurrentDigest"])
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
+        self.assertFalse((agents / "aispa-worker.md").exists())
+        backup = next(self.package.parent.glob(".aispa-backup-*"))
+        self.assertIn(str(backup / "agents"), notes)
+        self.assertEqual((backup / "agents" / "aispa-judge.md").read_bytes(), self.agent_bytes("aispa-judge.md", "old"))
+
+    def test_rollback_receipt_failure_returns_agents_to_updated_state(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        (agents / "aispa-judge.md").write_bytes(self.agent_bytes("aispa-judge.md", "old"))
+        before = self.agents_state(agents)
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        updated, digest = self.agents_state(agents), updates._snapshot(self.package)[1]
+        receipt_patch, _ = self.failing_receipt("rolled_back")
+        with receipt_patch, self.assertRaises(OSError) as caught:
+            updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual(str(caught.exception), "simulated receipt write failure")
+        self.assertEqual(self.agents_state(agents), updated)
+        self.assertEqual(updates._snapshot(self.package)[1], digest)
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.3")
+        saved = json.loads((self.package.parent / receipt["backupId"] / "receipt.json").read_text())
+        self.assertEqual(saved["status"], "installed")
+        restored = updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual(restored["status"], "rolled_back")
+        self.assertEqual(self.agents_state(agents), before)
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.2")
+
+    def test_failed_rollback_undo_still_restores_package_and_names_unrestored_files(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        (agents / "aispa-judge.md").write_bytes(self.agent_bytes("aispa-judge.md", "old"))
+        with self.network([self.agent_release()]):
+            review = updates.prepare(self.package)
+        receipt = updates.apply(self.package, review["candidateId"], confirmed=True)
+        digest = updates._snapshot(self.package)[1]
+        receipt_patch, state = self.failing_receipt("rolled_back")
+        original_replace = updates.os.replace
+
+        def replace(source, destination):
+            if state["failed"] and Path(source).parent.name == "replaced-agents":
+                raise OSError("simulated disk full during undo")
+            return original_replace(source, destination)
+
+        with receipt_patch, patch.object(updates.os, "replace", side_effect=replace), \
+             self.assertRaises(OSError) as caught:
+            updates.rollback(self.package, receipt["backupId"], confirmed=True)
+        self.assertEqual(str(caught.exception), "simulated receipt write failure")
+        notes = "\n".join(getattr(caught.exception, "__notes__", []))
+        self.assertIn("aispa-judge.md", notes)
+        self.assertIn("aispa-worker.md", notes)
+        self.assertIn("replaced-agents", notes)
+        self.assertEqual(updates._snapshot(self.package)[1], digest)
+        self.assertEqual(updates._version(self.package), "0.1.0-alpha.3")
+
+    def test_agents_install_and_check_say_a_new_session_is_needed(self):
+        agents = self.claude_install(list(self.SIX_AGENTS))
+        with self.network([]):
+            view = updates.check(self.package)["agents"]
+        self.assertEqual(view["status"], "missing")
+        self.assertIn("новом сеансе Claude Code", view["message"])
+        receipt = updates.install_agents(self.package, confirmed=True)
+        self.assertEqual(receipt["status"], "installed")
+        self.assertEqual(receipt["installed"], list(self.SIX_AGENTS))
+        self.assertIn("новом сеансе Claude Code", receipt["message"])
+        again = updates.install_agents(self.package, confirmed=True)
+        self.assertEqual((again["status"], again["installed"]), ("installed", []))
+        self.assertNotIn("новом сеансе", again["message"])
+        self.assertTrue((agents / "aispa-worker.md").is_file())
+
+    def test_install_agents_refuses_a_replacement_plan_without_touching_files(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        stale = self.agent_bytes("aispa-judge.md", "stale")
+        (agents / "aispa-judge.md").write_bytes(stale)
+        before = self.agents_state(agents)
+        original = updates._agent_sources
+        calls = []
+
+        def sources(package):
+            # The package changes between the two reads of one plan.
+            result = original(package)
+            calls.append(package)
+            return dict(result, **{"aispa-judge.md": stale}) if len(calls) == 2 else result
+
+        with patch.object(updates, "_agent_sources", side_effect=sources), \
+             self.assertRaisesRegex(Invalid, "только недостающие"):
+            updates.install_agents(self.package, confirmed=True)
+        self.assertEqual(self.agents_state(agents), before)
+
+    def test_unknown_agents_status_in_check_names_directory(self):
+        agents = self.claude_install(["aispa-judge.md"])
+        with self.network([]), patch.object(updates, "agents_status", side_effect=OSError("boom")):
+            view = updates.check(self.package)["agents"]
+        self.assertEqual(view["status"], "unknown")
+        self.assertIn("directory", view)
+        self.assertEqual(view["directory"], str(agents))
+        self.assertIn("boom", view["message"])
+
     def test_package_outside_claude_skills_does_not_touch_agents(self):
         sibling = self.package.parent.parent / "agents"
         sibling.mkdir()

@@ -755,6 +755,57 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((agents / "other.md").read_bytes(), b"unrelated\n")
         self.assertEqual((agents / "aispa-researcher.md").read_bytes(), expected["aispa-researcher.md"])
 
+    def test_interrupted_agent_write_leaves_no_file_and_later_command_installs_it(self):
+        expected = self.agent_release()
+        project = self.root / "project"
+        project.mkdir()
+        original_open = Path.open
+
+        class Interrupted:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def write(self, data):
+                self.stream.write(data[:len(data) // 2])
+                self.stream.flush()
+                raise OSError("simulated interrupted agent write")
+
+            def __getattr__(self, key):
+                return getattr(self.stream, key)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.stream.close()
+                return False
+
+        def open_(path, mode="r", *args, **kwargs):
+            stream = original_open(path, mode, *args, **kwargs)
+            inside = path.parent.name == "agents" and path.parent.parent.name == ".claude"
+            return Interrupted(stream) if inside and path.name == "aispa-worker.md" and "x" in mode else stream
+
+        with self.network():
+            receipt = install.preview(runtime="claude-code", scope="project", project_root=project,
+                                      tag=self.tag, cache_dir=self.cache)
+            with patch.object(Path, "open", open_):
+                done = install.apply(receipt["candidateId"], confirmed=True, cache_dir=self.cache)
+        agents = project / ".claude" / "agents"
+        self.assertEqual(done["status"], "installed")
+        self.assertEqual(done["agents"]["status"], "failed")
+        self.assertNotIn("aispa-worker.md", done["agents"]["installed"])
+        self.assertFalse((agents / "aispa-worker.md").exists())
+        skill = project / ".claude" / "skills" / "aispa"
+        # The update path then treats it as missing and installs it, not as "different".
+        status = updates.agents_status(skill)
+        self.assertIn("aispa-worker.md", status["missing"])
+        self.assertEqual(status["different"], [])
+        later = updates.install_agents(skill, confirmed=True)
+        self.assertIn("aispa-worker.md", later["installed"])
+        self.assertEqual(later["skipped"], [{"file": name, "reason": "identical"}
+                                            for name in done["agents"]["installed"]])
+        self.assertEqual({p.name: p.read_bytes() for p in agents.iterdir()}, expected)
+
     def test_custom_destination_and_other_runtimes_install_no_agents(self):
         self.agent_release()
         receipt = self.preview()

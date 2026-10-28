@@ -60,6 +60,8 @@ def parser():
     apply.add_argument("--candidate", required=True); apply.add_argument("--confirm", action="store_true")
     rollback = sub.add_parser("update-rollback")
     rollback.add_argument("--backup", required=True); rollback.add_argument("--confirm", action="store_true")
+    agents_cmd = sub.add_parser("update-agents", help="Install missing Claude Code agent files beside the skill")
+    agents_cmd.add_argument("--confirm", action="store_true")
     init = sub.add_parser("init")
     init.add_argument("--slug", required=True)
     init.add_argument("--title", required=True)
@@ -230,7 +232,7 @@ BATCH_LIMIT = 25
 # Each step is an ordinary command with its own lock and journal event; these
 # change the package, run a server, repair the journal or create a run.
 # Resume and seal return control for mandatory dashboard/briefing host actions.
-BATCH_DENIED = frozenset({"update-check", "update-prepare", "update-apply", "update-rollback", "serve",
+BATCH_DENIED = frozenset({"update-check", "update-prepare", "update-apply", "update-rollback", "update-agents", "serve",
                           "dashboard", "init", "resume", "seal", "batch"})
 BATCH_JOURNAL_READS = frozenset({"journal-inspect", "journal-context"})
 
@@ -401,6 +403,8 @@ def execute(args):
             result = updates.prepare(PACKAGE)
         elif args.action == "update-apply":
             result = updates.apply(PACKAGE, args.candidate, confirmed=args.confirm)
+        elif args.action == "update-agents":
+            result = updates.install_agents(PACKAGE, confirmed=args.confirm)
         else:
             result = updates.rollback(PACKAGE, args.backup, confirmed=args.confirm)
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -903,7 +907,8 @@ def main():
     try:
         return execute(parser().parse_args())
     except (Invalid, OSError, ValueError) as error:
-        print("AISpa: " + str(error), file=sys.stderr)
+        # Notes carry what a failed undo could not restore (update-apply/rollback/agents).
+        print("\n".join(["AISpa: " + str(error), *getattr(error, "__notes__", ())]), file=sys.stderr)
         return 2
 
 

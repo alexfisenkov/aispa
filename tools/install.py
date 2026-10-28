@@ -537,6 +537,18 @@ def _agents_plan(target, runtime, package):
     return {"status": "planned", "directory": str(directory), "files": files}
 
 
+def _write_new(path, data):
+    """Create `path` exclusively; an interrupted write leaves no partial file behind."""
+    stream = path.open("xb")
+    try:
+        with stream:
+            stream.write(data)
+    except BaseException:
+        # The name was created by this call (O_EXCL), so removing it is safe.
+        path.unlink(missing_ok=True)
+        raise
+
+
 def _install_agents(target, runtime):
     """Copy the package's agent files; an existing file with that name is never replaced."""
     directory, reason = _agents_directory(target, runtime)
@@ -555,8 +567,7 @@ def _install_agents(target, runtime):
         for name, data in sources.items():
             path = directory / name
             try:
-                with path.open("xb") as stream:
-                    stream.write(data)
+                _write_new(path, data)
             except FileExistsError:
                 same = path.is_file() and not _is_link(path) and path.read_bytes() == data
                 skipped.append({"file": name, "reason": "identical" if same else "different"})
