@@ -436,7 +436,7 @@ const I18N = {
     doneNeed:(k,p)=>`Для настоящего запуска ${[k ? `впиши <b>${k} ${plural(k,'ключ','ключа','ключей')}</b> в .env` : '', p ? `замени <b>${p} ${plural(p,'заглушку','заглушки','заглушек')}</b> своими данными` : ''].filter(Boolean).join(' и ')}.`,
     doneNothing:"От тебя ничего не нужно — можно пользоваться.",
     doneBig:t=>`в работе · сдано в ${t}`,
-    etaLbl:"осталось — с ревью и приёмкой",etaLate:"осталось — до сдачи",stageClock:n=>`на этапе «${n}»`,
+    etaLbl:"осталось — с ревью и приёмкой",etaLate:"осталось — до сдачи",etaUnknown:"пока не знаю",slow:"идёт дольше обычного",stageClock:n=>`на этапе «${n}»`,
     paused:"пауза — часы стоят",min:"мин",hr:"ч",
     ahead:"впереди",skipped:"пропущен",failedSt:"не прошёл",waitingSt:"ждём ответа",
     tReqs:"Требования",tTickets:"Таски",tTests:"Тесты",tTime:"В работе",tBlind:"Слепая приёмка",
@@ -538,7 +538,7 @@ const I18N = {
     doneNeed:(k,p)=>`To run it for real, ${[k ? `put <b>${k} ${en(k,'key','keys')}</b> into .env` : '', p ? `replace <b>${p} ${en(p,'placeholder','placeholders')}</b> with your data` : ''].filter(Boolean).join(' and ')}.`,
     doneNothing:"Nothing is needed from you — it is ready to use.",
     doneBig:t=>`working time · done at ${t}`,
-    etaLbl:"left — with review and acceptance",etaLate:"left — until done",stageClock:n=>`in “${n}”`,
+    etaLbl:"left — with review and acceptance",etaLate:"left — until done",etaUnknown:"don't know yet",slow:"taking longer than usual",stageClock:n=>`in “${n}”`,
     paused:"paused — the clock is stopped",min:"min",hr:"h",
     ahead:"ahead",skipped:"skipped",failedSt:"failed",waitingSt:"waiting for you",
     tReqs:"Requirements",tTickets:"Tickets",tTests:"Tests",tTime:"Working time",tBlind:"Blind acceptance",
@@ -618,7 +618,106 @@ const UI = {filter: 'all', open: {}};
 
 // ——— живые таймеры ———————————————————————————————————————————————
 // Всё время считается из меток state.js. Незакрытый интервал тикает от текущего момента.
+/*ETA-BEGIN*/
+// Оценка остатка — одна функция. Она берёт только замеры: готовые шаги этого прогона,
+// а пока их мало — историю прошлых прогонов на этом компьютере (state.history, её кладёт ap.py init).
+// Чисел «из головы» здесь нет: нет замеров — ответ «пока не знаю».
 const toMs = v => { const t = v ? new Date(v).getTime() : NaN; return isNaN(t) ? null : t; };
+// Метки времени из state.js; страничные (rememberBeats) добавляет collectMarks.
+function stateMarks(S){
+  const out = [];
+  const push = v => { const t = toMs(v); if (t != null) out.push(t); };
+  push(S.startedAt); push(S.updatedAt); push(S.finishedAt);
+  (S.beats || []).forEach(push);
+  (S.stages || []).forEach(x => { push(x.startedAt); push(x.finishedAt); });
+  (S.tickets || []).forEach(x => { push(x.startedAt); push(x.finishedAt); });
+  (S.waits || []).forEach(x => { push(x.from); push(x.to); });
+  return Array.from(new Set(out)).sort((a, b) => a - b);
+}
+function collectWaits(S){
+  const out = [];
+  (S.waits || []).forEach(w => {
+    const a = toMs(w.from), b = toMs(w.to);
+    if (a != null && b != null && b > a) out.push([a, b]);
+  });
+  if (S.waiting && !S.finishedAt) {
+    const a = toMs(S.waiting.since);
+    if (a != null) out.push([a, null]);
+  }
+  return out;
+}
+// Сумма промежутков между соседними метками без ожидания пользователя; каждый обрезан по порогу простоя.
+function workMs(marks, waits, a, b, nowMs){
+  if (b <= a) return 0;
+  const waited = (x, y) => waits.reduce((s, w) => {
+    const hi = Math.min(y, w[1] == null ? nowMs : w[1]), lo = Math.max(x, w[0]);
+    return hi > lo ? s + hi - lo : s;
+  }, 0);
+  const pts = [a].concat(marks.filter(t => t > a && t < b), [b]);
+  let s = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const gap = pts[i] - pts[i-1] - waited(pts[i-1], pts[i]);
+    s += Math.min(Math.max(0, gap), IDLE_CAP_MS);
+  }
+  return s;
+}
+// Середина и разброс: нижняя и верхняя четверти. Те же формулы считает ap.py init.
+function spreadOf(list){
+  const v = list.slice().sort((a, b) => a - b), n = v.length;
+  return {median: v[n >> 1], lo: v[Math.floor((n - 1) / 4)], hi: v[Math.ceil(3 * (n - 1) / 4)]};
+}
+const isSpread = x => !!x && [x.median, x.lo, x.hi].every(Number.isFinite);
+// Результат: null — остаток не показываем (сдано, ждём ответа, сбой, этап не из сборки);
+// {unknown:true} — замеров не хватает; иначе {lo, hi} в минутах. late — идёт проверка или приёмка;
+// slow — шаги, которые идут дольше обычного (больше полутора медиан).
+function etaRange(S, now){
+  const stages = S.stages || [], T = S.tickets || [];
+  const active = stages.find(s => s.status === 'active');
+  if (S.finishedAt || S.waiting || stages.some(s => s.status === 'failed')
+      || !active || ['build', 'review', 'final'].indexOf(active.id) < 0) return null;
+  const marks = stateMarks(S), waits = collectWaits(S);
+  const mins = (from, to) => workMs(marks, waits, toMs(from), to, now) / 60000;
+  const sg = id => stages.find(s => s.id === id) || {};
+  const own = T.filter(t => t.status === 'done' && t.startedAt && t.finishedAt)
+    .map(t => Math.max(1, Math.round(mins(t.startedAt, toMs(t.finishedAt)))));
+  const H = S.history || {};
+  const basis = own.length >= 2 ? spreadOf(own)
+    : isSpread(H.ticket) ? H.ticket : own.length ? spreadOf(own) : null;
+  const running = T.filter(t => ['in-progress', 'review', 'repair'].indexOf(t.status) >= 0);
+  const spent = t => t.startedAt ? mins(t.startedAt, now) : 0;
+  const slow = basis ? running.filter(t => 2 * spent(t) > 3 * basis.median).map(t => t.id) : [];
+  const late = active.id !== 'build';
+  const tail = {review: H.review, final: H.final};
+  const need = active.id === 'build' ? ['review', 'final'] : active.id === 'review' ? ['review', 'final'] : ['final'];
+  if ((active.id === 'build' && !basis) || !need.every(id => isSpread(tail[id]))) return {unknown: true, late, slow};
+  const left = k => {
+    const byId = Object.fromEntries(T.map(t => [t.id, t]));
+    const own1 = t => t.status === 'done' || t.status === 'failed' ? 0
+      : running.indexOf(t) >= 0 && t.startedAt ? Math.max(0, basis[k] - spent(t)) : basis[k];
+    const memo = {};
+    const chain = (id, seen) => {
+      const t = byId[id];
+      if (!t || t.status === 'done') return 0;
+      if (memo[id] != null) return memo[id];
+      if (seen.has(id)) return own1(t);
+      seen.add(id);
+      const d = own1(t) + Math.max(0, ...(t.blockedBy || []).map(b => chain(b, seen)));
+      seen.delete(id);
+      return memo[id] = d;
+    };
+    const build = active.id === 'build' ? Math.max(0, ...T.map(t => chain(t.id, new Set()))) : 0;
+    const stageLeft = id => {
+      const s = sg(id);
+      if (s.status === 'done' || s.status === 'skipped') return 0;
+      const gone = s.startedAt ? mins(s.startedAt, s.finishedAt ? toMs(s.finishedAt) : now) : 0;
+      return Math.max(0, tail[id][k] - gone);
+    };
+    return build + need.reduce((sum, id) => sum + stageLeft(id), 0);
+  };
+  const lo = Math.round(left('lo')), hi = Math.round(left('hi'));
+  return hi > 0 ? {lo: Math.min(lo, hi), hi, late, slow} : {unknown: true, late, slow};
+}
+/*ETA-END*/
 const spanMs = (from, to) => {
   const a = toMs(from);
   if (a == null) return null;
@@ -648,49 +747,16 @@ function rememberBeats(S){
   } catch (e) { return []; }
 }
 function collectMarks(S){
-  const out = [];
-  const push = v => { const t = toMs(v); if (t != null) out.push(t); };
-  push(S.startedAt); push(S.updatedAt); push(S.finishedAt);
-  (S.beats || []).forEach(push);
-  rememberBeats(S).forEach(push);
-  (S.stages || []).forEach(x => { push(x.startedAt); push(x.finishedAt); });
-  (S.tickets || []).forEach(x => { push(x.startedAt); push(x.finishedAt); });
-  (S.waits || []).forEach(x => { push(x.from); push(x.to); });
+  const out = stateMarks(S);
+  rememberBeats(S).forEach(v => { const t = toMs(v); if (t != null) out.push(t); });
   return Array.from(new Set(out)).sort((a, b) => a - b);
 }
-function collectWaits(S){
-  const out = [];
-  (S.waits || []).forEach(w => {
-    const a = toMs(w.from), b = toMs(w.to);
-    if (a != null && b != null && b > a) out.push([a, b]);
-  });
-  if (S.waiting && !S.finishedAt) {
-    const a = toMs(S.waiting.since);
-    if (a != null) out.push([a, null]);
-  }
-  return out;
-}
-function waitedIn(a, b){
-  let s = 0;
-  WAITS.forEach(([x, y]) => {
-    const hi = Math.min(b, y == null ? Date.now() : y), lo = Math.max(a, x);
-    if (hi > lo) s += hi - lo;
-  });
-  return s;
-}
-// Сумма промежутков между метками без ожидания пользователя; каждый обрезан по порогу простоя.
+// Рабочее время между двумя метками — см. workMs выше.
 function activeMs(from, to){
   const a = toMs(from);
   if (a == null) return null;
   const b = (to && toMs(to)) || Date.now();
-  if (b <= a) return 0;
-  const pts = [a].concat(MARKS.filter(t => t > a && t < b), [b]);
-  let s = 0;
-  for (let i = 1; i < pts.length; i++) {
-    const gap = pts[i] - pts[i-1] - waitedIn(pts[i-1], pts[i]);
-    s += Math.min(Math.max(0, gap), IDLE_CAP_MS);
-  }
-  return s;
+  return workMs(MARKS, WAITS, a, b, Date.now());
 }
 // Стоят ли часы прямо сейчас — то есть тянется ли простой дольше порога.
 // Ожидание ответа — не простой: у него своя подпись.
@@ -891,46 +957,12 @@ function render(lang){
   const stage = id => stages.find(s => s.id === id) || {};
 
   // ——— сколько осталось ———
-  // По цепочке тасков в минутах, а не «медиана × длина цепочки»: иначе таск,
-  // который идёт двадцать седьмую минуту, стоит в оценке как не начатый.
-  // Плюс то, что идёт после разработки: ревью всей ветки и приёмка —
-  // на реальных прогонах это почти половина времени, и без них оценка врала.
-  const byId = Object.fromEntries(T.map(t => [t.id, t]));
-  const leftFor = t => {
-    if (!t || t.status === 'done') return 0;
-    const full = median || 10;
-    if (t.status === 'review') return full * 0.2;
-    if (t.status === 'repair') return full * 0.5;
-    if (t.status === 'in-progress' && t.startedAt)
-      return Math.max(1, full - (activeMs(t.startedAt, null) || 0) / 60000);
-    return full;
-  };
-  const memo = {};
-  function chainMin(id, seen){
-    const t = byId[id];
-    if (!t || t.status === 'done') return 0;
-    if (memo[id] != null) return memo[id];
-    if (seen.has(id)) return leftFor(t);
-    seen.add(id);
-    const d = leftFor(t) + Math.max(0, ...(t.blockedBy || []).map(b => chainMin(b, seen)));
-    seen.delete(id);
-    return memo[id] = d;
-  }
-  const cpMin = Math.max(0, ...T.map(t => chainMin(t.id, new Set())));
-  const stageMin = id => { const s = stage(id); return s.startedAt ? (activeMs(s.startedAt, s.finishedAt) || 0) / 60000 : 0; };
-  let left = null, lateEta = false;
-  if (!fin && !waiting && !failedStage) {
-    const buildSoFar = stageMin('build');
-    if (activeStage && activeStage.id === 'build' && median) {
-      left = cpMin + Math.max(10, 0.5 * (buildSoFar + cpMin)) + 8;
-    } else if (activeStage && activeStage.id === 'review') {
-      left = Math.max(5, 0.6 * buildSoFar - stageMin('review')) + 8; lateEta = true;
-    } else if (activeStage && activeStage.id === 'final') {
-      left = Math.max(3, 10 - stageMin('final')); lateEta = true;
-    }
-  }
-  const eta = left ? [Math.max(1, Math.round(left * 0.75)), Math.max(2, Math.round(left * 1.4))] : null;
-  const etaText = eta ? (eta[1] < 60 ? `${eta[0]}–${eta[1]}<small>${L.min}</small>`
+  // Только по замерам: этого прогона, а пока их мало — по истории на этом компьютере (etaRange).
+  const E = etaRange(S, Date.now());
+  const eta = E && !E.unknown ? [E.lo, E.hi] : null;
+  const lateEta = !!(E && E.late);
+  const slowIds = E && E.slow ? E.slow : [];
+  const etaText = eta ? (eta[1] < 60 ? `${eta[0] === eta[1] ? eta[1] : eta[0] + '–' + eta[1]}<small>${L.min}</small>`
     : `${fmtDur(eta[0])} — ${fmtDur(eta[1])}`) : '';
 
   // ——— шапка ———
@@ -970,6 +1002,7 @@ function render(lang){
       lead = cur.note ? esc(cur.note) : (L.leadRun[cur.id] || '');
     }
     if (eta) { big = etaText; bigSub = lateEta ? L.etaLate : L.etaLbl; }
+    else if (E && E.unknown) { big = `<small>${L.etaUnknown}</small>`; bigSub = lateEta ? L.etaLate : L.etaLbl; }
     else if (cur.startedAt) { big = timerHTML(cur.startedAt, null); bigSub = L.stageClock(stName(cur)); }
   }
   // Шкала этапов: пройденное залито, текущее — в полоску, пропущенное — штриховкой.
@@ -1054,7 +1087,8 @@ function render(lang){
         const why = String(t.review || '').replace(/^(да|yes)\s*[—–-]\s*/i, '');
         const note = t.status === 'repair' && (t.repairFindings || []).length ? ['fix', L.noteRepair(t.repairFindings[t.repairFindings.length - 1])]
           : t.status === 'review' && /^(да|yes)/i.test(t.review || '') && why ? ['rev', L.noteReview(why)]
-          : t.status === 'failed' && (t.concerns || []).length ? ['bad', t.concerns.join('; ')] : null;
+          : t.status === 'failed' && (t.concerns || []).length ? ['bad', t.concerns.join('; ')]
+          : slowIds.indexOf(t.id) >= 0 ? ['rev', L.slow] : null;
         const extra = t.status === 'done' && (t.repairs || t.retries)
           ? ' · ' + [t.repairs ? L.tkParts.repair(t.repairs) : '', t.retries ? L.tkParts.retry(t.retries) : ''].filter(Boolean).join(' · ') : '';
         return `<div class="tl"><span class="tl-id${k.on ? ' on' : ''}">${esc(t.id)}</span>
