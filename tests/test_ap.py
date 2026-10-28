@@ -597,7 +597,7 @@ class Eta(unittest.TestCase):
     def test_history_gives_the_range(self):
         # цепочка из двух шагов: 10+10 и 40+40, потом проверка 10..30 и приёмка 3..8
         r = self.eta(eta_state([tk("01", "pending"), tk("02", "pending", blocked=["01"])], HIST), 5)
-        self.assertEqual((r["lo"], r["hi"], r["late"]), (33, 118, False))
+        self.assertEqual((r["lo"], r["hi"], r["late"], r["tailUnknown"]), (33, 118, False, False))
 
     def test_own_measurements_beat_history(self):
         done = [tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 30)),
@@ -605,10 +605,33 @@ class Eta(unittest.TestCase):
         r = self.eta(eta_state(done, HIST), 30)
         self.assertEqual((r["lo"], r["hi"]), (10 + 10 + 3, 20 + 30 + 8))      # 10 20: свой разброс; хвост из истории
 
-    def test_range_is_unknown_when_the_tail_has_no_history(self):
+    def test_two_own_steps_without_history_give_the_build_range_and_leave_the_tail_open(self):
+        # свои 10 и 20 мин → разброс 10..20 на оставшийся шаг; проверка и приёмка числами не добавлены
+        done = [tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 30)),
+                tk("03", "pending")]
+        r = self.eta(eta_state(done), 30)
+        self.assertEqual((r["lo"], r["hi"], r["late"], r["tailUnknown"]), (10, 20, False, True))
+        self.assertNotIn("unknown", r)
+
+    def test_one_own_step_without_history_says_dont_know_yet(self):
+        r = self.eta(eta_state([tk("01", "done", at(10), at(10, 10)), tk("02", "pending")]), 10)
+        self.assertTrue(r["unknown"])
+        self.assertNotIn("lo", r)
+
+    def test_step_history_without_tail_history_gives_only_the_build_range(self):
         own = {"runs": 1, "ticket": {"median": 20, "lo": 10, "hi": 40}}
         r = self.eta(eta_state([tk("01", "pending")], own), 5)
-        self.assertTrue(r["unknown"])
+        self.assertEqual((r["lo"], r["hi"], r["tailUnknown"]), (10, 40, True))
+
+    def test_review_without_history_says_dont_know_yet(self):
+        s = eta_state([tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 30))],
+                      stage="review")
+        self.assertTrue(self.eta(s, 40)["unknown"])
+
+    def test_the_panel_names_the_open_tail_in_one_line(self):
+        html = read(TEMPLATE)
+        self.assertIn("плюс проверка и приёмка — пока не знаю", html)
+        self.assertIn("tailUnknown", html[html.index("/*ETA-END*/"):])
 
     def test_a_ticket_over_one_and_a_half_medians_is_slow(self):
         tickets = [tk("01", "in-progress", at(10)), tk("02", "in-progress", at(10, 20))]
@@ -651,9 +674,28 @@ class Eta(unittest.TestCase):
         r = subprocess.run([NODE, ETA_TOOL, self.finished_run(True), self.finished_run(False)],
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "точек с диапазоном: 4\nпопало внутрь: 3\nпока не знаю: 4\n")
+        self.assertEqual(r.stdout, "точек с диапазоном: 4\nпопало внутрь: 3\nпока не знаю: 4\n"
+                                   "доля с диапазоном: 50%\nдоля «пока не знаю»: 50%\n")
         for private in ("private", "Private", self.tmp, "state.js"):
             self.assertNotIn(private, r.stdout)
+
+    def test_honesty_tool_finds_ranges_in_a_run_without_history(self):
+        # Три шага по 10 мин, истории нет. В 10:20 сданы два шага: остаток разработки 10..10,
+        # разработка и правда кончилась в 10:30 — внутри. Остальные четыре момента — «пока не знаю».
+        s = {"startedAt": at(10), "updatedAt": at(10, 50), "finishedAt": at(10, 50), "waits": [], "waiting": None,
+             "beats": [at(10), at(10, 10), at(10, 20), at(10, 30), at(10, 45), at(10, 50)],
+             "stages": [{"id": "build", "status": "done", "startedAt": at(10), "finishedAt": at(10, 30)},
+                        {"id": "review", "status": "done", "startedAt": at(10, 30), "finishedAt": at(10, 45)},
+                        {"id": "final", "status": "done", "startedAt": at(10, 45), "finishedAt": at(10, 50)}],
+             "tickets": [tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 20)),
+                         tk("03", "done", at(10, 20), at(10, 30))]}
+        path = os.path.join(self.tmp, "fresh-machine-state.js")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("window.STATE =\n" + json.dumps(s) + "\n")
+        r = subprocess.run([NODE, ETA_TOOL, path], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "точек с диапазоном: 1\nпопало внутрь: 1\nпока не знаю: 4\n"
+                                   "доля с диапазоном: 20%\nдоля «пока не знаю»: 80%\n")
 
 
 class Pure(unittest.TestCase):

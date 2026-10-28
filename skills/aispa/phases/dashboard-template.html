@@ -105,7 +105,7 @@
   .hero h2{margin:0;font-size:34px;line-height:1.1;font-weight:700;letter-spacing:-.03em;text-wrap:balance;max-width:32ch;overflow-wrap:anywhere}
   .lead{margin:12px 0 0;font-size:16.5px;line-height:1.5;color:var(--h-mut);max-width:64ch}
   .lead b{color:var(--h-tx);font-weight:650}
-  .big{text-align:right;flex:0 0 auto}
+  .big{text-align:right;flex:0 0 auto;max-width:100%}
   .big b{display:block;font-size:58px;line-height:.95;font-weight:700;letter-spacing:-.045em}
   .big b small{font-size:24px;letter-spacing:-.02em;font-weight:600;margin-left:6px}
   .big>span{display:block;font-size:14px;color:var(--h-mut);margin-top:10px}
@@ -436,7 +436,7 @@ const I18N = {
     doneNeed:(k,p)=>`Для настоящего запуска ${[k ? `впиши <b>${k} ${plural(k,'ключ','ключа','ключей')}</b> в .env` : '', p ? `замени <b>${p} ${plural(p,'заглушку','заглушки','заглушек')}</b> своими данными` : ''].filter(Boolean).join(' и ')}.`,
     doneNothing:"От тебя ничего не нужно — можно пользоваться.",
     doneBig:t=>`в работе · сдано в ${t}`,
-    etaLbl:"осталось — с ревью и приёмкой",etaLate:"осталось — до сдачи",etaUnknown:"пока не знаю",slow:"идёт дольше обычного",stageClock:n=>`на этапе «${n}»`,
+    etaLbl:"осталось — с ревью и приёмкой",etaLate:"осталось — до сдачи",etaBuild:"осталось на разработку, плюс проверка и приёмка — пока не знаю",etaUnknown:"пока не знаю",slow:"идёт дольше обычного",stageClock:n=>`на этапе «${n}»`,
     paused:"пауза — часы стоят",min:"мин",hr:"ч",
     ahead:"впереди",skipped:"пропущен",failedSt:"не прошёл",waitingSt:"ждём ответа",
     tReqs:"Требования",tTickets:"Шаги",tTests:"Тесты",tTime:"В работе",tBlind:"Слепая приёмка",
@@ -538,7 +538,7 @@ const I18N = {
     doneNeed:(k,p)=>`To run it for real, ${[k ? `put <b>${k} ${en(k,'key','keys')}</b> into .env` : '', p ? `replace <b>${p} ${en(p,'placeholder','placeholders')}</b> with your data` : ''].filter(Boolean).join(' and ')}.`,
     doneNothing:"Nothing is needed from you — it is ready to use.",
     doneBig:t=>`working time · done at ${t}`,
-    etaLbl:"left — with review and acceptance",etaLate:"left — until done",etaUnknown:"don't know yet",slow:"taking longer than usual",stageClock:n=>`in “${n}”`,
+    etaLbl:"left — with review and acceptance",etaLate:"left — until done",etaBuild:"left for building, plus checking and acceptance — don't know yet",etaUnknown:"don't know yet",slow:"taking longer than usual",stageClock:n=>`in “${n}”`,
     paused:"paused — the clock is stopped",min:"min",hr:"h",
     ahead:"ahead",skipped:"skipped",failedSt:"failed",waitingSt:"waiting for you",
     tReqs:"Requirements",tTickets:"Tickets",tTests:"Tests",tTime:"Working time",tBlind:"Blind acceptance",
@@ -669,7 +669,8 @@ function spreadOf(list){
 const isSpread = x => !!x && [x.median, x.lo, x.hi].every(Number.isFinite);
 // Результат: null — остаток не показываем (сдано, ждём ответа, сбой, этап не из сборки);
 // {unknown:true} — замеров не хватает; иначе {lo, hi} в минутах. late — идёт проверка или приёмка;
-// slow — шаги, которые идут дольше обычного (больше полутора медиан).
+// slow — шаги, которые идут дольше обычного (больше полутора медиан);
+// tailUnknown — на разработке без истории проверки и приёмки: в {lo, hi} только остаток разработки.
 function etaRange(S, now){
   const stages = S.stages || [], T = S.tickets || [];
   const active = stages.find(s => s.status === 'active');
@@ -689,7 +690,11 @@ function etaRange(S, now){
   const late = active.id !== 'build';
   const tail = {review: H.review, final: H.final};
   const need = active.id === 'build' ? ['review', 'final'] : active.id === 'review' ? ['review', 'final'] : ['final'];
-  if ((active.id === 'build' && !basis) || !need.every(id => isSpread(tail[id]))) return {unknown: true, late, slow};
+  // Проверка и приёмка без истории числами не добавляются: на разработке остаётся её собственный остаток
+  // по замерам — двум сданным шагам этого прогона или истории шагов, а хвост подписан «пока не знаю».
+  const tailUnknown = !need.every(id => isSpread(tail[id]));
+  const solid = own.length >= 2 || isSpread(H.ticket);
+  if (active.id === 'build' ? !basis || (tailUnknown && !solid) : tailUnknown) return {unknown: true, late, slow};
   const left = k => {
     const byId = Object.fromEntries(T.map(t => [t.id, t]));
     const own1 = t => t.status === 'done' || t.status === 'failed' ? 0
@@ -712,10 +717,10 @@ function etaRange(S, now){
       const gone = s.startedAt ? mins(s.startedAt, s.finishedAt ? toMs(s.finishedAt) : now) : 0;
       return Math.max(0, tail[id][k] - gone);
     };
-    return build + need.reduce((sum, id) => sum + stageLeft(id), 0);
+    return build + (tailUnknown ? 0 : need.reduce((sum, id) => sum + stageLeft(id), 0));
   };
   const lo = Math.round(left('lo')), hi = Math.round(left('hi'));
-  return hi > 0 ? {lo: Math.min(lo, hi), hi, late, slow} : {unknown: true, late, slow};
+  return hi > 0 ? {lo: Math.min(lo, hi), hi, late, slow, tailUnknown} : {unknown: true, late, slow};
 }
 /*ETA-END*/
 const spanMs = (from, to) => {
@@ -1001,7 +1006,7 @@ function render(lang){
       h2 = L.h2Run[cur.id] || stName(cur);
       lead = cur.note ? esc(cur.note) : (L.leadRun[cur.id] || '');
     }
-    if (eta) { big = etaText; bigSub = lateEta ? L.etaLate : L.etaLbl; }
+    if (eta) { big = etaText; bigSub = lateEta ? L.etaLate : E.tailUnknown ? L.etaBuild : L.etaLbl; }
     else if (E && E.unknown) { big = `<small>${L.etaUnknown}</small>`; bigSub = lateEta ? L.etaLate : L.etaLbl; }
     else if (cur.startedAt) { big = timerHTML(cur.startedAt, null); bigSub = L.stageClock(stName(cur)); }
   }

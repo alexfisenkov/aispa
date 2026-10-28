@@ -6,7 +6,8 @@
 //
 // Формула берётся из шаблона по меткам ETA-BEGIN / ETA-END, как есть. Для каждого сданного
 // прогона состояние восстанавливается на каждую метку времени (с тем, что было известно в тот момент,
-// и с историей, которую init положил в этот state.js). Вывод — только числа:
+// и с историей, которую init положил в этот state.js). Диапазон только разработки (tailUnknown:
+// проверка и приёмка без истории) сверяется с реальным концом этапа «Разработка». Вывод — только числа:
 // ни названий, ни slug, ни путей.
 'use strict';
 const fs = require('fs');
@@ -63,16 +64,23 @@ for (const file of process.argv.slice(2)) {
   const end = eta.toMs(S.finishedAt);
   if (end == null) continue;                              // идущие прогоны не судим
   const marks = eta.stateMarks(S), waits = eta.collectWaits(S);
+  const build = (S.stages || []).find(s => s.id === 'build') || {};
+  const buildEnd = eta.toMs(build.finishedAt);
   for (const t of marks) {
     if (t >= end) continue;
     const r = eta.etaRange(asOf(S, t), t);
     if (!r) continue;
     if (r.unknown) { unknown += 1; continue; }
+    const until = r.tailUnknown ? buildEnd : end;
+    if (until == null) continue;                          // разработка не закончилась — судить не с чем
     ranged += 1;
-    const real = eta.workMs(marks, waits, t, end, end) / 60000;
+    const real = eta.workMs(marks, waits, t, until, end) / 60000;
     if (real >= r.lo && real <= r.hi) inside += 1;
   }
 }
 console.log('точек с диапазоном: ' + ranged);
 console.log('попало внутрь: ' + inside);
 console.log('пока не знаю: ' + unknown);
+const share = n => (ranged + unknown ? Math.round(100 * n / (ranged + unknown)) : 0) + '%';
+console.log('доля с диапазоном: ' + share(ranged));
+console.log('доля «пока не знаю»: ' + share(unknown));

@@ -81,6 +81,18 @@ FACTS = {
 }
 
 
+# Служебные оси канона — режимы и глубина 1.0, как в phases/0-modes.md.
+AXES = {"modes": ["full", "semi", "interview", "manual"], "depth": ["strict", "normal", "deep"], "independent": True}
+WITHDRAWN_MODES = re.compile(r'"(?:fast|balanced|max|auto|important|compact|standard)"')
+
+
+def dials(section):
+    """Имена из первой колонки таблицы раздела phases/0-modes.md: | **full** — …"""
+    text = (PACKAGE / "phases/0-modes.md").read_text(encoding="utf-8")
+    body = text.split("## " + section, 1)[1].split("\n## ", 1)[0]
+    return re.findall(r"^\| \*\*([a-z]+)\*\*", body, re.M)
+
+
 def removed_paths():
     """Пути, которые опись отдаёт на удаление (тег 0.5), для проверки привязок."""
     path = ROOT / "docs/опись-0.5.md"
@@ -100,8 +112,7 @@ class SupportFaqTests(unittest.TestCase):
         value = {"schema": 1, "packageVersion": "1.0.0",
                  "source": {"repository": "alexfisenkov/aispa",
                             "files": [{"path": "tools/aispa_core/__init__.py", "sha256": sha(source.read_bytes())}]},
-                 "axes": {"questions": ["auto", "important", "interview"], "checks": ["fast", "balanced", "max"],
-                          "interviewScopes": ["compact", "standard", "deep"], "independent": True},
+                 "axes": copy.deepcopy(AXES),
                  "entries": [{"id": "modes", "question": "Режимы?", "answer": "Режим и глубина выбираются отдельно."},
                              {"id": "ordinary-autonomy", "question": "Нужно разрешение?",
                               "answer": "Нет; <повтор> спросит только перед необратимым."}]}
@@ -183,6 +194,23 @@ class SupportFaqTests(unittest.TestCase):
                 support_faq.select(root, version="1.0.0")
 
     # ── канон: набор записей, версия, привязки ──
+
+    def test_axes_are_the_modes_and_depth_of_the_modes_phase(self):
+        self.assertEqual(AXES["modes"], dials("Mode"))
+        self.assertEqual(AXES["depth"], dials("Depth"))
+        self.assertEqual(self.canon()["axes"], AXES)
+        self.assertEqual(support_faq.select(PACKAGE, version=VERSION)["axes"], AXES)
+        self.assertIsNone(WITHDRAWN_MODES.search((PACKAGE / "references/support-faq.json").read_text(encoding="utf-8")))
+
+    def test_canon_with_withdrawn_check_modes_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value, path = self.fixture(root)
+            value["axes"] = {"questions": ["auto", "important", "interview"], "checks": ["fast", "balanced", "max"],
+                             "interviewScopes": ["compact", "standard", "deep"], "independent": True}
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(Invalid, "mode axes"):
+                support_faq.select(root, version="1.0.0")
 
     def test_canon_has_exactly_the_25_entries_of_the_route(self):
         canon = self.canon()
@@ -340,6 +368,8 @@ class SupportFaqTests(unittest.TestCase):
         selected = json.loads(result.stdout)
         self.assertEqual(selected["packageVersion"], "1.0.0")
         self.assertEqual({row["id"] for row in selected["entries"]}, ENTRY_IDS)
+        self.assertEqual(selected["axes"], AXES)
+        self.assertIsNone(WITHDRAWN_MODES.search(result.stdout), "Снятые режимы проверки в ответе не называются")
         old = subprocess.run([sys.executable, "-B", str(PACKAGE / "tools/aispa.py"), "faq", "--version", "0.5.0"],
                              capture_output=True, text=True, encoding="utf-8", timeout=30,
                              env={**os.environ, "PYTHONPATH": ""})

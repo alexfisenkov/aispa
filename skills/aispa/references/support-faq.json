@@ -22,7 +22,7 @@
       },
       {
         "path": "tools/aispa_core/support_faq.py",
-        "sha256": "9072c26ac430bddbb160bba9c38d76924a0e1650b827171ff8b480fb89c5a718"
+        "sha256": "399b9efb5f9ef0559bbb7fbaee2273c99d913f222f85a8172abc7cdf0ed9527a"
       },
       {
         "path": "tools/ap.py",
@@ -111,19 +111,15 @@
     ]
   },
   "axes": {
-    "questions": [
-      "auto",
-      "important",
-      "interview"
+    "modes": [
+      "full",
+      "semi",
+      "interview",
+      "manual"
     ],
-    "checks": [
-      "fast",
-      "balanced",
-      "max"
-    ],
-    "interviewScopes": [
-      "compact",
-      "standard",
+    "depth": [
+      "strict",
+      "normal",
       "deep"
     ],
     "independent": true

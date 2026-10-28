@@ -137,14 +137,30 @@ class NarrowPackageTests(unittest.TestCase):
         driver = self.root / "faq.py"
         driver.write_text(FAQ, encoding="utf-8")
         new_tools = narrow_package(self.root / "aispa") / "tools"
+        # Служебные оси 1.0 — режимы и глубина, модуль тега знает только прежние. Поэтому каждый модуль
+        # читает копию пакета со своими осями, а сравнивается всё, кроме осей и хеша самого канона:
+        # записи, привязки к файлам, версия.
+        canon = lambda package: json.loads((package / "references/support-faq.json").read_text(encoding="utf-8"))
+        axes = {"old": canon(old_tools.parent)["axes"], "new": canon(ROOT / "skills/aispa")["axes"]}
+        self.assertNotEqual(axes["old"], axes["new"])
         for package, version in ((old_tools.parent, "0.5.0"), (ROOT / "skills/aispa", aispa_core.VERSION)):
             with self.subTest(package=package.parent.name, version=version):
-                answers = [python(driver, tools, package, version) for tools in (old_tools, new_tools)]
-                for answer in answers:
+                answers = []
+                for side, tools in (("old", old_tools), ("new", new_tools)):
+                    copy = self.root / side / version / "aispa"
+                    shutil.copytree(package, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+                    value = canon(copy)
+                    value["axes"] = axes[side]
+                    (copy / "references/support-faq.json").write_text(
+                        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                    answer = python(driver, tools, copy, version)
                     self.assertEqual(answer.returncode, 0, answer.stderr)
-                self.assertEqual(json.loads(answers[1].stdout), json.loads(answers[0].stdout))
-                if version == "0.5.0":
-                    self.assertTrue(json.loads(answers[1].stdout)["ok"])
+                    result = json.loads(answer.stdout)
+                    self.assertTrue(result["ok"], result["value"])
+                    self.assertEqual(result["value"].pop("axes"), axes[side])
+                    result["value"].pop("canonicalSha256")
+                    answers.append(result["value"])
+                self.assertEqual(answers[1], answers[0])
 
     def test_old_run_commands_point_to_the_pinned_copy(self):
         tool = narrow_package(self.root / "aispa") / "tools/aispa.py"

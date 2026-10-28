@@ -78,8 +78,9 @@ def select(package, *, version, ids=None, expected_sha256=None):
     _need(isinstance(value, dict) and set(value) == {"schema", "packageVersion", "source", "axes", "entries"}
           and type(value["schema"]) is int and value["schema"] == 1 and value["packageVersion"] == version,
           "unsupported schema/version or unexpected private metadata")
-    axes = {"questions": ["auto", "important", "interview"], "checks": ["fast", "balanced", "max"],
-            "interviewScopes": ["compact", "standard", "deep"], "independent": True}
+    # The two dials of phases/0-modes.md: how much the user is asked, how much is worked out for them.
+    axes = {"modes": ["full", "semi", "interview", "manual"], "depth": ["strict", "normal", "deep"],
+            "independent": True}
     _need(isinstance(value["axes"], dict) and value["axes"] == axes
           and value["axes"].get("independent") is True, "mode axes must stay independent")
     source = value["source"]

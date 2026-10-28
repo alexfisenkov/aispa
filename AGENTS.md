@@ -23,8 +23,22 @@ AISpa 1.0 — это Autopilot 2.2.0 Ника Велса (MIT) с правкам
 `skills/aispa/references/support-faq.json` — канон ответов на вопросы
 учеников, `docs/support-faq.md` получается из него генератором
 `tools/render_support_faq.py`. Руками второй файл не правят. Ответ привязан к
-файлам пакета; изменил такой файл — перечитай ответ и пересобери привязки
-(`python3 tools/render_support_faq.py --rebind`).
+файлам пакета; изменил такой файл — перечитай ответ и пересобери привязки и
+документ (из корня репозитория; квитанция генератора нужна только для проверки,
+поэтому — во временный файл):
+
+```sh
+python3 tools/render_support_faq.py --rebind --package skills/aispa --version 1.0.0 --output docs/support-faq.md --receipt "$(mktemp)"
+```
+
+Проверка, что канон свежий и `docs/support-faq.md` собран из него (первая
+команда кладёт квитанцию во временный файл, вторая сверяет по ней документ),
+и что установленный пакет отвечает:
+
+```sh
+r="$(mktemp)" && python3 tools/render_support_faq.py --package skills/aispa --version 1.0.0 --output "$(mktemp)" --receipt "$r" && python3 tools/render_support_faq.py --check --package skills/aispa --version 1.0.0 --output docs/support-faq.md --receipt "$r"
+python3 skills/aispa/tools/aispa.py faq --version 1.0.0
+```
 
 ## Публичный репозиторий
 
