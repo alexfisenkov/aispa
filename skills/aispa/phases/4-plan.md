@@ -124,7 +124,7 @@ A ticket that exists only in the dialogue is not a ticket — the user is shown 
 
 ## Showing the plan
 
-**Parallelism gets one line, and only if it is true**: «6 тасков в 4 волны, часть пойдёт параллельно».
+**Parallelism gets one line, and only if it is true**: «6 шагов в 4 волны, часть пойдёт параллельно».
 
 - **semi, interview** — one screen, one plain line per ticket saying what the user will be able to do when it lands, then «Показываю план и начинаю. Скажи "стоп", если что-то не так» — and start. Never promise a countdown you cannot hold.
 - **full** — the same screen as a notification.

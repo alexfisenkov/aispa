@@ -42,10 +42,10 @@ Phase names here are English and never shown. In the chat, on the dashboard and 
 
 | Stage id | Пользователю |
 |---|---|
-| `preflight` · `manifest` · `briefing` · `spec` | Подготовка · Требования · Брифинг · Спецификация |
-| `plan` · `build` · `review` · `final` | План · Разработка · Код-ревью · Приёмка |
+| `preflight` · `manifest` · `briefing` · `spec` | Подготовка · Требования · Вопросы · Описание |
+| `plan` · `build` · `review` · `final` | План · Разработка · Проверка · Приёмка |
 
-**«Сборка» — весь прогон**, поэтому пятый этап — «Разработка». **Единица работы — «таск»**: «задача» — это то, что поставил пользователь.
+**«Сборка» — весь прогон**, поэтому пятый этап — «Разработка». **Единица работы — «шаг»**: «задача» — это то, что поставил пользователь.
 
 ## The flight
 
@@ -99,7 +99,7 @@ Codex IDs: сверить с каталогом среды; новый ID — т
 
 - A subagent never gets Fable, Astra, `inherit`, an empty model, xhigh, max or ultra — not on the hardest task either; nothing above Opus · high or Sol · high.
 - Astra is known but not for subagents; an unfamiliar ID is never accepted by its prefix.
-- Advise the main chat Opus 5.5 in Claude Code and Sol 6.1 in Codex: high on the brief and the plan, medium after.
+- Advise the main chat Opus 5.5 in Claude Code and Sol 6.1 in Codex: high on the brief and the plan, medium after. Fable or Astra in the main chat only by the user's own informed choice.
 - An agent file that is not visible (installed in this same session) → a built-in agent with the `model` parameter, and one line to the user: «усилие не применено».
 
 ## Files this skill owns

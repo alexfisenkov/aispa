@@ -58,4 +58,4 @@ Then `phases/8-final.md`.
 
 ## Reporting
 
-To the user, nothing per ticket. After the whole-branch review, one line: «Код-ревью: нашлось 7 замечаний, 4 поправил, 3 — в отчёте».
+To the user, nothing per ticket. After the whole-branch review, one line: «Проверка: нашлось 7 замечаний, 4 поправил, 3 — в отчёте».
