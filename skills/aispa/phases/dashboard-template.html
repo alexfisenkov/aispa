@@ -10,7 +10,10 @@
 <style>
   /* Цвет здесь — сигнал, а не украшение: у каждого состояния сборки свой.
      Графит — идёт работа, хром — ждём человека, синий — таск пишется,
-     зелёный — сдано, бирюзовый — проверка, янтарный — ремонт, красный — упало. */
+     зелёный — сдано, бирюзовый — проверка, янтарный — ремонт, красный — упало.
+     Палитра — AISpa 0.5: графит, хром, синий, бирюзовый, ремонт #854D0E, упало #991B1B и светлые плашки.
+     Производные (в 0.5 такой роли нет): --done #18784E (темнее #1F8A5B ради белого текста AA), --tx2, --line2,
+     тёмные --inset и градиент шапки, #34A56F и #4F7DF0 на полосе этапов. */
   :root{
     --bg:#F4F5F6; --card:#FFFFFF; --inset:#F4F5F6; --soft:#ECEDEF; --line:#E3E4E7; --line2:#D5D7DB;
     --tx:#181A1C; --tx2:#3A3C40; --mut:#55585E; --quiet:#62666D;
@@ -18,8 +21,8 @@
     --done:#18784E; --done-soft:#DCFCE7; --done-tx:#166534;
     --now:#1D4ED8; --now-on:#FFFFFF; --now-soft:#DBEAFE; --now-tx:#1D4ED8;
     --rev:#0F766E; --rev-soft:#CCFBF1; --rev-tx:#0F766E;
-    --fix:#92400E; --fix-soft:#FEF3C7; --fix-tx:#92400E;
-    --bad:#B91C1C; --bad-soft:#FEE2E2; --bad-tx:#991B1B;
+    --fix:#854D0E; --fix-soft:#FEF3C7; --fix-tx:#854D0E;
+    --bad:#991B1B; --bad-soft:#FEE2E2; --bad-tx:#991B1B;
     --idle:#C7C9CC; --logo-filter:none;
     --sh:0 1px 2px rgba(20,20,22,.04),0 20px 50px -30px rgba(20,20,22,.22);
     --sh-raised:0 1px 2px rgba(20,20,22,.04),0 16px 36px -24px rgba(20,20,22,.24);
@@ -32,8 +35,8 @@
       --done:#18784E; --done-soft:#123523; --done-tx:#86EFAC;
       --now-soft:#192E50; --now-tx:#93C5FD;
       --rev:#0F766E; --rev-soft:#123D38; --rev-tx:#99F6E4;
-      --fix:#92400E; --fix-soft:#3D3217; --fix-tx:#FDE68A;
-      --bad:#B91C1C; --bad-soft:#431C22; --bad-tx:#FCA5A5;
+      --fix:#854D0E; --fix-soft:#3D3217; --fix-tx:#FDE68A;
+      --bad:#991B1B; --bad-soft:#431C22; --bad-tx:#FCA5A5;
       --idle:#4A4C52; --logo-filter:invert(1);
       --sh:0 1px 0 rgba(255,255,255,.04) inset,0 20px 50px -30px rgba(0,0,0,.8);
       --sh-raised:0 16px 36px -24px rgba(0,0,0,.8);
@@ -47,8 +50,8 @@
     --done:#18784E; --done-soft:#123523; --done-tx:#86EFAC;
     --now-soft:#192E50; --now-tx:#93C5FD;
     --rev:#0F766E; --rev-soft:#123D38; --rev-tx:#99F6E4;
-    --fix:#92400E; --fix-soft:#3D3217; --fix-tx:#FDE68A;
-    --bad:#B91C1C; --bad-soft:#431C22; --bad-tx:#FCA5A5;
+    --fix:#854D0E; --fix-soft:#3D3217; --fix-tx:#FDE68A;
+    --bad:#991B1B; --bad-soft:#431C22; --bad-tx:#FCA5A5;
     --idle:#4A4C52; --logo-filter:invert(1);
     --sh:0 1px 0 rgba(255,255,255,.04) inset,0 20px 50px -30px rgba(0,0,0,.8);
     --sh-raised:0 16px 36px -24px rgba(0,0,0,.8);
@@ -102,8 +105,8 @@
     border-radius:28px;padding:28px 30px 26px;display:flex;flex-direction:column;gap:28px;
     background:var(--hero);color:var(--h-tx);box-shadow:0 30px 60px -32px var(--hero-shadow);min-width:0}
   .hero.ask{background:linear-gradient(165deg,#FFFFFF 0%,#E0E2E5 45%,#C7C9CC 100%);--h-tx:#171717;--h-mut:rgba(23,23,23,.78);--h-track:rgba(23,23,23,.14);box-shadow:0 30px 60px -30px rgba(20,20,22,.45),inset 0 1px 0 #fff}
-  .hero.won{background:#18784E;--h-track:rgba(255,255,255,.22);box-shadow:0 30px 60px -30px rgba(24,120,78,.6)}
-  .hero.bad{background:#B91C1C;--h-track:rgba(255,255,255,.22);box-shadow:0 30px 60px -30px rgba(185,28,28,.55)}
+  .hero.won{background:#18784E;--h-mut:rgba(255,255,255,.9);--h-track:rgba(255,255,255,.22);box-shadow:0 30px 60px -30px rgba(24,120,78,.6)}
+  .hero.bad{background:#991B1B;--h-track:rgba(255,255,255,.22);box-shadow:0 30px 60px -30px rgba(153,27,27,.55)}
   .hero-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:20px 40px}
   .hero-main{flex:1 1 420px;min-width:0}
   .state{display:inline-flex;align-items:center;gap:9px;font-size:14px;font-weight:700;margin-bottom:12px}
@@ -134,7 +137,7 @@
   .hero.ask .live{background:#171717;outline:0}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(29,78,216,.6)}70%{box-shadow:0 0 0 9px rgba(29,78,216,0)}100%{box-shadow:0 0 0 0 rgba(29,78,216,0)}}
   .badge-ic{width:26px;height:26px;border-radius:50%;background:#fff;display:inline-flex;align-items:center;justify-content:center}
-  .hero.won .badge-ic{color:#18784E}.hero.bad .badge-ic{color:#B91C1C}
+  .hero.won .badge-ic{color:#18784E}.hero.bad .badge-ic{color:#991B1B}
   .stripes{background-image:linear-gradient(135deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.28) 75%,transparent 75%,transparent);background-size:22px 22px;animation:stripes 1.1s linear infinite}
   .hero.ask .stripes{background-image:linear-gradient(135deg,rgba(23,23,23,.28) 25%,transparent 25%,transparent 50%,rgba(23,23,23,.28) 50%,rgba(23,23,23,.28) 75%,transparent 75%,transparent)}
   @keyframes stripes{to{background-position:22px 0}}
@@ -176,8 +179,7 @@
   .tl-id.on{color:var(--tx)}
   .bar{height:42px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 6px 0 15px;font-size:14.5px;font-weight:650;min-width:0}
   .bar .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .chipin{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;background:rgba(255,255,255,.2);font-size:12.5px;font-weight:700;white-space:nowrap}
-  .f-now .chipin{background:rgba(255,255,255,.2)}
+  .chipin{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;background:rgba(0,0,0,.22);font-size:12.5px;font-weight:700;white-space:nowrap}
   .f-wait .chipin{background:var(--inset);color:var(--mut)}
   .tl-time{font-size:13.5px;font-weight:650;text-align:right;color:var(--mut);white-space:nowrap}
   .tl-time.now{color:var(--now-tx)}.tl-time.fix{color:var(--fix-tx)}.tl-time.rev{color:var(--rev-tx)}.tl-time.bad{color:var(--bad-tx)}
