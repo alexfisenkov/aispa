@@ -1,210 +1,133 @@
 ---
 name: aispa
-description: Разработка по исходному брифу с постоянным контекстом, нативными исполнителями, независимой критикой и приёмкой по доказательствам. Второй круг критики идёт после блокирующего замечания, а у тяжёлых задач в «Максимуме» — всегда. Использовать только по явному вызову AISpa, /aispa или $aispa.
+description: Builds an app, site, bot, or feature end-to-end from a dictated idea — requirements, briefing, spec, tickets, subagents, review, acceptance — with a live dashboard, for users who expect a finished result without reviewing specs or code. Starts only on /aispa; a bare /aispa resumes an interrupted run.
 disable-model-invocation: true
-argument-hint: "[идея проекта или файл с брифом]"
+argument-hint: "[full|semi|interview|manual] [strict|deep] что нужно построить или путь к brief.md"
 metadata:
-  version: "0.5.0"
+  version: "1.0.0"
 ---
 
 # AISpa
 
-Веди проект от слов владельца до проверенного результата. Версия 0.5.0.
-Этот файл — постоянный маршрут; подробности открывай только для текущего
-этапа и роли. Полный каталог команд, документов и архивов заранее в контекст не загружай.
-Новый запуск подхватывает существующие документы и сохраняет проектный замысел.
-После init проверь `project-documents`: повторно не создавай найденные аналоги.
-До idea/seal выбери актуальный intent по [стартовому маршруту](phases/01-start.md).
-Новый бриф задаёт текущую работу; постоянный замысел не переносит старые задачи.
+AISpa flies a dictated idea from words to a working project **in one dialogue**, without making the user approve each stage. Every rule it needs lives in `phases/` and `prompts/`; no other skill has to be installed.
 
-**Закреплённые тексты.** Прогон исполняет свой закреплённый runtime: если в
-`state.policy` нет `focusedReview`, SKILL, фазы и промпты читай из
-`.aispa/runs/<run>/runtime/`, а не из установленного пакета. Активный прогон
-со старым runtime продолжай его прежними командами; не пересоздавай прогон ради
-оптимизации. Новый пакет не мигрирует старый активный прогон.
+**The order is the product.** Code is written in the second-to-last phase. Everything before it decides *what* to build; everything after it proves the right thing got built.
 
-## Ветки без прогона
+**The brief is the contract, not the design.** *Nothing may quietly vanish*: the user's words become a numbered manifest before anything else, and every phase is gated on it — what breaks naive vibecoding is a requirement that stopped existing around the third rewrite. And *the brief is a silhouette*: it describes the happy path and nothing underneath, so working out the empty states, failures and limits is legitimate work. How far to take it is the user's [depth](phases/0-modes.md) dial; depth that **detaches** from the brief is never allowed.
 
-- **Осмотр без изменений (audit-only).** Явный запрос «найди ошибки», «изучи
-  работающий проект без изменений» — `assess` до update-check и init:
-  [границы](phases/01-start.md), [кратко](references/support.md).
-- **Вопрос о самом AISpa** — read-only `faq --version <версия>` пакета, о
-  котором спросили: [справочник](references/support.md).
+## Reading this skill
 
-Ни одна из веток не открывает прогон и панель.
+This file is the orchestrator: order, gates, the rules that never lose. Each phase's rules are in its own file, **read when that phase starts and not before** — one file at a time, never ahead: a file opened early stays in the one context that is never refreshed for the rest of the run.
 
-## Первое действие при явном вызове
+| Phase | Read | Produces |
+|---|---|---|
+| 0 Preflight | `phases/0-modes.md`, `phases/0-preflight.md`, then `0-memory.md`, `0-instruments.md` | mode announced, repo configured, dashboard open, `carried.md` after a landed run |
+| 1 Manifest | `phases/1-manifest.md` | `<дата>-brief.md`, `manifest.md` |
+| 2 Briefing | `phases/2-briefing.md` (+ `2-adversarial.md` when it runs) | answers recorded into the manifest |
+| 3 Spec | `phases/3-spec.md` | `notes.md` in existing code, `spec.md`, the boundaries in `interfaces.md` |
+| 4 Plan | `phases/4-plan.md` | `tickets/NN-*.md`, the plan commit |
+| 5 Build | `phases/5-subagents.md` | code, one commit per ticket |
+| 6 Review | `phases/6-review.md` — at the first point review, and for the whole-branch review | reviewed code |
+| 8 Final | `phases/8-final.md`, and `phases/9-memory.md` before spawning | blind acceptance, memory, progress file, report |
+| — | `phases/0-resume.md` — instead of preflight, when resuming | |
+| — | `phases/5-repair.md` — when a ticket comes back anything but a clean `DONE` | |
+| — | `phases/9-memory.md` — also in Phase 5, when a ticket discovered something worth keeping | |
+| — | `phases/rationalizations.md` — on a failed gate, on catching yourself excusing something, once before the report | |
 
-Для обычной разработки сразу выполни `update-check` из открытого установленного
-пакета; при новом выпуске предложи выбор и ставь только по ответу человека —
-[обновление и откат](references/updates.md). Активный прогон остаётся на
-закреплённом runtime. Если `update-check` называет недостающих агентов Claude Code,
-`update-agents --confirm` — только с согласия человека ([там же](references/updates.md)).
+**After a compaction, re-read the state, not the phases:** `state.js` (it holds `dir` and `skillDir`), `manifest.md`, `interfaces.md`, `carried.md` if the run has one, and the file of the phase you are in. Nothing else.
 
-## Обязательная видимая панель
+## The words the user sees
 
-После init нового прогона или resume существующего ответ несёт действие
-`start-dashboard`: выполни `dashboard start` закреплённым runtime и открой
-панель одним действием `open-dashboard` из его ответа, без вопроса «открыть ли».
-Сделай это до интервью по существу, разбора брифа, исследования, подготовки
-документов и запуска исполнителей. После resume и возвращения к существующему
-проекту повтори этот порядок. В Codex — `open_in_codex`; если ответ queued,
-проверь, что вкладки этого проекта нет, и только тогда открывай через CUA. В
-Claude Code — браузер приложения, если он есть, иначе один раз дай ссылку.
-Запуск сервера, ссылка или queued-открытие не подтверждают видимую вкладку:
-прочитай страницу. Если встроенной вкладки нет, прямо назови ограничение и дай
-живой URL. Если установленный пакет новее закреплённого runtime, панель
-поднимай `dashboard refresh-view` из установленного пакета; разработка идёт
-pinned runtime. Подробности — [открытие панели](references/dashboard-opening.md).
+Phase names here are English and never shown. In the chat, on the dashboard and in the report there is **exactly one Russian word per stage**:
 
-## Режимы и полномочия
+| Stage id | Пользователю |
+|---|---|
+| `preflight` · `manifest` · `briefing` · `spec` | Подготовка · Требования · Брифинг · Спецификация |
+| `plan` · `build` · `review` · `final` | План · Разработка · Код-ревью · Приёмка |
 
-Если режим не задан явно, после update-check покажи один выбор и дождись ответа:
-`auto` — самостоятельная работа по исходному брифу; `important` — только важные
-развилки до фиксации брифа; `interview` — подробный разговор до фиксации брифа.
-Используй нативный инструмент выбора либо три нумерованных варианта.
-Вместе с режимом вопросов предложи охват и длительность интервью. В `auto` не
-открывай интервью. Новые слова владельца учитывай сразу. Не проси повторить уже
-данное разрешение. Обновление, защищённые поля, оплата, удаление, публикация и
-сообщения сохраняют свои отдельные границы полномочий.
+**«Сборка» — весь прогон**, поэтому пятый этап — «Разработка». **Единица работы — «таск»**: «задача» — это то, что поставил пользователь.
 
-Вторым выбором спроси, сколько проверять. «Быстро» — отдельный критик только у
-задач с деньгами, ключами, доступами, личными данными или обязательным
-пользовательским потоком; «Сбалансированно» — у
-всех тяжёлых задач; «Максимум» — у каждой задачи и второй круг у тяжёлых, дольше
-и дороже. Сверка брифа на входе, проверка всей ветки, слепая приёмка из чистого
-клона и ремонт расхождений идут во всех режимах. «Сбалансированно» — режим по
-умолчанию. Маленькому проекту (нет кода или до 50 отслеживаемых файлов, одна
-функция, страница или бот) первой рекомендацией идёт «Быстро» с причиной; это
-совет, режим ставит выбор пользователя. Если человек уже назвал режим в вызове,
-второй раз не спрашивай. Режим проверки не путай с глубиной сценариев `--depth balanced`.
-Смену режима по ходу не предлагай; по новым словам человека сохрани их файлом и
-выполни `check-mode <режим> --file <файл>`. По ходу работы вопросов не задавай:
-развилку решай сам и фиксируй через `decision`.
+## The flight
 
-## Ход работы
+Two dials, decided once in Phase 0 (`phases/0-modes.md`): **the mode** — `full`, `semi` (default), `interview`, `manual`; **the depth** — `strict`, normal (default), `deep`.
 
-- **До `seal`.** `host-context` — шаг до интервью: отчёт среды о субагентах,
-  инструментах и правилах ([старт](phases/01-start.md)); текст блокера движка
-  передай человеку как есть. До `seal` только читай: не ставь программы, не
-  загружай файлы, не запускай пробы на внешних серверах, не пиши вне `.aispa/`.
-  Каждый ответ владельца сохраняй дословно через `brief`
-  ([бриф](phases/02-product.md)).
-- **`seal`.** Первое успешное `seal` завершает вопросы на весь текущий прогон.
-  Сразу передай человеку сообщение `notify-autonomous-start` из ответа. Не
-  объявляй готовым сам продукт. `seal` запускай отдельно от batch. При
-  восстановлении сверяй `autonomy`: дополнение брифа не открывает повторное
-  интервью. Не подменяй запрет вопросов просьбой «подтвердить
-  план/этап/продолжение». Доступы и полномочия не возникают автоматически:
-  недоступный шаг отметь блокером, продолжай независимое и вынеси необходимое
-  действие в финал.
-- **Проверку запрещает среда.** Если инструмент среды запрещает проверку, а
-  продукт цел, тот же пункт сначала проверь скриптом проекта через `verify --task`
-  (его пишет исполнитель). Нельзя и так — запиши пункт непроверенным с причиной,
-  назови блокер человеку и не крути ходы впустую: независимое продолжается, но
-  пока задача заблокирована, сдача невозможна ([приёмка](phases/05-accept.md)). Кнопки и другие сценарии интерфейса
-  проверяет скрипт одной командой, а не координатор кликами во встроенном
-  браузере ([задачи](phases/04-build.md)).
-- **Непрерывность.** В Codex, закрыв волну, в том же ходе открой следующую; ход
-  заканчивай только финалом, блокером или вопросом, который разрешает режим.
-- **Задача.** Создай участника → `task-open` → передай пути; сдача и следующий
-  шаг — `task-close` ([задачи](phases/04-build.md)). Передавай `context`, `card`,
-  `template` по их `absolutePath` без перепечатки тел; worker получает bundle с
-  формой — только после успешной адресной проверки. Движок заполняет только
-  известные поля формы, а не выводы проверяющего.
-- **Экономия.** Правило: то, что считается командой или скриптом, не отдаётся
-  модели — агента зовут думать. Исполнитель гоняет тесты своей зоны; полный
-  набор — один раз в `clean-verify` финального кандидата. Краткий ответ — умолчание команд;
-  полный JSON — глобальный `--full` перед командой. Не загружай целиком
-  `references/contracts.md` ради одного отчёта: найди нужный раздел. Это
-  сокращает справочный материал, но не исходный бриф, код и обязательные
-  проверки роли.
-- **Пакет шагов.** Несколько служебных шагов подряд отправляй одним
-  `batch --file steps.json` (до 25 argv без `--root`); пакет останавливается
-  на первой ошибке. Не включай шаг, которому нужен результат предыдущего, пока
-  его не увидел.
-- **Этапы на панели.** Вне задач отмечай `progress begin <phase>` до работы и
-  `progress end` после ([живые этапы](references/dashboard-progress.md)): это
-  запись для панели. Она не подтверждает результат и не заменяет реальные отчёты. Не записывай задним
-  числом; в старом runtime без progress не меняй runtime или журнал ради таймера.
+| Phase | full | semi | interview | manual |
+|---|---|---|---|---|
+| 1 Manifest | auto | auto | auto | auto |
+| 2 Briefing | self-briefing | only what the brief leaves open | the adversarial pass, then every fork | the same |
+| 3 Spec | auto | auto | auto | show → wait for «ок» |
+| 4 Plan | auto, notify | auto, stoppable | auto, stoppable | discuss → wait for «ок» |
+| 5 Build · 6 Review | auto | auto | auto | auto |
+| 8 Final | report + Assumptions | report | report | report |
 
-## Инварианты каждого этапа
+`interview` and `manual` differ in exactly two cells — the spec gate and the plan gate.
 
-- Человеку пиши коротко и простыми словами: что сделано, что дальше, что от
-  него нужно, без внутренних терминов движка; ID и SHA — ссылкой на файл, а не
-  в тексте.
-- Сохраняй полный исходный бриф без секретов; дополнения — отдельными `brief`.
-  Перед `seal` два разных участника отдельно учитывают каждую исходную часть;
-  сверяющий видит оригинал, а не выводы первого. Исходные источники неизменны.
-  Требования и обязательное ядро не сокращай из-за сложности. `drop` и `defer`
-  требуют точной цитаты нового решения владельца. Невыполнимое ядро остаётся
-  явно заблокированным, независимую работу продолжай.
-- Канон — проверяемый журнал и неизменные источники в `.aispa/runs/`;
-  `.aispa/context/` — производные представления. Не правь журнал, SHA, receipt
-  или документы context вручную. `init` не лечит повреждённый журнал. При
-  оборванной записи — `journal-inspect` и адресное
-  `journal-recover --sha256 … --confirm`; неизвестные внешние эффекты запрещают
-  возобновление ([восстановление](phases/06-continuity.md)).
-- Нативных агентов вызывает среда, не Python. Сохраняй реальные runtime,
-  native ID и session; ID нельзя выдумывать. Модель и усилие каждой роли — по
-  [таблице маршрутов](references/model-routing.md); среды и запасной ход —
-  [адаптеры](references/native-agents.md). Не подставляй ID другого
-  провайдера; requested и actual/unknown сохраняй отдельно. Чувствительные
-  задачи требуют сильного разрешённого участника либо явного блокера возможностей.
-- После `init` зарегистрируй настоящего координатора один раз. Независимые
-  сверки, критика и приёмка не получают coordinator alias. Проверяй usage:
-  отсутствие автора не означает нулевые токены.
-- Тяжесть задачи определяет движок; критиков назначает режим. PASS критика
-  закрывает задачу; после блокирующего замечания — ремонт и второй свежий
-  критик. Не запускай и не назначай critic2 заранее. Любой non-PASS второго
-  критика блокирует задачу. Reset, replan, новое имя и новый прогон не обнуляют
-  лимит; новую попытку открывают только новые слова владельца. Не выпрашивай
-  слова посреди работы. Сомнение или новый риск требует `promote-task`.
-- Исполнители работают в объявленных зонах и сохраняют чужие изменения.
-  Пересечение записи с чтением другой задачи требует `dependsOn`. Координатор
-  пишет Journal последовательно.
-- Проверка команды, критика, проверка ветки, чистый клон и слепая приёмка —
-  разные доказательства. Старый успешный запуск из `commands` не является
-  текущим PASS: повтори команду на актуальном коде. Чистый клон точного Git
-  commit — проверка, не sandbox. Локальный preview, зелёные библиотечные тесты
-  и PASS критиков не подтверждают использование полного навыка или выпуск.
-  Усечённый вывод команды не даёт PASS.
-  Недоступную проверку нельзя заменить обещанием. Не объявляй готовым то, что
-  не проверено. Расхождение слепой приёмки чинится ([финал](phases/05-accept.md)).
-- Сроки исполнения до seal — только через
-  [узкий реестр обязательств](references/execution-obligations.md). Продуктовые
-  условия не становятся исключениями.
-- Тестовый контракт фиксирует отказные границы
-  ([отказные проверки](references/failure-checks.md)). Связь с тестовым файлом
-  не доказывает выполнение сценария.
-- Секреты и чужие персональные данные не попадают в бриф, команды, логи,
-  отчёты и репозиторий. Глобальная установка не нужна для удобства.
+**The manifest gates run in every mode** — they check the build against the user's own words, and cost the user no time:
 
-## Открывай только нужный этап
+| Gate | After | Passes when |
+|---|---|---|
+| **G1** | Briefing | every requirement has a status; none `open` without a recorded reason |
+| **G2** | Spec | zero `open` — **and an independent reader given only the brief and the spec finds nothing missing** |
+| **G3** | Plan | every `in-spec` requirement is in a ticket and every ticket traces to one — `ap.py check-plan` |
+| **G4** | Final | blind acceptance against the brief, spec withheld, from a clean clone |
 
-| Ситуация | Прочитать сейчас |
-| --- | --- |
-| Новый прогон, режимы, среда, документы | [Старт и контекст](phases/01-start.md) |
-| Идея, вопросы, требования, `seal`, новые слова владельца | [Продукт и бриф](phases/02-product.md) |
-| Исследование, spec, план, тяжесть и модели задач | [Архитектура и план](phases/03-plan.md) |
-| Открытие и закрытие задачи, проверка, критики, ремонт | [Разработка задач](phases/04-build.md) |
-| Проверка ветки, ремонт находок, чистый клон, слепая приёмка | [Финал](phases/05-accept.md) |
-| Знания, продолжение после паузы, восстановление, finish | [Продолжение и итог](phases/06-continuity.md) |
+G2 and G4 are one check at the two ends of the flight: they measure against the user's words with your paraphrase taken away. Between them everything measures against the spec, because that is the contract the executors were given. A failed gate sends its phase back to be redone.
 
-Открой также только профильный раздел [contracts](references/contracts.md) и
-нужный prompt роли. Вызов `context --kind … --write` создаёт адресный пакет:
-каждый обязательный источник в нём прочитай целиком. Обрезанный вывод не равен
-прочитанному файлу. В том же сохранённом контексте повторно используй только
-текст, который ты сам уже получил полностью, проверив неизменность SHA; новый
-критик и приёмщик читают обязательные источники сами. После потери контекста
-восстанови их: запись «прочитано» и наличие файла не заменяют содержание.
+**The plan may be corrected; the brief may not.** When the build proves the plan wrong, the spec is amended and a `D##` row records what the code demonstrated (`phases/5-repair.md`) — never a way to retire a requirement or to slip in an idea.
 
-## После потери контекста
+## Secrets
 
-Прочитай `.aispa/context/INDEX.md`, `memory.md`, затем полные брифы,
-требования, текущий план, решения и историю ролей. Запусти `status` сохранённым
-`.aispa/runs/<run>/runtime/tools/aispa.py` и продолжай с файла текущего этапа
-([продолжение](phases/06-continuity.md)). Нельзя пересоздать состояние через
-`init`, если журнал повреждён. При известном отказе закреплённого движка открой
-только [адресный ремонт](references/runtime-repair.md). Не меняй runtime или
-digest вручную. После подтверждённого ремонта продолжай через возвращённый `cli`.
+Binding on every phase; the phases do not restate it.
+
+- **Never request one.** *Which* provider and *whether* an account exists are questions; the key, token, password or connection string never is.
+- **Redact at ingest**, before anything is written — the gate in `phases/1-manifest.md`. «Verbatim» always means «verbatim after redaction».
+- **Refer to it by name** — `STRIPE_SECRET_KEY`. The user puts values into `.env` themselves; `.env` is ignored before the first commit; the report lists the names still empty.
+- **A leaked secret is a stop condition**: reported at once, in plain words, with the advice to rotate it — `ap.py ask stop` first, so the dashboard says it too.
+
+## Files this skill owns
+
+```
+.aispa-work/
+├── <YYYY-MM-DD>-<slug>--wip/   one run; the suffix comes off when it lands
+│   ├── <YYYY-MM-DD>-brief.md   the user's words, redacted; later changes appended
+│   ├── manifest.md             requirements and their status
+│   ├── reference.md            what it should be like — the user's comparables only
+│   ├── spec.md                 the specification
+│   ├── interfaces.md           the boundaries, the project rules, what finished tickets built
+│   ├── notes.md                exploration notes, in an existing codebase
+│   ├── carried.md              what the last run left, read at preflight — after a landed run only
+│   ├── memory-proposal.md      what to add to the user's own memory file, if it is theirs
+│   └── tickets/NN-<slug>.md
+├── README.md        how to read this folder, and the register of runs
+├── PROGRESS.md       where the work stands between runs — read by the next run and by plain sessions
+├── state.js         the run state — written only by ap.py
+├── ap.py            one call per event: state, dashboard, server
+├── dashboard.html   the human view; carries a snapshot of the state
+└── index.html       → dashboard.html
+
+AGENTS.md (+ CLAUDE.md → AGENTS.md)    the project memory — or the user's own file, left untouched
+docs/architecture.md, docs/adr/        at T2+: how it is built, and why
+CONTEXT.md                             at T2+: the project's words — or the user's own, only added to
+```
+
+`.aispa-work/` is committed — it is the user's record of what was promised and delivered. The memory file is the project as it stands for whoever opens it next; `docs/adr/` is why it stands that way; `CONTEXT.md` is what its words mean; `PROGRESS.md` is what is still open and what the user settled — the one file a session without AISpa updates; `spec.md` is throwaway once the work ships.
+
+## Judgement
+
+Numbers in this skill — tiers, question counts, wave widths — are **calibration for a first guess, never targets.** The rules are arguments, each paid for, and arguments can lose: where following one would make the result worse for the user, break it deliberately, say so in one line, and carry on. Never quietly, and never keep one only because it is written down.
+
+**The rules that set the run's cost are the exception** — what goes to repair, which tickets get a point review, how many times a fix is re-reviewed. Widening them «for quality» is how a run doubles its bill with nobody having decided to. Break one only by telling the user in one line what it will cost.
+
+**Five rules are not calibration and do not lose** — in every mode, at every depth:
+
+1. **A requirement is removed only by the user**, in their own words, quoted into the manifest and appended to the brief. The same holds for one they add mid-flight.
+2. **A secret is never requested, echoed or written** — not into a file, a prompt, a commit or a report.
+3. **A fact about the user is never invented.** Prices, texts, addresses, accounts stay visible placeholders.
+4. **An irreversible or outward-facing action is a question** — deploy, publish, pay, message a third party, delete data, rewrite history.
+5. **The orchestrator does not write the project's code.** Its keyboard reaches `.aispa-work/`, the memory files, `.gitignore`, `.env.example` and git; everything else goes to a subagent (`phases/5-subagents.md`).
+
+## When to use it
+
+The user dictates what to build and expects the finished thing; they will not read specs or review code. «Собери под ключ», "just build it". Wanting the idea taken apart question by question and the build done without them is still AISpa — `interview`; wanting to approve the spec and the tickets is `manual`.
+
+**Not:** co-writing code line by line with the user; a small single-file change (just do it); an idea bigger than one project whose destination is unclear (settle that first).
