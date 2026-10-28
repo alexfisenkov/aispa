@@ -6,7 +6,6 @@
 """
 
 import importlib.util
-import io
 import json
 import os
 import re
@@ -15,8 +14,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import urllib.error
-from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.join(os.path.dirname(HERE), "skills", "aispa")
@@ -31,15 +28,6 @@ MANIFEST = """# Манифест требований
 | R02 | «складывает в таблицу» | in-spec | — | spec §4 |
 | R03 | «SMS» | dropped | «не надо» | — |
 | R05 | «цвета студии» | in-spec | — | spec §6 |
-"""
-
-BRIEF = """# Изначальная задача
-
-Бот принимает заявки и складывает в таблицу, плюс SMS, в цветах студии.
-
-## Дополнения
-
-- 2026-10-01 — «SMS не надо, только телега»
 """
 
 
@@ -63,18 +51,15 @@ class Run(unittest.TestCase):
         os.makedirs(self.a)
         shutil.copy(TEMPLATE, os.path.join(self.a, "dashboard.html"))
         shutil.copy(AP, os.path.join(self.a, "ap.py"))
-        self.data = tempfile.mkdtemp(prefix="ap-data-")      # каталог данных: не настоящий домашний
-        self.history = os.path.join(self.data, "aispa", "history.jsonl")
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
-        shutil.rmtree(self.data, ignore_errors=True)
 
     def git(self, *args):
         return subprocess.run(["git", "-C", self.root] + list(args), capture_output=True, text=True)
 
     def ap(self, *args):
-        env = dict(os.environ, AISPA_NO_UPDATE_CHECK="1", XDG_DATA_HOME=self.data, LOCALAPPDATA=self.data)
+        env = dict(os.environ, AISPA_NO_UPDATE_CHECK="1")
         r = subprocess.run([sys.executable, os.path.join(self.a, "ap.py")] + list(args) + ["--no-serve"],
                            capture_output=True, text=True, env=env, cwd=self.root)
         return r.returncode, r.stdout
@@ -128,14 +113,6 @@ class Run(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.a, first.replace("--wip", ""), "state.js")))
         self.assertTrue(self.state()["dir"].endswith("second--wip"))
 
-    def test_gitignore_holds_only_the_serve_files_once(self):
-        self.init()
-        self.ap("finish", "--result", "готово")
-        code, out = self.ap("init", "--slug", "second")
-        self.assertEqual(code, 0, out)
-        text = read(os.path.join(self.root, ".gitignore"))
-        self.assertEqual([line for line in text.splitlines() if line], [".aispa-work/serve.*"], text)
-
     # ── stages ─────────────────────────────────────────────────────────────
     def test_opening_a_stage_closes_the_previous(self):
         self.init()
@@ -168,7 +145,6 @@ class Run(unittest.TestCase):
     def plan(self):
         self.init()
         self.write("manifest.md", MANIFEST)
-        self.write("2026-10-01-brief.md", BRIEF)
         self.write("tickets/01-karkas.md", ticket("01", "Каркас", "R01, R05", "—", ["src/core/"], 1, "да — фундамент", "сильная"))
         self.write("tickets/02-priem.md", ticket("02", "Приём", "R01.1, R02, A01", "01", ["src/bot/"], 2))
 
@@ -206,38 +182,6 @@ class Run(unittest.TestCase):
         self.write("manifest.md", MANIFEST + "| G01 | «отмена» | in-spec | — | spec §5 |\n")
         code, out = self.ap("check-plan")
         self.assertIn("требование G01", out)
-
-    def dropped_lines(self, out):
-        return [line for line in out.splitlines() if line.lstrip().startswith("!") and "R03" in line]
-
-    def test_check_plan_accepts_a_drop_quoted_from_any_brief_file(self):
-        self.plan()
-        self.write("2026-10-01-brief.md", "# Изначальная задача\n\nБот для заявок, SMS тоже.\n")
-        self.write("2026-10-02-brief.md", "# Изначальная задача\n\nА SMS — не надо, только телега.\n")
-        code, out = self.ap("check-plan")
-        self.assertEqual(self.dropped_lines(out), [], out)
-        self.assertIn("G3: трасса сходится", out)
-
-    def test_check_plan_flags_a_drop_whose_quote_is_not_in_the_brief(self):
-        self.plan()
-        self.write("2026-10-01-brief.md", "# Изначальная задача\n\nБот для заявок.\n\n## Дополнения\n\n- 2026-10-01 — «телега»\n")
-        code, out = self.ap("check-plan")
-        self.assertEqual(len(self.dropped_lines(out)), 1, out)
-        self.assertFalse(self.state()["gates"]["G3"]["ok"])
-
-    def test_check_plan_flags_a_drop_quoting_only_the_requirement_itself(self):
-        # Цитата из ячейки «Из брифа» этой же строки — слова требования, а не отказ пользователя.
-        self.plan()
-        self.write("manifest.md", MANIFEST.replace("| dropped | «не надо» |", "| dropped | «SMS» — не просили |"))
-        code, out = self.ap("check-plan")
-        self.assertEqual(len(self.dropped_lines(out)), 1, out)
-        self.assertFalse(self.state()["gates"]["G3"]["ok"])
-
-    def test_check_plan_flags_a_drop_without_a_quote(self):
-        self.plan()
-        self.write("manifest.md", MANIFEST.replace("| dropped | «не надо» |", "| dropped | пользователь отказался |"))
-        code, out = self.ap("check-plan")
-        self.assertEqual(len(self.dropped_lines(out)), 1, out)
 
     def test_done_closes_rows_only_when_all_their_tickets_are_done(self):
         self.plan()
@@ -449,67 +393,6 @@ class Run(unittest.TestCase):
         self.assertEqual(self.stage("final")["status"], "pending")
         self.assertNotIn("finishedAt", self.stage("final"))
 
-    # ── история времени ────────────────────────────────────────────────────
-    def read_history(self):
-        with open(self.history, encoding="utf-8") as f:
-            return [json.loads(line) for line in f if line.strip()]
-
-    def test_finish_appends_one_anonymous_history_row(self):
-        self.plan()
-        self.ap("tickets")
-        self.ap("set", "tier=T2")
-        self.ap("stage", "build")
-        self.ap("ticket", "01", "02", "start")
-        self.ap("ticket", "01", "02", "done")
-        self.ap("stage", "review")
-        self.ap("stage", "final")
-        self.ap("finish", "--result", "Бот принимает заявки")
-        rows = self.read_history()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(sorted(rows[0]), ["finalMin", "reviewMin", "ticketMin", "tickets", "tier"])
-        self.assertEqual(rows[0]["tier"], "T2")
-        self.assertEqual(rows[0]["tickets"], 2)
-        self.assertEqual(len(rows[0]["ticketMin"]), 2)
-        self.assertTrue(all(isinstance(x, int) and x >= 1 for x in rows[0]["ticketMin"]))
-        raw = read(self.history)
-        for private in ("repair-bot", "Бот", "Каркас", "Приём", "wip", self.root, "R01", "src/"):
-            self.assertNotIn(private, raw)
-
-    def test_finish_history_leaves_skipped_stages_empty(self):
-        self.init()
-        self.ap("finish", "--result", "готово")
-        row = self.read_history()[0]
-        self.assertEqual((row["tickets"], row["ticketMin"], row["reviewMin"], row["finalMin"]),
-                         (0, [], None, None))
-
-    def history_rows(self, rows, raw=None):
-        os.makedirs(os.path.dirname(self.history), exist_ok=True)
-        with open(self.history, "w", encoding="utf-8") as f:
-            f.write(raw if raw is not None else "".join(json.dumps(r) + "\n" for r in rows))
-
-    def test_init_puts_history_medians_in_state(self):
-        row = lambda t, r, f: {"tier": "T2", "tickets": len(t), "ticketMin": t, "reviewMin": r, "finalMin": f}
-        self.history_rows([row([10, 20, 30], 12, 4), row([40], None, 6), row([], 20, None)])
-        self.init()
-        h = self.state()["history"]
-        self.assertEqual(h["runs"], 3)
-        self.assertEqual(h["ticket"], {"median": 30, "lo": 10, "hi": 40})      # 10 20 30 40
-        self.assertEqual(h["review"], {"median": 20, "lo": 12, "hi": 20})      # 12 20
-        self.assertEqual(h["final"], {"median": 6, "lo": 4, "hi": 6})          # 4 6
-
-    def test_init_without_usable_history_adds_no_field(self):
-        self.init()                                                  # файла нет
-        self.assertNotIn("history", self.state())
-        self.ap("finish", "--result", "готово")
-        os.remove(self.history)
-        for raw in ("", "\n\n", "{оборван\n\x00\xff не json\n[1, 2]\n"):
-            self.history_rows(None, raw)
-            code, out = self.ap("init", "--slug", "again", "--force")
-            self.assertEqual(code, 0, out)
-            self.assertNotIn("history", self.state(), repr(raw))
-            self.ap("finish", "--result", "готово")
-            os.remove(self.history)
-
     def test_commits_flags_a_done_ticket_whose_commit_left_history(self):
         self.plan()
         self.ap("tickets")
@@ -530,172 +413,6 @@ class Run(unittest.TestCase):
         self.assertNotIn("таск 01", out)
         self.assertEqual(self.state()["tickets"][1]["status"], "done")   # сбрасывает оркестратор
         self.assertEqual(len(self.state()["log"]), events)               # проверка — не событие
-
-
-# ── честное время на панели: поведение шаблона через node ──────────────────
-NODE = shutil.which("node")
-ETA_TOOL = os.path.join(os.path.dirname(HERE), "tools", "eta-honesty.cjs")
-HARNESS = """
-const fs = require('fs');
-const html = fs.readFileSync(process.argv[2], 'utf8');
-const block = html.match(/\\/\\*ETA-BEGIN\\*\\/([\\s\\S]*?)\\/\\*ETA-END\\*\\//)[1];
-const cap = +html.match(/const IDLE_CAP_MS = (\\d+)/)[1];
-const etaRange = new Function('IDLE_CAP_MS', block + '; return etaRange;')(cap);
-const input = JSON.parse(fs.readFileSync(0, 'utf8'));
-console.log(JSON.stringify(etaRange(input.state, input.now)));
-"""
-HIST = {"runs": 3, "ticket": {"median": 20, "lo": 10, "hi": 40},
-        "review": {"median": 15, "lo": 10, "hi": 30}, "final": {"median": 5, "lo": 3, "hi": 8}}
-
-
-def at(h, m=0):
-    return "2026-10-01T%02d:%02d:00+00:00" % (h + m // 60, m % 60)
-
-
-def eta_state(tickets, history=None, stage="build"):
-    t0 = at(10)
-    st = [{"id": "build", "status": "active", "startedAt": t0}] if stage == "build" else [
-        {"id": "build", "status": "done", "startedAt": t0, "finishedAt": at(10, 30)},
-        {"id": stage, "status": "active", "startedAt": at(10, 30)}]
-    s = {"startedAt": t0, "updatedAt": t0, "finishedAt": None, "stages": st, "tickets": tickets,
-         "waits": [], "waiting": None, "beats": [t0]}
-    if history:
-        s["history"] = history
-    return s
-
-
-def tk(tid, status, start=None, finish=None, blocked=()):
-    t = {"id": tid, "status": status, "blockedBy": list(blocked)}
-    if start:
-        t["startedAt"] = start
-    if finish:
-        t["finishedAt"] = finish
-    return t
-
-
-@unittest.skipUnless(NODE, "нужен node")
-class Eta(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="ap-eta-")
-        self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.harness = os.path.join(self.tmp, "harness.cjs")
-        with open(self.harness, "w", encoding="utf-8") as f:
-            f.write(HARNESS)
-
-    def eta(self, state, minute):
-        now = int(__import__("datetime").datetime.fromisoformat(at(10, minute)).timestamp() * 1000)
-        r = subprocess.run([NODE, self.harness, TEMPLATE], input=json.dumps({"state": state, "now": now}),
-                           capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)
-
-    def test_no_measurements_says_dont_know_yet(self):
-        r = self.eta(eta_state([tk("01", "pending"), tk("02", "pending", blocked=["01"])]), 5)
-        self.assertTrue(r["unknown"])
-        self.assertNotIn("lo", r)
-
-    def test_history_gives_the_range(self):
-        # цепочка из двух шагов: 10+10 и 40+40, потом проверка 10..30 и приёмка 3..8
-        r = self.eta(eta_state([tk("01", "pending"), tk("02", "pending", blocked=["01"])], HIST), 5)
-        self.assertEqual((r["lo"], r["hi"], r["late"], r["tailUnknown"]), (33, 118, False, False))
-
-    def test_own_measurements_beat_history(self):
-        done = [tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 30)),
-                tk("03", "pending")]
-        r = self.eta(eta_state(done, HIST), 30)
-        self.assertEqual((r["lo"], r["hi"]), (10 + 10 + 3, 20 + 30 + 8))      # 10 20: свой разброс; хвост из истории
-
-    def test_two_own_steps_without_history_give_the_build_range_and_leave_the_tail_open(self):
-        # свои 10 и 20 мин → разброс 10..20 на оставшийся шаг; проверка и приёмка числами не добавлены
-        done = [tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 30)),
-                tk("03", "pending")]
-        r = self.eta(eta_state(done), 30)
-        self.assertEqual((r["lo"], r["hi"], r["late"], r["tailUnknown"]), (10, 20, False, True))
-        self.assertNotIn("unknown", r)
-
-    def test_one_own_step_without_history_says_dont_know_yet(self):
-        r = self.eta(eta_state([tk("01", "done", at(10), at(10, 10)), tk("02", "pending")]), 10)
-        self.assertTrue(r["unknown"])
-        self.assertNotIn("lo", r)
-
-    def test_step_history_without_tail_history_gives_only_the_build_range(self):
-        own = {"runs": 1, "ticket": {"median": 20, "lo": 10, "hi": 40}}
-        r = self.eta(eta_state([tk("01", "pending")], own), 5)
-        self.assertEqual((r["lo"], r["hi"], r["tailUnknown"]), (10, 40, True))
-
-    def test_review_without_history_says_dont_know_yet(self):
-        s = eta_state([tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 30))],
-                      stage="review")
-        self.assertTrue(self.eta(s, 40)["unknown"])
-
-    def test_the_panel_names_the_open_tail_in_one_line(self):
-        html = read(TEMPLATE)
-        self.assertIn("плюс проверка и приёмка — пока не знаю", html)
-        self.assertIn("tailUnknown", html[html.index("/*ETA-END*/"):])
-
-    def test_a_ticket_over_one_and_a_half_medians_is_slow(self):
-        tickets = [tk("01", "in-progress", at(10)), tk("02", "in-progress", at(10, 20))]
-        r = self.eta(eta_state(tickets, HIST), 40)        # 40 мин против 30; 20 мин против 30
-        self.assertEqual(r["slow"], ["01"])
-        r = self.eta(eta_state(tickets, HIST), 30)        # ровно 30 — ещё не дольше
-        self.assertEqual(r["slow"], [])
-
-    def test_review_stage_counts_only_what_is_left(self):
-        s = eta_state([tk("01", "done", at(10), at(10, 30))], HIST, stage="review")
-        r = self.eta(s, 40)                               # проверка идёт 10 мин
-        self.assertEqual((r["lo"], r["hi"], r["late"]), (0 + 3, 20 + 8, True))
-
-    def test_the_formula_holds_no_invented_numbers(self):
-        html = read(TEMPLATE)
-        block = html[html.index("/*ETA-BEGIN*/"):html.index("/*ETA-END*/")]
-        self.assertEqual(re.findall(r"\|\| *10|0\.[0-9]+ *\*|\* *0\.[0-9]|\+ *8\b|1\.4|0\.75", block), [])
-        self.assertIn("2700000", html)
-        self.assertEqual(len(re.findall(r"token|токен", html, re.I)), 0)
-
-    def finished_run(self, history):
-        s = {"startedAt": at(10), "updatedAt": at(10, 50), "finishedAt": at(10, 50), "waits": [], "waiting": None,
-             "beats": [at(10), at(10, 15), at(10, 30), at(10, 45), at(10, 50)],
-             "stages": [{"id": "build", "status": "done", "startedAt": at(10), "finishedAt": at(10, 30)},
-                        {"id": "review", "status": "done", "startedAt": at(10, 30), "finishedAt": at(10, 45)},
-                        {"id": "final", "status": "done", "startedAt": at(10, 45), "finishedAt": at(10, 50)}],
-             "tickets": [tk("01", "done", at(10), at(10, 15)), tk("02", "done", at(10, 15), at(10, 30), ["01"])],
-             "slug": "private-slug", "title": "Private title"}
-        if history:
-            s["history"] = {"runs": 3, "ticket": {"median": 15, "lo": 10, "hi": 20},
-                            "review": {"median": 10, "lo": 8, "hi": 12}, "final": {"median": 5, "lo": 3, "hi": 7}}
-        path = os.path.join(self.tmp, ("with" if history else "without") + "-history-state.js")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("window.STATE =\n" + json.dumps(s, ensure_ascii=False) + "\n")
-        return path
-
-    def test_honesty_tool_prints_only_counts(self):
-        # Четыре момента с историей: 31..59 при 50 (внутри), 21..39 при 35 (внутри),
-        # 11..19 при 20 (мимо), 3..7 при 5 (внутри). Без истории — «пока не знаю» везде.
-        r = subprocess.run([NODE, ETA_TOOL, self.finished_run(True), self.finished_run(False)],
-                           capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "точек с диапазоном: 4\nпопало внутрь: 3\nпока не знаю: 4\n"
-                                   "доля с диапазоном: 50%\nдоля «пока не знаю»: 50%\n")
-        for private in ("private", "Private", self.tmp, "state.js"):
-            self.assertNotIn(private, r.stdout)
-
-    def test_honesty_tool_finds_ranges_in_a_run_without_history(self):
-        # Три шага по 10 мин, истории нет. В 10:20 сданы два шага: остаток разработки 10..10,
-        # разработка и правда кончилась в 10:30 — внутри. Остальные четыре момента — «пока не знаю».
-        s = {"startedAt": at(10), "updatedAt": at(10, 50), "finishedAt": at(10, 50), "waits": [], "waiting": None,
-             "beats": [at(10), at(10, 10), at(10, 20), at(10, 30), at(10, 45), at(10, 50)],
-             "stages": [{"id": "build", "status": "done", "startedAt": at(10), "finishedAt": at(10, 30)},
-                        {"id": "review", "status": "done", "startedAt": at(10, 30), "finishedAt": at(10, 45)},
-                        {"id": "final", "status": "done", "startedAt": at(10, 45), "finishedAt": at(10, 50)}],
-             "tickets": [tk("01", "done", at(10), at(10, 10)), tk("02", "done", at(10, 10), at(10, 20)),
-                         tk("03", "done", at(10, 20), at(10, 30))]}
-        path = os.path.join(self.tmp, "fresh-machine-state.js")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("window.STATE =\n" + json.dumps(s) + "\n")
-        r = subprocess.run([NODE, ETA_TOOL, path], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "точек с диапазоном: 1\nпопало внутрь: 1\nпока не знаю: 4\n"
-                                   "доля с диапазоном: 20%\nдоля «пока не знаю»: 80%\n")
 
 
 class Pure(unittest.TestCase):
@@ -720,31 +437,6 @@ class Pure(unittest.TestCase):
     def test_skill_declares_a_version(self):
         text = read(os.path.join(SKILL, "SKILL.md"))
         self.assertIsNotNone(self.m._version(text))
-
-    def test_update_line_names_aispa_and_asks_for_a_yes(self):
-        skill = tempfile.mkdtemp(prefix="ap-skill-")
-        self.addCleanup(shutil.rmtree, skill, True)
-        with open(os.path.join(skill, "SKILL.md"), "w", encoding="utf-8") as f:
-            f.write('---\nname: aispa\nmetadata:\n  version: "1.0.0"\n---\n')
-        remote = io.BytesIO(b'---\nname: aispa\nmetadata:\n  version: "1.2.0"\n---\n')
-        asked = []
-
-        def online(url, timeout=None):
-            asked.append(url)
-            return remote
-
-        def offline(url, timeout=None):
-            raise urllib.error.URLError("нет сети")
-
-        env = {k: v for k, v in os.environ.items() if k != "AISPA_NO_UPDATE_CHECK"}
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch.object(self.m.urllib.request, "urlopen", online):
-                line = self.m.check_update({"skillDir": skill})
-            with mock.patch.object(self.m.urllib.request, "urlopen", offline):
-                silent = self.m.check_update({"skillDir": skill})
-        self.assertEqual(line, "вышла AISpa 1.2.0 (у тебя 1.0.0) — скажи «обнови AISpa», поставлю после твоего «да»")
-        self.assertEqual(asked, ["https://raw.githubusercontent.com/alexfisenkov/aispa/main/skills/aispa/SKILL.md"])
-        self.assertIsNone(silent)
 
 
 if __name__ == "__main__":

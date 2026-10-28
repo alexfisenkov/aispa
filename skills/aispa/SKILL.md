@@ -1,6 +1,6 @@
 ---
 name: aispa
-description: Builds an app, site, bot, or feature end-to-end from a dictated idea — requirements, briefing, spec, tickets, subagents, review, acceptance — with a live dashboard, for users who expect a finished result without reviewing specs or code. Starts only on /aispa in Claude Code and $aispa in Codex; a call without a task resumes an interrupted run.
+description: Builds an app, site, bot, or feature end-to-end from a dictated idea — requirements, briefing, spec, tickets, subagents, review, acceptance — with a live dashboard, for users who expect a finished result without reviewing specs or code. Starts only on /aispa; a bare /aispa resumes an interrupted run.
 disable-model-invocation: true
 argument-hint: "[full|semi|interview|manual] [strict|deep] что нужно построить или путь к brief.md"
 metadata:
@@ -42,10 +42,10 @@ Phase names here are English and never shown. In the chat, on the dashboard and 
 
 | Stage id | Пользователю |
 |---|---|
-| `preflight` · `manifest` · `briefing` · `spec` | Подготовка · Требования · Вопросы · Описание |
-| `plan` · `build` · `review` · `final` | План · Разработка · Проверка · Приёмка |
+| `preflight` · `manifest` · `briefing` · `spec` | Подготовка · Требования · Брифинг · Спецификация |
+| `plan` · `build` · `review` · `final` | План · Разработка · Код-ревью · Приёмка |
 
-**«Сборка» — весь прогон**, поэтому пятый этап — «Разработка». **Единица работы — «шаг»**: «задача» — это то, что поставил пользователь.
+**«Сборка» — весь прогон**, поэтому пятый этап — «Разработка». **Единица работы — «таск»**: «задача» — это то, что поставил пользователь.
 
 ## The flight
 
@@ -83,25 +83,6 @@ Binding on every phase; the phases do not restate it.
 - **Redact at ingest**, before anything is written — the gate in `phases/1-manifest.md`. «Verbatim» always means «verbatim after redaction».
 - **Refer to it by name** — `STRIPE_SECRET_KEY`. The user puts values into `.env` themselves; `.env` is ignored before the first commit; the report lists the names still empty.
 - **A leaked secret is a stop condition**: reported at once, in plain words, with the advice to rotate it — `ap.py ask stop` first, so the dashboard says it too.
-
-## Subagent models
-
-Phase files are read one at a time, so every subagent's route lives here. In Claude Code the agent file holds model and effort (an Agent call cannot pass effort); in Codex pass model and effort explicitly on every spawn.
-
-| Role | Claude Code (agent · model · effort) | Codex (ID · effort) |
-|---|---|---|
-| judge (checks, writes no code): G2 reader, point and repair reviewer, branch reviewer, blind acceptance | `aispa-judge` — Opus · high | `gpt-6.1-sol` · high |
-| strong executor: a ticket with `Ревью: да — <риск>` or `сильная`, `F1` and `F2`, a relaunch after a failure | `aispa-sensitive-worker` — Opus · high | `gpt-6.1-sol` · high |
-| executor `обычная`, code researcher (`3-spec`), memory agent, ADR, history reading (`0-preflight` §5) | `aispa-worker` — Sonnet · medium | `gpt-6.1-terra` · medium |
-| `механика-скрипт` | `aispa-mechanic-scripted` — Haiku · low | `gpt-6-luna` · low |
-| `механика` | `aispa-mechanic` — Sonnet · low | `gpt-6.1-terra` · low |
-
-Codex IDs: сверить с каталогом среды; новый ID — только после правки этой таблицы.
-
-- A subagent never gets Fable, Astra, `inherit`, an empty model, xhigh, max or ultra — not on the hardest task either; nothing above Opus · high or Sol · high.
-- Astra is known but not for subagents; an unfamiliar ID is never accepted by its prefix.
-- Advise the main chat Opus 5.5 in Claude Code and Sol 6.1 in Codex: high on the brief and the plan, medium after. Fable or Astra in the main chat only by the user's own informed choice.
-- An agent file that is not visible (installed in this same session) → a built-in agent with the `model` parameter, and one line to the user: «усилие не применено».
 
 ## Files this skill owns
 
@@ -144,11 +125,6 @@ Numbers in this skill — tiers, question counts, wave widths — are **calibrat
 3. **A fact about the user is never invented.** Prices, texts, addresses, accounts stay visible placeholders.
 4. **An irreversible or outward-facing action is a question** — deploy, publish, pay, message a third party, delete data, rewrite history.
 5. **The orchestrator does not write the project's code.** Its keyboard reaches `.aispa-work/`, the memory files, `.gitignore`, `.env.example` and git; everything else goes to a subagent (`phases/5-subagents.md`).
-
-## Outside a run
-
-- **«Обнови AISpa»** → `python3 "<skillDir>/tools/aispa.py" update-check`; a newer release → `update-prepare`, show both versions, and only after the person's «да» `update-apply --candidate <candidateId> --confirm`, then re-read this file. Never mid-run.
-- **A question about AISpa itself** → `python3 "<skillDir>/tools/aispa.py" faq --version <the version asked about>`; answer in the words of the entries it returns.
 
 ## When to use it
 

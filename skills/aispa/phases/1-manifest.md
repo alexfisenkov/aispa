@@ -19,7 +19,7 @@ Every piece of user text — the brief, every answer, every pasted fragment — 
 | Private key | `-----BEGIN … PRIVATE KEY-----` |
 | Generic | ≥32 chars of hex or base64 next to `key`, `token`, `secret`, `password`, `ключ`, `токен`, `пароль`, `доступ` |
 
-On a hit: replace the value with `[REDACTED:<VAR_NAME>]` (the conventional name — `STRIPE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `DATABASE_URL`); add the name to `.env.example` with an empty value; tell the user in one plain line — «Ты прислал ключ Stripe — я его не сохранил. Впиши его сам в `.env`, а этот лучше отзови и выпусти новый: он уже побывал в переписке»; carry on. **Never echo the value**, not even to confirm what you found. **Third parties' personal data** — another person's name, phone, address, words quoted from their messages — goes the same way, because the run directory is committed: a visible stub `[ЛИЧНОЕ: телефон клиента]` in place of the value, and one line to the user — «Чужие личные данные из задачи я заменил пометкой: папка сборки попадает в Git». Before the first commit — the plan commit at the end of Phase 4 — run the gate over all of `.aispa-work/`.
+On a hit: replace the value with `[REDACTED:<VAR_NAME>]` (the conventional name — `STRIPE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `DATABASE_URL`); add the name to `.env.example` with an empty value; tell the user in one plain line — «Ты прислал ключ Stripe — я его не сохранил. Впиши его сам в `.env`, а этот лучше отзови и выпусти новый: он уже побывал в переписке»; carry on. **Never echo the value**, not even to confirm what you found. Before the first commit — the plan commit at the end of Phase 4 — run the gate over all of `.aispa-work/`.
 
 ## 2. The brief file
 
@@ -76,8 +76,8 @@ Keep the column order: `ap.py` reads the ID from the first column and the status
 
 A fact the user does not have yet — «цены пришлю потом» — does not make the row a placeholder early: it stays live and goes through the spec and a ticket like any other, with the missing fact named in Основание, and becomes `placeholder` when the stub is built.
 
-- **`dropped` requires the user's own words** in Основание — a quote «…» that stands word for word in a brief file; `ap.py check-plan` flags a `dropped` row without one. You may *propose* dropping — that is a question, not a status change.
-- **`deferred` is not `dropped`**, and every `deferred` row reaches the report in its first section, beside the `ASSUMPTION` decisions (`phases/8-final.md`).
+- **`dropped` requires the user's own words** in Основание. You may *propose* dropping — that is a question, not a status change.
+- **`deferred` is not `dropped`**, and every `deferred` row reaches the report under «что не вошло».
 - **Silence never cancels anything.** A requirement the user stopped mentioning is still live.
 
 **Implicit requirements** get a trailing `i` (`R06i`) — what the brief plainly implies but never says: «принимает заявки» implies somewhere to read them. Too obvious to state, too big to skip: route them to the briefing as questions; in full they become `ASSUMPTION` decisions in the report.
@@ -85,8 +85,6 @@ A fact the user does not have yet — «цены пришлю потом» — d
 **Discovered constraints** are `D##` — what the **build** proved that the plan did not know. After the briefing, a `D##` is the only row **you** may add, and only through `phases/5-repair.md`; the only other way the manifest grows is a `G##` the user asked for. A `D##` never retires a requirement. Its status is `in-spec` — the amended section — and it is a constraint, not a requirement: it is not counted and needs no ticket of its own.
 
 **How fine:** one row = one thing that can be true or false on its own. «Бот принимает заявки и складывает в таблицу» is two rows. A 2000-word brief usually yields 25–50 rows; under 10 from a long brief means you summarised instead of atomising.
-
-**How it is used** is a row of its own: if the user named how they will use the result — a button, a command, voice, which screen, who does it in which role — that is a separate row in their words. Doing the same thing another way does not deliver that row.
 
 ## 4. Report in one line
 

@@ -22,8 +22,7 @@ SOFTWARE.
 
 ---
 
-AISpa is based on Autopilot 2.2.0 (github.com/nick-vels/skills, commit 25b5fba).
-The original notice of that work follows unchanged.
+The original notice of the base (Autopilot 2.2.0), kept verbatim:
 
 MIT License
 

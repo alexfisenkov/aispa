@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Основано на Autopilot (github.com/nick-vels/skills), © 2026 Nick Vels, MIT; изменения © 2026 Alexander Fisenkov, MIT
 """Учёт прогона AISpa: состояние, дашборд, сервер — одной командой на событие.
 
 Агент не правит .aispa-work/state.js руками. Каждое событие прогона — один вызов:
@@ -184,117 +183,6 @@ def fresh_state(a):
     }
 
 
-# ── история времени ─────────────────────────────────────────────────────────
-# Общий файл на компьютере: одна обезличенная строка на сданный прогон. По нему
-# панель честно оценивает остаток, пока в самом прогоне замеров мало.
-
-IDLE_CAP_S = 2700                                         # как IDLE_CAP_MS в панели
-
-
-def history_file():
-    if WIN:
-        base = os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local")
-    else:
-        base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
-    return os.path.join(base, "aispa", "history.jsonl")
-
-
-def _secs(v):
-    try:
-        return dt.datetime.fromisoformat(v).timestamp() if v else None
-    except (TypeError, ValueError):
-        return None
-
-
-def work_minutes(state, start, end):
-    """Рабочие минуты между двумя метками — тем же счётом, что на панели: без ожиданий
-    ответа и без простоя дольше 45 минут. None, если меток нет."""
-    a, b = _secs(start), _secs(end)
-    if a is None or b is None:
-        return None
-    marks = {_secs(x) for x in [state.get("startedAt"), state.get("updatedAt"), state.get("finishedAt")]
-             + list(state.get("beats") or [])}
-    waits = []
-    for coll, keys in (("stages", ("startedAt", "finishedAt")), ("tickets", ("startedAt", "finishedAt")),
-                       ("waits", ("from", "to"))):
-        for x in state.get(coll) or []:
-            marks.update(_secs(x.get(k)) for k in keys)
-    for w in state.get("waits") or []:
-        x, y = _secs(w.get("from")), _secs(w.get("to"))
-        if x is not None and y is not None and y > x:
-            waits.append((x, y))
-    pts = [a] + sorted(t for t in marks if t is not None and a < t < b) + [b]
-    total = 0.0
-    for i in range(1, len(pts)):
-        waited = sum(max(0.0, min(pts[i], y) - max(pts[i - 1], x)) for x, y in waits)
-        total += min(max(0.0, pts[i] - pts[i - 1] - waited), IDLE_CAP_S)
-    return max(1, int(total / 60 + 0.5)) if b > a else 1
-
-
-def history_row(state):
-    """Строка истории: ярус, число шагов, рабочие минуты сданных шагов и этапов
-    проверки и приёмки. Ни названия, ни slug, ни путей, ни текстов."""
-    tier = state.get("tier")
-    stage_min = {}
-    for sid in ("review", "final"):
-        st = next((s for s in state.get("stages") or [] if s.get("id") == sid), {})
-        real = st.get("status") == "done" and st.get("startedAt") != st.get("finishedAt")   # не закрыт «задним числом»
-        stage_min[sid] = work_minutes(state, st.get("startedAt"), st.get("finishedAt")) if real else None
-    tickets = state.get("tickets") or []
-    return {"tier": tier if isinstance(tier, str) and re.fullmatch(r"T\d", tier) else None,
-            "tickets": len(tickets),
-            "ticketMin": [m for m in (work_minutes(state, t.get("startedAt"), t.get("finishedAt"))
-                                      for t in tickets if t.get("status") == "done") if m],
-            "reviewMin": stage_min["review"], "finalMin": stage_min["final"]}
-
-
-def append_history(state):
-    path = history_file()
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(history_row(state), ensure_ascii=False) + "\n")
-    except OSError as e:
-        return "! история времени не записана (%s)" % e.strerror
-    return None
-
-
-def _spread(values):
-    v = sorted(values)
-    n = len(v)
-    return {"median": v[n // 2], "lo": v[(n - 1) // 4], "hi": v[-(-3 * (n - 1) // 4)]}
-
-
-def history_summary():
-    """Медианы и разброс по общему файлу для панели; нет файла, он пуст или повреждён — None."""
-    cols = {"ticket": [], "review": [], "final": []}
-    runs = 0
-    try:
-        with open(history_file(), encoding="utf-8", errors="replace") as f:
-            lines = f.read().splitlines()
-    except OSError:
-        return None
-    num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(row, dict) or "tickets" not in row:
-            continue
-        runs += 1
-        cols["ticket"] += [x for x in row.get("ticketMin") or [] if num(x)] \
-            if isinstance(row.get("ticketMin"), list) else []
-        for key, name in (("reviewMin", "review"), ("finalMin", "final")):
-            if num(row.get(key)):
-                cols[name].append(row[key])
-    if not runs:
-        return None
-    out = {"runs": runs}
-    out.update({k: _spread(v) for k, v in cols.items() if v})
-    return out
-
-
 # ── манифест и таски ────────────────────────────────────────────────────────
 
 ROW_ID = re.compile(r"^[RGD]\d+[a-z]?$")
@@ -326,10 +214,8 @@ def manifest_table(state):
         cells = [c.strip().strip("`*") for c in raw]
         if len(cells) >= 3 and ROW_ID.match(cells[0]):
             rows.append({"id": cells[0], "text": plain(raw[1]) if len(raw) > 1 else "",
-                         "cell": raw[1] if len(raw) > 1 else "",
                          "status": cells[2].split()[0].lower() if cells[2] else "open",
-                         "why": plain(raw[3]) if len(raw) > 3 else "",
-                         "basis": raw[3].replace("\\|", "|") if len(raw) > 3 else ""})
+                         "why": plain(raw[3]) if len(raw) > 3 else ""})
     return rows
 
 
@@ -467,25 +353,6 @@ def check_plan(state):
     for rid, st in rows:
         if st in ("in-spec", "in-ticket", "placeholder") and not rid.startswith("D") and rid not in base:
             problems.append("требование %s (%s) не попало ни в один таск" % (rid, st))
-    # Снять требование может только пользователь: в «Основании» строки dropped — его
-    # слова «…», дословно из какого-нибудь файла брифа (целиком, с «Дополнениями»).
-    # Цитата, которая есть в ячейке «Из брифа» этой же строки, — слова самого требования,
-    # а не отказ от него: она не считается.
-    squash = lambda s: " ".join(s.split())
-    bare = lambda s: squash(re.sub(r"[«»*`]", " ", s.replace("\\|", "|")))
-    briefs = []
-    for p in sorted(glob.glob(os.path.join(run_dir(state), "*-brief.md"))):
-        try:
-            briefs.append(squash(open(p, encoding="utf-8").read()))
-        except OSError:
-            pass
-    for r in manifest_table(state) or []:
-        own = bare(r["cell"])
-        quotes = [squash(q) for q in re.findall(r"«([^»]+)»", r["basis"])
-                  if q.strip() and bare(q) not in own]
-        if r["status"] == "dropped" and not any(q in b for q in quotes for b in briefs):
-            problems.append("требование %s снято без слов пользователя: в «Основании» нет цитаты «…», "
-                            "которая дословно есть в файле брифа" % r["id"])
     known = {rid for rid, _ in rows}
     ids = {t["id"] for t in tickets}
     for t in tickets:
@@ -789,12 +656,15 @@ def check_update(state):
         return None
     if not remote or (local and remote <= local):
         return None
+    home = _norm(os.path.expanduser("~"))
+    flag = " -g" if _norm(skill).startswith(home + "/.") else ""
     v = lambda t: ".".join(map(str, t))
-    return ("вышла AISpa %s (у тебя %s) — скажи «обнови AISpa», поставлю после твоего «да»"
-            % (v(remote), v(local) if local else "без номера"))
+    return ("вышла версия AISpa %s (у тебя %s): npx skills update aispa%s · "
+            "что нового — github.com/%s/blob/main/CHANGELOG.md"
+            % (v(remote), v(local) if local else "без номера", flag, REPO))
 
 
-# ── реестр прогонов (.aispa-work/README.md) ─────────────────────────────────
+# ── реестр прогонов (.aispa-work/README.md) ──────────────────────────────────
 
 README_TEXT = """# Как читать эту папку
 
@@ -901,9 +771,6 @@ def cmd_init(opt):
             os.replace(STATE, os.path.join(A, dst))
         notes.append("прошлый прогон убран в архив: %s" % dst)
     state = fresh_state(opt)
-    past = history_summary()
-    if past:
-        state["history"] = past
     log(state, "init")
     os.makedirs(os.path.join(run_dir(state), "tickets"), exist_ok=True)
     save(state)
@@ -1086,9 +953,6 @@ def cmd_finish(state, opt):
             notes.append("! не смог переименовать %s — оставляю как есть" % d)
     state["finishedAt"] = t
     state["result"] = opt.get("result") if isinstance(opt.get("result"), str) else None
-    problem = append_history(state)
-    if problem:
-        notes.append(problem)
     register_row(state, "сдан", state["result"])
     log(state, "finish", result=state["result"])
     return notes

@@ -8,9 +8,8 @@ Runs on every flight — new repo, new feature, resume alike. Every line is idem
 
 ```bash
 A=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)/.aispa-work
-TPL="<skillDir>/phases/dashboard-template.html"   # <skillDir>: the folder of the SKILL.md you opened
-[ -f "$TPL" ] || TPL=$(find -L ~/.claude/skills ~/.agents/skills ~/.codex/skills ~/.claude/plugins .claude/skills .agents/skills \
-        -maxdepth 6 -path '*/aispa/phases/dashboard-template.html' 2>/dev/null | head -1)
+TPL=$(find -L ~/.claude/skills ~/.agents/skills ~/.claude/plugins .claude/skills .agents/skills \
+        -maxdepth 6 -name dashboard-template.html 2>/dev/null | head -1)
 [ -n "$TPL" ] && TPL=$(cd "$(dirname "$TPL")" && pwd -P)/dashboard-template.html
 command -v cygpath >/dev/null && TPL=$(cygpath -m "$TPL")   # Windows: C:/…, а не /c/…
 echo "skillDir = ${TPL%/phases/*}"
@@ -19,7 +18,7 @@ cp "${TPL%/phases/*}/tools/ap.py" "$A/ap.py"
 ```
 
 - **`skillDir` is what every subagent contract hangs on** — `prompts/executor.md` and `prompts/review.md` go down as paths built from it. It goes into `init` below and lives in `state.js`, never only in your context.
-- **`skillDir` comes from the path you opened `SKILL.md` by** — put that folder in place of `<skillDir>`. `find` is the fallback for when that path is not at hand: `-L`, because skills are installed through symlinks, which a plain `find` does not follow; only a template under an `aispa` folder, so another skill installed beside it is never picked; the pattern in quotes and no bare `*` in the line, because an unmatched glob aborts the whole line in zsh. Empty output → widen the search once by hand and carry on.
+- `find -L` and no `*` in it: skills are installed through symlinks, which a plain `find` does not follow, and an unmatched glob aborts the whole line in zsh. Empty output → widen the search once by hand and carry on.
 - **`python3` not a working interpreter** — on Windows it can be the Microsoft Store stub → use `python` or `py -3` wherever this skill says `python3`.
 - `index.html` is a symlink so the server answers `/` with the dashboard instead of a directory listing.
 - Never regenerate the template, never read it into context, never edit it.
@@ -41,8 +40,6 @@ A line starting with **`↑`** means a newer AISpa is out: put it into the openi
 Immediately after `init`, before Phase 1 asks anything.
 
 **Path A — the pane beside the chat (preferred), over http.** In Claude Code: `preview_start({url: "http://localhost:PORT"})`, then `navigate` to `/dashboard.html`. A bare `navigate` to localhost without `preview_start` is refused, and so is `127.0.0.1`. Never hand the pane a `file://` path: it loads the page as `data:`, which cannot fetch `state.js` — the snapshot shows, the clocks never move. If `preview_start` is not in your tool list, search for it before concluding there is no pane.
-
-**In Codex** — open the address in Codex's built-in browser, in one action. If the panel is already open, do not open it a second time. If there is no built-in browser, give the person the address and carry on.
 
 **Say the address in the chat too** — some clients show the pane only as a card with an «Open» button.
 

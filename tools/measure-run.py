@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Основано на Autopilot (github.com/nick-vels/skills), © 2026 Nick Vels, MIT; изменения © 2026 Alexander Fisenkov, MIT.
-
-Замер прогона Autopilot и AISpa по логам сессии Claude Code.
-Рабочая папка прогона AISpa — `.aispa-work/`; роли субагентов AISpa узнаются по типу агента.
+"""Замер прогона AISpa по логам сессии Claude Code.
 
 Отвечает на три вопроса, ради которых он написан:
   · во что обошёлся прогон и кто именно потратил;
@@ -38,7 +35,6 @@ for _s in (sys.stdout, sys.stderr):                     # cp1251-консоль 
     except (AttributeError, ValueError):
         pass
 
-WORK_DIR = ".aispa-work"    # рабочая папка прогона AISpa в проекте
 W_OUT, W_WRITE, W_READ = 5.0, 1.25, 0.1
 IDLE_GAP_SEC = 300          # пауза длиннее — это простой, а не работа
 CEILING_HINT = 120_000      # ориентир для колонки «перебор»: выше — контекст раздут
@@ -59,33 +55,13 @@ ROLES = [
 ]
 
 
-# Агенты AISpa узнаются по типу, который записан в meta.json субагента.
-AGENT_ROLES = {
-    "aispa-worker": "исполнитель", "aispa-sensitive-worker": "исполнитель",
-    "aispa-mechanic-scripted": "механика", "aispa-mechanic": "механика",
-    "aispa-researcher": "разведка",
-}
-
-
-def role_of(label, agent_type=None):
+def role_of(label):
     if label == "Оркестратор":
         return "оркестратор"
-    if agent_type in AGENT_ROLES:
-        return AGENT_ROLES[agent_type]
     for name, rx in ROLES:
         if re.search(rx, label.lower()):
             return name
-    return "ревью" if agent_type == "aispa-judge" else "прочее"
-
-
-def run_folders(project_path):
-    """(сданных, в работе) папок прогонов в .aispa-work/ проекта; папка без даты в имени — не прогон."""
-    work = os.path.join(os.path.abspath(os.path.expanduser(project_path)), WORK_DIR)
-    if not os.path.isdir(work):
-        return 0, 0
-    names = [n for n in os.listdir(work) if n[:4].isdigit() and os.path.isdir(os.path.join(work, n))]
-    wip = sum(1 for n in names if n.endswith("--wip"))
-    return len(names) - wip, wip
+    return "прочее"
 
 
 def logs_dir_for(project_path):
@@ -116,7 +92,7 @@ def load(path):
     return rows
 
 
-def analyse(path, label, agent_type=None):
+def analyse(path, label):
     rows = load(path)
     ctx, tools = [], Counter()
     out = win = rin = cold = 0
@@ -175,7 +151,7 @@ def analyse(path, label, agent_type=None):
             idle += gap
 
     return {
-        "label": label, "role": role_of(label, agent_type), "steps": len(ctx),
+        "label": label, "steps": len(ctx),
         "avg_ctx": sum(ctx) / len(ctx) if ctx else 0,
         "max_ctx": max(ctx) if ctx else 0,
         "over": sum(1 for c in ctx if c > CEILING_HINT),
@@ -198,7 +174,7 @@ def main():
         sys.exit(f"в {d} нет .jsonl")
 
     def weight(p):
-        """Прогон Autopilot узнаётся по субагентам, а не по свежести:
+        """Прогон AISpa узнаётся по субагентам, а не по свежести:
         последняя по времени сессия — обычно та, в которой смотрят результат."""
         n = len(glob.glob(os.path.join(p[:-6], "subagents", "*.jsonl")))
         return (n, os.path.getsize(p))
@@ -225,16 +201,11 @@ def main():
     results = [analyse(main_log, "Оркестратор")]
     for jf in sorted(glob.glob(os.path.join(sub_dir, "subagents", "*.jsonl"))):
         key = os.path.basename(jf)[:-6]
-        meta = metas.get(key, {})
-        results.append(analyse(jf, meta.get("description", key), meta.get("agentType")))
+        results.append(analyse(jf, metas.get(key, {}).get("description", key)))
     results.sort(key=lambda r: -r["norm"])
 
     total = sum(r["norm"] for r in results) or 1
-    print(f"\nПрогон: {sys.argv[1]}   контекстов: {len(results)}")
-    done, wip = run_folders(sys.argv[1])
-    if done or wip:
-        print(f"Папка {WORK_DIR}/: сдано прогонов {done}, в работе {wip}")
-    print()
+    print(f"\nПрогон: {sys.argv[1]}   контекстов: {len(results)}\n")
     print(f"{'контекст':<38}{'шагов':>7}{'ср.ctx':>9}{'макс':>9}{'>120K':>7}{'норм.ед':>11}{'доля':>7}")
     print("-" * 88)
     for r in results:
@@ -252,9 +223,9 @@ def main():
     print("По ролям")
     by = {}
     for r in results:
-        by.setdefault(r["role"], [0, 0.0])
-        by[r["role"]][0] += 1
-        by[r["role"]][1] += r["norm"]
+        by.setdefault(role_of(r["label"]), [0, 0.0])
+        by[role_of(r["label"])][0] += 1
+        by[role_of(r["label"])][1] += r["norm"]
     for name, (n, val) in sorted(by.items(), key=lambda kv: -kv[1][1]):
         print(f"  {name:<14}{n:>3} конт.{val/1e6:>9.2f}M{val/total*100:>6.1f}%")
     print()
@@ -278,7 +249,7 @@ def main():
     print(f"  контекстов с протухшим кэшем (запись/чтение > 10%): {len(cold_agents)}"
           + (f" — {', '.join(r['label'][:24] for r in cold_agents[:4])}" if cold_agents else " — нет"))
 
-    execs = [r for r in results if r["role"] == "исполнитель" and r["steps"]]
+    execs = [r for r in results if role_of(r["label"]) == "исполнитель" and r["steps"]]
     if execs:
         print("\nНагрузка исполнителей (цель — ~3K строк на таск, обычно 300–400K контекста)")
         low = [r for r in execs if r["max_ctx"] < EXEC_LOW]

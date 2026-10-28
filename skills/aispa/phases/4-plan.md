@@ -51,15 +51,13 @@ Every ticket of the chain carries the same requirement. It applies when the chan
 **Review** — whether the ticket gets a point review after its commit (`phases/6-review.md`). It never holds up the build: the next tickets fly while it runs. **Every ticket is reviewed once at the end anyway**, as part of the whole branch — a point review is only for what is worth catching earlier.
 
 - `да — фундамент` — ticket 01, when later tickets build on it, and the expand step of a wide change. Nothing else is foundation.
-- `да — <риск>` — a ticket whose **own code** is one of these: sign-in, passwords, sessions, 2FA; keys and secrets; money; deleting or migrating user data; granting and checking access; processing personal data. A ticket that only checks permissions inside an ordinary feature is not a risk ticket — the whole-branch review covers it. Most tickets in a product with access rights touch them; marking them all is how a run reviews 12 tickets of 15.
+- `да — <риск>` — a ticket whose **own code** is one of these: sign-in, passwords, sessions, 2FA; keys and secrets; money; deleting or migrating user data. A ticket that only checks permissions inside an ordinary feature is not a risk ticket — the whole-branch review covers it. Most tickets in a product with access rights touch them; marking them all is how a run reviews 12 tickets of 15.
 - `нет` — the rest. Most tickets. **At T0 the one ticket is `нет` too**: the whole-branch review is its review, and a point review would read the same diff twice.
 
 **Model** — who builds it.
 
 - `сильная` — every ticket with review `да`, and any ticket whose core is a genuinely hard algorithm or an unfamiliar integration.
-- `обычная` — the rest: a well-specified slice over decided boundaries. It runs on a cheaper model (route table in `SKILL.md`).
-- `механика-скрипт` — mechanics: «форматирование, сверка, раскладка файлов, где результат проверяет скрипт». Only when the ticket's criteria name the script command that checks every one of them.
-- `механика` — the same kind of work, when no script checks the result. A ticket that writes code or text for a person is never mechanics.
+- `обычная` — the rest: a well-specified slice over decided boundaries. It runs on a cheaper model (`phases/5-subagents.md`).
 
 ## The ticket file
 
@@ -98,7 +96,6 @@ Every ticket of the chain carries the same requirement. It applies when the chan
 ```
 
 - **The verbatim brief quotes are not decoration** — they are the last thing standing between a fresh context and a plausible reinterpretation, and the point reviewer judges the Manifest axis from them.
-- **A criterion names the surface in the brief's words** — «нажимает кнопку „Записаться“», not «вызывает запись». Where the brief says how it is used — a button, a command, a screen, a role — the criterion says it the same way.
 - **Every criterion is checkable and false at the commit the executor starts from.** A criterion already true tests nothing; the executor proves each one red before building it (`prompts/executor.md`).
 - No file paths or code snippets except a structure prose states worse — a schema, a state machine.
 - `Зависит от` lists ticket numbers only — `01, 02`, or `—`.
@@ -124,7 +121,7 @@ A ticket that exists only in the dialogue is not a ticket — the user is shown 
 
 ## Showing the plan
 
-**Parallelism gets one line, and only if it is true**: «6 шагов в 4 волны, часть пойдёт параллельно».
+**Parallelism gets one line, and only if it is true**: «6 тасков в 4 волны, часть пойдёт параллельно».
 
 - **semi, interview** — one screen, one plain line per ticket saying what the user will be able to do when it lands, then «Показываю план и начинаю. Скажи "стоп", если что-то не так» — and start. Never promise a countdown you cannot hold.
 - **full** — the same screen as a notification.

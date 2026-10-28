@@ -23,7 +23,7 @@
 Before each round goes out: `ap.py ask briefing --note "три вопроса — где хранить заявки, ночь, отмена"`. The answers close it — `answered`, or the next round's `ask`.
 
 - **Every question names its requirement** — internally, «this closes R07». A question that closes no row is dropped.
-- **Look facts up, ask only decisions.** What stack the repo uses is a fact; which payment provider they have an account with is a decision. Before the plan, install and run nothing outside the project — on servers, a VPS, in someone else's accounts (rule 4 in `SKILL.md`).
+- **Look facts up, ask only decisions.** What stack the repo uses is a fact; which payment provider they have an account with is a decision.
 - **Blocking unknowns go in the first round** — payment, hosting, which accounts exist, where the data lives, an existing system to fit into. Asked at the end, they cost half the project.
 - **Decisions, never secrets.** *Which* provider, *whether* an account exists — yes; the key itself — never.
 - **Never answer for the user.** «Не знаю» → the row stays live with the missing fact named in Основание, and the build puts a visible stub there.
@@ -35,7 +35,7 @@ Before each round goes out: `ap.py ask briefing --note "три вопроса �
 | **interview · manual** | all of them, plus everything the adversarial pass opened |
 
 - **Everything else you decide yourself** — error wording, retry policy, defaults, naming, layout — in every mode. But a decision goes back to the user, not to you, if it **costs money or ties them to a vendor**, **changes what they see or can do**, **means rebuilding rather than editing to undo**, or **encodes a rule about their business** — prices, deadlines, who may do what, what happens to someone's data. Unsure which side it falls on → ask.
-- **Nothing open → say so and go:** «Вопросов нет — в задаче всё однозначно, пишу описание», and `ap.py stage briefing skip --note "вопросов не потребовалось"`.
+- **Nothing open → say so and go:** «Вопросов нет — в задаче всё однозначно, пишу спецификацию», and `ap.py stage briefing skip --note "вопросов не потребовалось"`.
 
 Calibration, not a target: semi usually lands at one or two rounds; interview and manual at three to six on a real project. What makes an interview bad is padding, never length. Say once, if it will be long, that it will be — and do not apologise for the count as you go.
 
@@ -65,7 +65,7 @@ Whatever the user hands you that the result could be measured against — refere
 
 ## Recording answers
 
-After each round, update the manifest rows at once: a decision into Основание; a cancellation → `dropped` with the user's words; something new → a `G##` row with their phrasing; «не знаю» → the missing fact into Основание. **Every answer** is also appended to the brief's `## Дополнения`, dated and verbatim — an «ок» together with the recommendations it accepted, word for word: `- <дата> — на вопросы 1–3: «ок»; принято: «Где хранить заявки — в Google-таблице …»`. G2 and G4 read only the brief, so an answer that lives only in the manifest was never given for them.
+After each round, update the manifest rows at once: a decision into Основание; a cancellation → `dropped` with the user's words; something new → a `G##` row with their phrasing; «не знаю» → the missing fact into Основание. Every answer that **cancels, adds or reverses** is also appended to the brief's `## Дополнения`, dated and verbatim.
 
 ## When the задача changes later
 
@@ -87,4 +87,4 @@ No interview: `ap.py stage briefing skip --note "полный автомат —
 
 ## Closing
 
-Gate **G1**: every row has a status; nothing `open` without a recorded reason. Then one line — «Понял. Пишу описание» — and Phase 3. Do not summarise the interview back to the user.
+Gate **G1**: every row has a status; nothing `open` without a recorded reason. Then one line — «Понял. Пишу спецификацию» — and Phase 3. Do not summarise the interview back to the user.

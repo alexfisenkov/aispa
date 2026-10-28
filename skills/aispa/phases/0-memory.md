@@ -42,7 +42,7 @@ Written before anything is built, so an interrupted run still leaves something t
 
 ## Как здесь работает AISpa
 
-Сборка ведётся навыком `/aispa`. Требования, описание и шаги — в `.aispa-work/`.
+Сборка ведётся навыком `/aispa`. Требования, спецификация и таски — в `.aispa-work/`.
 Прогресс — `.aispa-work/dashboard.html`. Требование из `manifest.md` может снять
 только пользователь. Прерванную сборку продолжает «продолжи AISpa».
 

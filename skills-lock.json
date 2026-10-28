@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "aispa": {
+      "source": "alexfisenkov/aispa",
+      "sourceType": "github",
+      "skillPath": "skills/aispa/SKILL.md",
+      "computedHash": "1dd95ea76ab4fd45be27a52399ffe572666078a56171923d16c7581a336d2a90"
+    }
+  }
+}

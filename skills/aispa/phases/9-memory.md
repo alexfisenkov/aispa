@@ -32,7 +32,7 @@ AISpa's file → one line appended between the markers. The user's → one line 
 
 ## Moment 3 — the description (Phase 8)
 
-**A subagent on the cheaper model, launched after the blind acceptance, its `F2` repair and the repeat check** (`phases/8-final.md` §1) — it reads the repository as the repair left it and never sees the checker. It receives the repository, the current memory file, `interfaces.md`, the tier, and the commands already verified: the full suite you ran, and the commands the last blind check returns. **Not `spec.md`, not the tickets** — a memory written from the plan documents intentions, and the next session trusts it.
+**A subagent on the cheaper model, launched with the blind acceptance** — they read the same finished repo and never see each other. It receives the repository, the current memory file, `interfaces.md`, the tier, and the commands already verified: the full suite you ran, and the commands the blind checker returns. **Not `spec.md`, not the tickets** — a memory written from the plan documents intentions, and the next session trusts it.
 
 **The memory file carries pointers and traps, not a retelling.** Every line is read by every future session; a directory tree, a paraphrase of `package.json` or a description of what a module «does» is a cache of what the repo already says, and it goes stale first.
 
@@ -83,7 +83,7 @@ The memory file answers «как этим пользоваться»; ADRs answe
 
 Three sources, nothing else: **every `D##` row** (the plan proved wrong — the most valuable kind); **load-bearing implementation decisions** (data model, module boundaries, an external service — anything whose reversal means rebuilding). Vocabulary is not a decision — it goes to the glossary below. Not: a decision with no alternative, anything a linter or framework decided, the obvious default. Three to six files on T2, five to twelve on T3.
 
-**A subagent, in parallel with the blind checker, on the cheaper model.** It receives `spec.md`, `manifest.md`, `interfaces.md` (the boundaries live there) and `notes.md` when it exists (the names the code already uses), **not the repository** — it documents decisions and words, not code.
+**A subagent, in parallel with the other two, on the cheaper model.** It receives `spec.md`, `manifest.md`, `interfaces.md` (the boundaries live there) and `notes.md` when it exists (the names the code already uses), **not the repository** — it documents decisions and words, not code.
 
 > По приложенным спецификации, манифесту, `interfaces.md` и `notes.md` напиши по одному ADR на каждое решение,
 > которое дорого отменять, и на каждую строку `D##`. Не вызывай скиллы

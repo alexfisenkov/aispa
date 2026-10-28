@@ -24,7 +24,7 @@ Never two tickets in one context — accumulated context is what makes long sess
 
 A subagent has a filesystem; pasting what it can read writes the same words twice into the bill, and the second copy stays in your context for the rest of the run. Every rule the executor must follow travels in its prompt or in `prompts/executor.md` — a rule that lives only in a phase file does not exist for the one writing the code.
 
-**The model.** Model and effort of every subagent come from the table in `SKILL.md`, never from the chat. `Модель: сильная` is Opus · high (Sol · high in Codex), so a chat on a stronger model does not leak into the executor. `сильная`, a ticket with `Ревью: да — <риск>`, `F1` and `F2` are `aispa-sensitive-worker`; `обычная` is `aispa-worker`, `механика-скрипт` is `aispa-mechanic-scripted`, `механика` is `aispa-mechanic`. `aispa-judge` is for the checking roles only — it never edits code, so an executor sent to it builds nothing. In Claude Code the agent file carries the effort; in Codex model and effort are passed explicitly on every spawn. A ticket that already failed once is relaunched on the strong model — `aispa-sensitive-worker`.
+**The model.** A ticket marked `Модель: сильная` runs on the session's model. `обычная` runs on a cheaper one — in Claude Code, `model: "sonnet"` on the Agent call; a harness without a model choice ignores this silently. A ticket that already failed once is relaunched on the strong model.
 
 **Dependencies.** Ticket 01 installs everything the spec's «Решения по реализации» names. A later ticket that needs something else returns `BLOCKED` with its name; if it fits a decision already made, add it to «Решения», relaunch that ticket with permission to install exactly that — the manifest and lock files join its commit — and fly nothing else that installs at the same time.
 
@@ -38,7 +38,7 @@ Phase 4 gave every ticket a wave and a zone. **Launch a whole wave in one messag
 - **A dependent never launches on an uncommitted parent.**
 - `ap.py ticket 02 03 start` goes **before** the launch — one call for the whole wave, **in the same message as the Agent calls**: Bash first, the launches after it.
 - **One event, one message.** Every call of yours re-reads your whole context — at 200K, one call costs about as much as a small subagent's first steps. What one event needs goes out together: the `ap.py` mark, the commit, the next launch, the line to the user. Never a call that only marks, then a call that only launches.
-- **Waiting for the wave is ending your turn** — a background subagent wakes you when it returns. Never spawn an agent, or run a loop, just to wait. Where a background subagent does not wake you by itself (Codex, a headless run), wait for it with the wait tool in the same turn; the turn ends only with a handover, a question the mode allows, or a stop condition.
+- **Waiting for the wave is ending your turn** — a background subagent wakes you when it returns. Never spawn an agent, or run a loop, just to wait.
 
 **One working tree, several writers.** Parallel executors share the checkout. Each touches only its zone (and `.env.example`), and you commit by zone. A check that fails **only in files of zones still being written** is a neighbour's unfinished work, not this ticket's defect: the ticket may land on its own tests green, and the full check runs again when the neighbour lands.
 
