@@ -22,8 +22,8 @@ AISpa is built on Autopilot 2.2.0 (Nick Vels, MIT).
 
 <p align="center">
   <a href="assets/aispa-dashboard.png"><img src="assets/dash-now.png" width="380" alt="The header: what is happening now, how much is left, the eight stages"></a>
-  <a href="assets/aispa-dashboard.png"><img src="assets/dash-tasks.png" width="380" alt="Build progress: every task as a coloured bar, grouped into waves"></a>
-  <a href="assets/aispa-dashboard.png"><img src="assets/dash-done.png" width="380" alt="A finished build: keys and placeholders needed from you, blind acceptance, checks"></a>
+  <a href="assets/aispa-dashboard.png"><img src="assets/dash-tasks.png" width="380" alt="Tasks by wave: every task with a coloured state bar and its steps"></a>
+  <a href="assets/aispa-dashboard.png"><img src="assets/dash-done.png" width="380" alt="A finished build: keys and placeholders needed from you, the four checks including blind acceptance"></a>
 </p>
 
 <p align="center"><sub>Header · build progress · the report of a finished build — <a href="assets/aispa-dashboard.png">open the full dashboard</a></sub></p>
@@ -226,13 +226,13 @@ At deep depth one requirement from the brief unfolds into several worked-out sce
 
 **The header — what's happening, in one sentence.** Blue: the build is running — "2 of 6 tickets done, 3 more in progress", which tickets are being written, which are in review, and how long until done including review and acceptance. Orange: **the build is waiting for you** — briefing questions, your "ok" on the spec in manual mode, a decision before an irreversible step; the browser tab says "● Waiting for you", and the build clock is stopped meanwhile. Green: done — what you now have and what you need to do to run it for real. Under the sentence — eight stages from preflight to acceptance: passed, current, skipped.
 
-**Build progress — every state has its own colour.** Green — task done, striped orange — being written, teal — in review, purple — back from review for repair, red — failed, dashed — waiting its turn. Under a repair or review bar it says why. Tasks are grouped into waves: you can see what runs in parallel and what the next wave is waiting for.
+**Tasks by wave — every state has its own colour.** Each task is a card with a coloured stripe on the left: green — done, blue — being written, teal — in review, amber — back from review for repair, red — failed, grey — waiting its turn. Under the title — which requirements it covers, on the right — its state and time, below — the steps "writing → review → repair → done". Why a task is in review or repair is written right there; open "Requirements and task details" to see the requirements in your words, the zone, dependencies, tests and the commit. Each wave shows how many tasks are done and a progress bar: you can see what runs in parallel and what the next wave is waiting for.
 
-**Your words.** Every requirement from the brief — as your quote, with what became of it: done, in progress, needs your data, deferred, dropped by you. Deferred items and placeholders show the reason. This is AISpa's main promise — nothing disappears quietly — and here you can check it with your own eyes.
+**Requirements.** Every requirement from the brief — as your quote, with what became of it: done, in progress, needs your data, deferred, dropped by you. Deferred items and placeholders show the reason. This is AISpa's main promise — nothing disappears quietly — and here you can check it with your own eyes.
 
 <p align="center">
   <img src="assets/dash-waiting.png" width="380" alt="The build is waiting for you: questions in the chat, the build clock is stopped">
-  <img src="assets/dash-words.png" width="380" alt="Your words: every requirement quoted from the brief, with its status">
+  <img src="assets/dash-words.png" width="380" alt="Requirements: every requirement quoted from the brief, with its status">
 </p>
 
 
