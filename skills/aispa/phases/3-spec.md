@@ -31,7 +31,7 @@ How far to take it is the user's setting — stored as `strict` / `normal` / `de
 | **Boundaries** | who may do this, and what happens to someone who may not? |
 | **Aftermath** | where does the result go, who learns about it, can it be undone? |
 
-Each answer becomes an `R##.n` story with its own acceptance line. The number of stories is an output: seven dimensions that matter give seven stories, two give two, and padding is the same defect as skipping.
+Each answer becomes an `R##.n` story with its own acceptance line. A dimension the user answered in the briefing becomes a story at every depth, whatever the table says. The number of stories is an output: seven dimensions that matter give seven stories, two give two, and padding is the same defect as skipping.
 
 **Two roads.** *Propose* when the answer is the user's to give — that was a briefing question. *Decide* when it is craft — error text, retry policy, limits, defaults — write it in and say so in the summary. In `auto`, everything is decided and listed in the report; at strict, nothing is offered beyond what was asked.
 

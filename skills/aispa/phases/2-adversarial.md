@@ -22,7 +22,7 @@ Five to seven findings is the normal yield; fewer than three on a real project m
 
 | Kind of finding | auto | important | interview · manual |
 |---|---|---|---|
-| only the user can settle it | `ASSUMPTION` in the manifest and the report | asked **only if** the branches give a visibly different product | **asked**, early — right after the blocking externals, in the second round at the latest |
+| only the user can settle it | `ASSUMPTION` in the manifest and the report | asked **only if** the branches give a visibly different product | **asked**, early — right after the blocking externals, by the end of the second round at the latest (one question at a time: the second group of questions, `phases/2-briefing.md`) |
 | craft — you can settle it | decided, into the spec | same | same |
 | a whole capability | `A##` under its parent, or «Вне рамок» | same | same, or offered as a question |
 | outside the brief | one line in «Вне рамок» | same | same |

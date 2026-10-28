@@ -113,7 +113,7 @@ If you didn't name a mode, the agent first asks one thing — how to work — an
 How do we work? Answer with a number or a word:
 1. On my own from the brief (сам по брифу) — I ask nothing about the brief; decisions made for you are listed in the report.
 2. Only what matters (только важное) — I ask only what the brief leaves undecided and what changes the result.
-3. Interview (интервью) — I go through the whole brief in detail, topic by topic. There will be many questions — several dozen on an ordinary project — but I build exactly what you have in mind. Each comes with my own answer, so "ok" is enough. If you like, I'll ask one at a time. Then I build it myself.
+3. Interview (интервью) — I go through the whole brief in detail, topic by topic. There will be many questions — several dozen on an ordinary project — but I build exactly what you have in mind. Each comes with my own answer: usually "ok" is enough, and where the choice matters I'll ask you to name a letter. If you like, I'll ask one at a time. Then I build it myself.
 4. Manual (ручной) — like interview, plus you approve the spec and the task list.
 ```
 

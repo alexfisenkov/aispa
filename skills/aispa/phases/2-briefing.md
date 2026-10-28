@@ -11,7 +11,7 @@
 **Ask a round, not a question.** One message holds the current frontier — questions whose answers do not depend on another unanswered one — up to four at a time, numbered, **one theme per round** (one screen, one feature, one kind of decision). Each carries a recommended answer and a reason in half a line, so the user can reply «ок» to accept every recommendation, or «2 — таблица, остальное ок». The next round is built from the answers: what they opened, what they closed.
 
 ```
-Тема 1 из 5 — заявки · осталось примерно 30 вопросов
+Тема 1 из 5 — заявки · осталось примерно 35 вопросов
 
 1. Где хранить заявки — в Google-таблице или в базе? Я бы взял таблицу: тебе её видно и не нужен сервер.
 2. Кто отвечает клиентам ночью? Я бы принимал заявки круглосуточно и обещал ответ в рабочие часы.
@@ -20,12 +20,14 @@
    б) только до выезда мастера — после выезда отмена через звонок тебе.
    Я бы взял «б». Тут выбери букву сам — от этого зависит, что увидит клиент.
 
-Ответь номерами или «ок» — согласен с остальными моими вариантами.
+Ответь, например: «3б, остальное ок» — или просто «ок», если со всем согласен (кроме вопроса с ⚑: там нужна буква).
 ```
+
+The progress line «Тема N из M · осталось примерно K» exists only in `interview` and `manual`, where `interview.md` holds the map; «осталось» counts the questions of this round too, and the number matches the opening map the first time. In `important` there is no map and no theme count: the round opens with a plain «Два вопроса, дальше соберу сам» (the real number).
 
 Before each round goes out: `ap.py ask briefing --note "тема «заявки» — хранение, ночь, отмена"`. The answers close it — `answered`, or the next round's `ask`.
 
-- **Every question names its requirement** — internally, «this closes R07». A question that closes no row is dropped — unless its answer adds something in the user's words (a scope edge, an item from the last run), which becomes a `G##` row.
+- **Every question names its requirement** — internally, «this closes R07». A question that closes no row is dropped — except the scope-edge question (item 7 of «What to ask about») and the `carried.md` question, whose answers become `G##` or `dropped` rows.
 - **Look facts up, ask only decisions.** What stack the repo uses, what a file already contains, how a service usually works — facts, found by you. Which payment provider they have an account with, what a client may do — decisions, asked.
 - **Blocking unknowns go in the first round** — payment, hosting, which accounts exist, where the data lives, an existing system to fit into. Asked at the end, they cost half the project.
 - **Decisions, never secrets.** *Which* provider, *whether* an account exists — yes; the key itself — never.
@@ -47,10 +49,10 @@ The user chose to be asked, and every answer they give is one guess fewer in the
 For each row, three passes:
 
 1. **Its own words** — every word with two readings («заявка», «клиент», «быстро»), every number not given, every «и т.д.».
-2. **The eight dimensions** — the same as the spec phase uses: *первый запуск* (what is there before any data), *пусто* (zero items), *неверный ввод*, *сбой* (network, service), *прерывание* (closed halfway, sent twice), *рост* (ten versus ten thousand), *границы* (who may do this, and who may not), *после* (where the result goes, who learns, can it be undone). At «Сбалансированно» and «Максимум» — all eight for every row; at «Быстро» — only *неверный ввод*, *сбой* and pass 1, since nothing beyond what was said will be built. A dimension that does not apply is skipped silently, never asked as «не применимо?». Only the part of the answer that is the user's goes on the map; the craft part you decide in the spec.
+2. **The eight dimensions** — the same as the spec phase uses: *первый запуск* (what is there before any data), *пусто* (zero items), *неверный ввод*, *сбой* (network, service), *прерывание* (closed halfway, sent twice), *рост* (ten versus ten thousand), *границы* (who may do this, and who may not), *после* (where the result goes, who learns, can it be undone). At «Сбалансированно» and «Максимум» — all eight for every row; at «Быстро» — pass 1, plus *границы* and *после* where the brief already names roles or outcomes (they are the user's to answer); *неверный ввод* and *сбой* are craft at that depth and are decided in the spec. A dimension the user answers here becomes an `R##.n` story at any depth (`phases/3-spec.md`). A dimension that does not apply is skipped silently, never asked as «не применимо?». Only the part of the answer that is the user's goes on the map; the craft part you decide in the spec.
 3. **The list in «What to ask about»** below, as it touches this row.
 
-Then order the map: blocking externals first, the adversarial findings no later than the second round, then themes in the order the brief tells them, scope edges last. Answers open new questions — add them to the map and recount; the count you say is honest and approximate, never a promise.
+Then order the map: blocking externals first, the adversarial findings no later than the end of the second round (in the one-at-a-time form: the second group, see below), then themes in the order the brief tells them, scope edges last. Answers open new questions — add them to the map and recount; the count you say is honest and approximate, never a promise.
 
 **Open with the map, in one message, before the first round** — the user sees how much there is and how to steer it:
 
@@ -78,7 +80,7 @@ Forty «ок» in a row usually means nothing was decided — the recommendation
 
 ### One question at a time
 
-On request — «спрашивай по одному», «по одному вопросу», «давай по одному», "one at a time" — the interview goes **one question per message**: the same recommendation and reason in half a line, the same ⚑ for a real choice, «ок» takes the recommendation. The progress line shrinks to the question: «Вопрос 7 · тема «оплата» · осталось примерно 15». Back to rounds on «можно пачкой», «давай раундами», "all at once". It can be asked for in the call («/aispa interview спрашивай по одному …» — said to you, not a sentence about the product), in the answer to the start question («интервью, по одному») or at any moment; it changes the form, never what is asked. Stored in the run: `ap.py init --questions one` or `ap.py set questions=one` / `questions=rounds`, one line of acknowledgement («Хорошо, дальше по одному вопросу»), and `ask briefing` before each question.
+On request — «спрашивай по одному», «по одному вопросу», «давай по одному», "one at a time" — the interview goes **one question per message**: the same recommendation and reason in half a line, the same ⚑ for a real choice, «ок» takes the recommendation. The progress line shrinks to the question: «Вопрос 7 · тема «оплата» · осталось примерно 15». **"Round" in the one-at-a-time form** means a group of up to four questions of one theme, not one message: the rules above that count rounds — one ⚑ per group, three bare «ок» (about ten questions in a row), the adversarial findings by the end of the second group, `carried.md` in the first — count groups. Back to rounds on «можно пачкой», «давай раундами», "all at once". It can be asked for in the call («/aispa interview спрашивай по одному …» — said to you, not a sentence about the product), in the answer to the start question («интервью, по одному») or at any moment; it changes the form, never what is asked. Stored in the run: `ap.py init --questions one` or `ap.py set questions=one` / `questions=rounds`, one line of acknowledgement («Хорошо, дальше по одному вопросу»), and `ask briefing` before each question.
 
 Calibration, not a target: on a real project an interview or a manual run lands at **several dozen questions** — roughly five to fifteen per screen or main feature, twenty to sixty in all, over many rounds; a one-page brief, at ten or fifteen; `important`, at a round or two. There is no cap. What makes an interview bad is padding — a question you could have answered yourself, a craft decision dressed up as a choice — never length. Say the size once, in the opening map, and do not apologise for the count as you go.
 

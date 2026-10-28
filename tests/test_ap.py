@@ -592,6 +592,11 @@ class Words(unittest.TestCase):
         for rule in ("One question at a time", "interview.md", "«Дальше решай сам»", "⚑"):
             self.assertIn(rule, briefing)
         self.assertNotIn("three to six", briefing)
+        self.assertIn("«По одному» and nothing else", modes)
+        self.assertIn("\"Round\" in the one-at-a-time form", briefing)
+        self.assertIn("«3б, остальное ок»", briefing)
+        self.assertIn("`interview.md` if the active stage is briefing", read(os.path.join(SKILL, "phases", "0-resume.md")))
+        self.assertIn("becomes a story at every depth", read(os.path.join(SKILL, "phases", "3-spec.md")))
         readme = os.path.join(os.path.dirname(SKILL), "..")
         self.assertIn("«по одному»", read(os.path.join(readme, "README.ru.md")))
         self.assertIn("\"one at a time\"", read(os.path.join(readme, "README.md")))

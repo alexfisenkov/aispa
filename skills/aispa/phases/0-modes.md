@@ -20,6 +20,7 @@ Everything after `/aispa` splits into **the mode** (`auto`, `important`, `interv
 - **Named in the call → never asked.** A mode word contradicting the rest of the sentence → the mode word wins; two mode words → ask which, in one line.
 - **Not named → the start choice**, once, before `init`.
 - **An answer that names none of the four** — «как хочешь», «не знаю», silence after a nudge, something unrelated — resolves to `important`.
+- **«По одному» and nothing else** as the answer to the start question («по одному», «по одному, пожалуйста») → `interview` with `questions=one`: those words are offered only in item 3.
 - **Switchable mid-run** («переключись в ручной») — applies from the next phase; `ap.py set mode=manual`, one line of acknowledgement, nothing replayed.
 - **One question at a time** is not a mode but the form of the questions, in any mode that asks: «спрашивай по одному», «по одному вопросу», "one at a time" — in the call when it is said to you about the questions (not a sentence about the product: «бот задаёт вопросы по одному» is brief), in the answer to the start question («интервью, по одному»), or mid-run. `ap.py init --questions one`, or `ap.py set questions=one` / `questions=rounds` later; how it runs is in `phases/2-briefing.md`. Never asked as a separate start question.
 - **Instructions in the brief** — stack, budget, «без базы данных», a deadline — are requirements in the manifest. They constrain the build; they never replace a phase.
@@ -33,7 +34,7 @@ Only on a new run (not a resume, not a run going on in another window) and only 
 Как работаем? Ответь цифрой или словом:
 1. Сам по брифу — по брифу ничего не спрашиваю, решения за тебя перечислю в отчёте.
 2. Только важное — спрошу только то, что в брифе не определено и меняет результат.
-3. Интервью — подробно пройду весь бриф вопросами, тема за темой. Вопросов будет много — на обычный проект несколько десятков, зато соберу ровно то, что ты задумал. К каждому — мой вариант, хватит ответить «ок». Хочешь — буду спрашивать по одному. Дальше соберу сам.
+3. Интервью — подробно пройду весь бриф вопросами, тема за темой. Вопросов будет много — на обычный проект несколько десятков, зато соберу ровно то, что ты задумал. К каждому — мой вариант: обычно хватит ответить «ок», а где выбор важный — попрошу назвать букву. Хочешь — буду спрашивать по одному. Дальше соберу сам.
 4. Ручной — как интервью, плюс согласуешь спецификацию и список задач.
 ```
 

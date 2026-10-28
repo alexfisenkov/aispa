@@ -8,6 +8,7 @@
 - Real choices instead of a row of «ок»: a question whose branches give a visibly different product is marked ⚑ with options а/б/в, and «ок» for the round does not cover it; after three bare «ок» rounds the agent offers once to decide the rest itself.
 - «Дальше решай сам» stops the interview at any point: the rest is decided the way `auto` decides it and listed in the report.
 - The «Интервью» option of the start question now says honestly that there will be many questions and that they can come one at a time.
+- The one-word answer «по одному» to the start question means the interview with one question at a time. In that form a «round» is a group of up to four questions of one theme. The «ок» hint is now a ready reply («3б, остальное ок»). A dimension the user answered in the interview becomes a story in the spec at any depth. A resumed run re-reads `interview.md`.
 
 ## 1.0.1 — 2026-10-28
 
