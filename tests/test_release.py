@@ -41,13 +41,16 @@ def version_of_package(package):
 
 
 def run(args, cwd=None, env=None):
+    env = dict(env or {})
+    if "HOME" in env:  # на Windows Path.home() берёт USERPROFILE, а не HOME
+        env.setdefault("USERPROFILE", env["HOME"])
     r = subprocess.run([sys.executable, "-B"] + args, capture_output=True, text=True,
-                       encoding="utf-8", cwd=cwd, env=dict(os.environ, **(env or {})))
+                       encoding="utf-8", cwd=cwd, env=dict(os.environ, **env))
     return r.returncode, r.stdout, r.stderr
 
 
 def listing(root):
-    return sorted(os.path.relpath(os.path.join(d, f), root) for d, _, fs in os.walk(root) for f in fs)
+    return sorted(os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/") for d, _, fs in os.walk(root) for f in fs)
 
 
 RUN = "20261020T090000-bot-abcd1234"
