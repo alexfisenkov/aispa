@@ -30,6 +30,38 @@ def runtime_digest():
                    and "__pycache__" not in p.parts and p.suffix != ".pyc"})
 
 
+def project_install_ignores(store):
+    """.gitignore lines for this skill when its copy sits untracked inside the project.
+
+    A tracked (committed) install, an install outside the project and files Git
+    already ignores add nothing: only what would stop a clean clone is named.
+    """
+    lines = []
+    try:
+        package = PACKAGE.resolve().relative_to(store.root).as_posix()
+    except ValueError:
+        package = None
+    if package and package.split("/")[0] != ".aispa" and not store.git("ls-files", "-z", "--", package) \
+            and store.git("ls-files", "--others", "--exclude-standard", "-z", "--", package):
+        lines.append(package + "/")
+    agents = ".claude/agents/aispa-*.md"
+    if store.git("ls-files", "--others", "--exclude-standard", "-z", "--", agents):
+        lines.append(agents)
+    return lines
+
+
+def emit_init(store, output, *, compact_mode):
+    """The compact init answer also names what init added to the project's .gitignore."""
+    if not compact_mode or "projectIgnore" not in output:
+        return emit(store, output, compact_mode=compact_mode)
+    from aispa_core.cli_output import compact
+    try:
+        value = {**compact(store, output), "projectIgnore": output["projectIgnore"]}
+    except (Invalid, OSError):
+        return emit(store, output, compact_mode=True)
+    print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
 def parser():
     p = argparse.ArgumentParser(description="AISpa " + VERSION)
     p.add_argument("--root", default=".", help="Корень Git-проекта")
@@ -497,10 +529,15 @@ def execute(args):
             previous = ignore.read_bytes() if ignore.exists() else b""
             if b".aispa/" in previous.splitlines() and not store.private_history_ignored():
                 raise Invalid("Исключение .aispa/ переопределено правилами Git; исправьте .gitignore до init")
-            if b".aispa/" not in previous.splitlines():
-                ignore.write_bytes(previous + (b"\n" if previous and not previous.endswith(b"\n") else b"") + b".aispa/\n")
+            wanted = [] if b".aispa/" in previous.splitlines() else [".aispa/"]
+            installed = project_install_ignores(store)
+            wanted += [line for line in installed if line.encode() not in previous.splitlines()]
+            if wanted:
+                ignore.write_bytes(previous + (b"\n" if previous and not previous.endswith(b"\n") else b"")
+                                   + "".join(line + "\n" for line in wanted).encode())
             if not store.private_history_ignored():
                 raise Invalid("Git не исключает .aispa; приватные снимки не созданы")
+            installed = [line for line in installed if line in wanted]
             state = store.create(args.slug, args.title, initializer=initialize_run)
             shutil.copy2(PACKAGE / "assets/dashboard.html", store.home / "dashboard.html")
             store.append(state, "runtime-pinned")
@@ -517,7 +554,12 @@ def execute(args):
                     raise
             if advice is not None:
                 output["coordinatorAdvice"] = advice
-            emit(store, output, compact_mode=args.compact)
+            if installed:
+                output["projectIgnore"] = {"added": installed, "message": (
+                    "Копия навыка AISpa лежит внутри проекта и не входит в Git, поэтому она добавлена в .gitignore: "
+                    + ", ".join(installed) + ". Это не ваш код; иначе финальная проверка из чистого клона "
+                    "остановилась бы на неучтённых файлах. Остальные строки .gitignore не тронуты.")}
+            emit_init(store, output, compact_mode=args.compact)
             return 0
         state = store.load()
         previous_sequence = store.read_journal()["count"]

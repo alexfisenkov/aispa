@@ -326,6 +326,8 @@ def project(store, state):
     if blocks is not None:
         view["modelBlocks"] = blocks
     from . import findings, focused_review
+    # 0.5.0: waves are never checked against the brief (it is checked at the start and by the blind acceptance).
+    view["focusedReview"] = focused_review.enabled(state)
     if "collectedFindings" in state or focused_review.enabled(state):
         view["findings"] = findings.view(state)
     from . import product_flows

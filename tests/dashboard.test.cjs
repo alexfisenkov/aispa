@@ -593,6 +593,30 @@ test('fast mode says the waves are not checked against the brief and names skipp
  assert.match(f.text('remaining'),/Detailed scenarios \(main and error only\)/);
  const plain=await fixture('',sample());assert.match(plain.text('wavesNote'),/После каждой волны проверяется весь бриф/);
 });
+test('0.5.0 runs never claim a brief check after each wave, in every mode',async()=>{
+ for(const [mode,label] of [['fast','Быстро'],['balanced','Сбалансированно'],['max','Максимум']]){
+  const d=sample();d.checkMode=mode;d.checkModeLabel=label;d.focusedReview=true;
+  const f=await fixture('',d);
+  assert.doesNotMatch(f.text('wavesNote'),/После каждой волны проверяется весь бриф/,mode);
+  assert.match(f.text('wavesNote'),/Волны с брифом не сверяются/,mode);
+  assert.match(f.text('wavesNote'),/слепой приёмкой/,mode);
+  f.el('language').change('en');
+  assert.doesNotMatch(f.text('wavesNote'),/The full brief is checked after each wave/,mode);
+  assert.match(f.text('wavesNote'),/Waves are not checked against the brief/,mode);
+ }
+});
+test('the skipped-checks heading names the run\'s own mode',async()=>{
+ const d=sample();d.checkMode='balanced';d.checkModeLabel='Сбалансированно';d.focusedReview=true;
+ d.remaining={skippedChecks:['Проверка задач standard и light отдельным критиком']};
+ const f=await fixture('',d);
+ assert.doesNotMatch(f.text('remaining'),/быстрый режим/i);
+ assert.match(f.text('remaining'),/Пропущенные проверки режима «Сбалансированно»/);
+ f.el('language').change('en');
+ assert.doesNotMatch(f.text('remaining'),/fast mode/i);
+ assert.match(f.text('remaining'),/Checks skipped by the Balanced mode/);
+ const fast=sample();fast.checkMode='fast';fast.checkModeLabel='Быстро';fast.remaining={skippedChecks:['Проверка задач критиками']};
+ assert.match((await fixture('',fast)).text('remaining'),/Пропущенные проверки режима «Быстро»/);
+});
 test('check mode, fast tasks and deferred tasks are named',async()=>{
  const d=sample();d.checkMode='max';d.checkModeLabel='Максимум';
  d.tasks=[{id:'T01',title:'Быстрая',requirements:['R01'],wave:1,status:'completed',proofCurrent:true,tier:'fast',
@@ -1016,6 +1040,18 @@ test('without measurements the panel says it does not know yet, in both language
  assert.doesNotMatch(f.text('eta'),/\d/);
  f=await etaFor(none,'en');assert.match(f.text('eta'),/first finished task/);
  f=await etaFor(none);assert.match(f.text('etaRows'),/Проверка ветки: сколько займёт — пока не знаю/);
+});
+test('finished tasks of another kind do not make the panel wait for a first finished task',async()=>{
+ // Blind acceptance: T01 (heavy) finished, T02 (standard) runs, and its kind has no timings yet.
+ const other=measured({reason:'insufficient_data',basis:null,lowerSeconds:null,upperSeconds:null,sampleCount:0,
+  completedTasks:1,unmeasuredTasks:['T02']});
+ let f=await etaFor(other);
+ assert.doesNotMatch(f.text('eta'),/первой готовой задачи/);
+ assert.match(f.text('eta'),/пока не знаю/);
+ assert.match(f.text('etaNote'),/для задач такого вида замеров пока нет/);
+ f=await etaFor(other,'en');
+ assert.doesNotMatch(f.text('eta'),/first finished task/);
+ assert.match(f.text('etaNote'),/no timings yet for tasks of this kind/);
 });
 test('stages outside tasks get their own lines and a conditional repair says so',async()=>{
  const f=await etaFor(measured());const rows=f.text('etaRows');

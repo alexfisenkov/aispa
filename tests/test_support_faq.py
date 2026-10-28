@@ -30,6 +30,8 @@ def sha(data):
 NEW_ENTRIES = {"scripts-instead-of-agents", "stopped-midway", "subagents-disabled", "decisions-after-brief",
                "interview-length", "brief-size", "large-old-run", "small-change", "test-form", "dashboard-no-data",
                "dashboard-stop", "when-to-use", "own-skills-and-rules", "backup", "how-to-launch"}
+# Blind acceptance of the build (question about large requests): one entry added after decision 16.
+REPAIR_ENTRIES = {"long-context"}
 REWRITTEN_ENTRIES = {"question-check-modes", "ordinary-autonomy", "audit-repair", "first-install", "parallel-projects",
                      "updates-backup", "resume", "visible-controls", "models", "checks-and-cost", "evidence-boundaries",
                      "pinned-runtime"}
@@ -84,6 +86,8 @@ STORY_FACTS = {
     "question-check-modes": ("«Сбалансированно»", "по умолчанию"),
     "models": ("Fable", "Astra", "неизвестно"),
     "visible-controls": ("кнопк", "правильный ввод"),
+    "long-context": ("условиях своего тарифа", "только свою задачу", "изменения своей задачи", "новом чате",
+                     "тот же прогон"),
 }
 
 
@@ -244,8 +248,8 @@ class SupportFaqTests(unittest.TestCase):
 
     def test_actual_canonical_entries_follow_decision_16(self):
         entries = self.canonical_entries()
-        self.assertEqual(set(entries), NEW_ENTRIES | REWRITTEN_ENTRIES | {"pinned-runtime"})
-        self.assertEqual(len(entries), 27)
+        self.assertEqual(set(entries), NEW_ENTRIES | REWRITTEN_ENTRIES | REPAIR_ENTRIES | {"pinned-runtime"})
+        self.assertEqual(len(entries), 28)
         self.assertEqual(len(NEW_ENTRIES), 15)
         self.assertEqual(set(PREVIOUS_ANSWER_SHA256), REWRITTEN_ENTRIES)
         for row_id, previous in PREVIOUS_ANSWER_SHA256.items():

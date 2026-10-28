@@ -417,13 +417,14 @@ var GATES=[['coverage','Покрытие','Бриф отражён в специ
  ['acceptance','Приёмка','Независимая проверка ядра']];
 var REMAINING=[['checks','Неуспешные проверки'],['blockedTasks','Блокеры'],['excluded','Исключения по решению владельца'],['inherited','Остатки прошлых прогонов'],
  ['execution','Сроки исполнения'],['inheritedExecution','Сроки прошлых прогонов'],
- ['unmapped','Не попало в требования'],['skippedChecks','Пропущенные проверки (быстрый режим)']];
+ ['unmapped','Не попало в требования'],['skippedChecks','Пропущенные проверки режима']];
 var UNKNOWN='Состояние не определено';
 var I18N={language:['Язык','Language'],theme:['Тема','Theme'],refresh:['Обновить','Refresh'],workshopLink:[' — Telegram-канал, новая вкладка',' — Telegram channel, new tab'],updated:['Последняя запись агента','Last agent entry'],
  observed:['Актуальность проверена','Observed'],stage:['Текущий этап','Current stage'],checkMode:['Режим проверки','Check mode'],modeChanges:['Смены режима проверки','Check mode changes'],checks:['Проверки','Checks'],
  now:['Сейчас выполняется','Current work'],history:['История','History'],runTime:['Время прогона · без отмеченных пауз','Run time · excluding recorded pauses'],
  estimate:['Примерно до завершения','Approximate time remaining'],waves:['Задачи по волнам','Tasks by wave'],
  wavesNoteFast:['В быстром режиме волны не сверяются с брифом. Фазы показаны только там, где есть запись движка.','In fast mode waves are not checked against the brief. Phases appear only when recorded by the engine.'],
+ wavesNoteFocused:['Волны с брифом не сверяются: бриф проверяется на входе и слепой приёмкой в конце. Фазы показаны только там, где есть запись движка.','Waves are not checked against the brief: the brief is checked at the start and by the blind acceptance at the end. Phases appear only when recorded by the engine.'],
  wavesNote:['После каждой волны проверяется весь бриф. Фазы показаны только там, где есть запись движка.','The full brief is checked after each wave. Phases appear only when recorded by the engine.'],
  stageHeading:['Этап','Stage'],requirements:['Требования','Requirements'],
  requirementsNote:['«Реализовано по задачам» ещё не означает, что требование принято.','Implemented by tasks does not mean the requirement was accepted.'],
@@ -479,7 +480,7 @@ var EN={
  'Состояние недоступно':'State unavailable','Нет данных':'No data','Пока нет оценки':'No estimate yet',
  'Задача принята':'Task accepted','Выполнение проверено':'Completion verified',
  'Быстрая задача':'Fast task','Без проверок по ходу · итоговая приёмка':'No in-flight checks · final acceptance',
- 'Отложено в остатки':'Deferred to remaining','Пропущенные проверки (быстрый режим)':'Checks skipped by fast mode',
+ 'Отложено в остатки':'Deferred to remaining','Пропущенные проверки режима':'Checks skipped by the check mode',
  'Проверка задач критиками':'Task review by critics','Тестовый контракт RED':'RED test contract',
  'Сверка волн с полным брифом':'Wave check against the full brief','Обзор версии целиком':'Whole-version review','Подробные сценарии (только main и error)':'Detailed scenarios (main and error only)','Быстро':'Fast','Сбалансированно':'Balanced','Максимум':'Maximum',
  'Лёгкая задача':'Light task','Тяжёлая задача':'Heavy task','Обычная задача':'Standard task',
@@ -597,6 +598,8 @@ Object.assign(EN,{'Снимок считается':'Snapshot is calculating','�
  'Оценка обновится после завершения расчёта.':'The estimate will update after calculation finishes.',
  'Оценка обновится после успешной проверки источника.':'The estimate will update after the source is successfully verified.'});
 Object.assign(EN,{'Сколько осталось — скажу после первой готовой задачи':'Time remaining: I will tell after the first finished task',
+ 'Сколько осталось — пока не знаю':'Time remaining: not known yet',
+ 'Готовые задачи уже есть, но для задач такого вида замеров пока нет; оценка появится после первой готовой задачи этого вида.':'Some tasks are finished, but there are no timings yet for tasks of this kind; the estimate appears after the first finished task of this kind.',
  'Замеры этого прогона и прошлых прогонов на этом компьютере пока не накоплены.':'There are no timings yet from this run or from earlier runs on this computer.',
  'Идёт дольше обычного':'Taking longer than usual','идёт дольше обычного':'taking longer than usual',
  'Работа':'Work','Простой и ожидание':'Idle and waiting','Ожидание ответа':'Waiting for an answer',
@@ -773,6 +776,7 @@ function etaText(d){
  if(ownerWaiting(d))return [tr('Ожидает ответа владельца'),tr('Пока нет оценки')];
  if(finalStatus(d.status))return [tr('Прогон завершён'),tr(d.status==='delivered_with_remaining'?'Остатки перечислены отдельно.':'Все действующие требования приняты.')];
  var e=d.estimate||{},reason=e.reason,isMeasured=Array.isArray(e.rows);
+ if(isMeasured&&reason==='insufficient_data'&&e.completedTasks>0)return [tr('Сколько осталось — пока не знаю'),tr('Готовые задачи уже есть, но для задач такого вида замеров пока нет; оценка появится после первой готовой задачи этого вида.')];
  if(isMeasured&&reason==='insufficient_data')return [tr('Сколько осталось — скажу после первой готовой задачи'),tr('Замеры этого прогона и прошлых прогонов на этом компьютере пока не накоплены.')];
  var messages={paused:['После возобновления','Прогон на паузе.'],blocked:['Зависит от блокеров','Срок неизвестен до устранения препятствий.'],
  cancelled:['Прогон отменён','Оценка больше не рассчитывается.'],stale:['Нужна новая проверка','Прежняя приёмка устарела.'],
@@ -951,6 +955,11 @@ function renderEvents(d){
   if(known&&hasText)body.append(h('span',null,' · '+item.text));
   row.append(time,body);box.append(row)});
 }
+function skippedHeading(d){
+ var name=d.checkModeLabel||MODE_NAMES[d.checkMode];
+ if(!name)return tr('Пропущенные проверки режима');
+ return locale==='en'?'Checks skipped by the '+tr(name)+' mode':'Пропущенные проверки режима «'+name+'»';
+}
 function remainingItem(value,key,reqs,tasks){
  if(key==='skippedChecks')return {id:'',text:tr(value)};
  if(typeof value==='string'){
@@ -1048,7 +1057,7 @@ function render(d){
  $('heroStatus').hidden=status==='running';$('runExplanation').hidden=status!=='running';$('runExplanation').textContent=status==='running'?tr(HINT.running):'';
  $('statusShort').textContent=source==='calculating'?tr('Рассчитывается'):source==='source_error'?tr('Ошибка источника'):source==='archive'?tr('Архив'):tr(SHORT[status]||UNKNOWN)+(source==='demo'?sourceSuffix():'');
  var dot=DOT[status]||DOT.unavailable;$('statusDot').style.background=dot[0];$('statusDot').style.border=dot[1];
- var note=$('wavesNote');if(note){var noteKey=d.checkMode==='fast'?'wavesNoteFast':'wavesNote';note.setAttribute('data-i18n',noteKey);note.textContent=I18N[noteKey][locale==='en'?1:0]}
+ var note=$('wavesNote');if(note){var noteKey=d.focusedReview===true?'wavesNoteFocused':d.checkMode==='fast'?'wavesNoteFast':'wavesNote';note.setAttribute('data-i18n',noteKey);note.textContent=I18N[noteKey][locale==='en'?1:0]}
  var modeBox=$('checkModeBox');modeBox.hidden=!d.checkMode;
  if(d.checkMode)$('checkModeName').textContent=tr(d.checkModeLabel||d.checkMode);
  $('updatedAt').textContent=fmt(d.updatedAt);$('observedAt').textContent=fmt(d.observedAt);
@@ -1097,7 +1106,7 @@ function render(d){
  journalNotice(d);
  var rb=$('remaining');rb.replaceChildren();var any=false;
  REMAINING.forEach(function(k){var items=Array.isArray(rem[k[0]])?rem[k[0]]:[];if(!items.length)return;any=true;
-  var group=h('div','rem-group');group.append(h('span',null,tr(k[1])));items.forEach(function(value){var it=remainingItem(value,k[0],reqs,tasks),row=h('div','rem');
+  var group=h('div','rem-group');group.append(h('span',null,k[0]==='skippedChecks'?skippedHeading(d):tr(k[1])));items.forEach(function(value){var it=remainingItem(value,k[0],reqs,tasks),row=h('div','rem');
    if(it.id)row.append(h('span','mono',it.id));row.append(h('b',null,it.text));group.append(row)});rb.append(group)});
  if(!any){var clean=connected()&&status==='accepted'&&d.remainingAssessed;
   var cl=h('div','clean');if(clean)cl.append(h('i',null,'✓'));

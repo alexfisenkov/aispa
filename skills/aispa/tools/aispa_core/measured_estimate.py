@@ -63,10 +63,11 @@ def _active(state):
 
 
 def task_class(state, task):
-    tier = task.get("tier")
+    """The engine's weight of the latest attempt (what the panel shows); the plan tier only before one."""
+    history = state.get("taskHistory", {}).get(task.get("id"), [])
+    tier = history[-1].get("tier") if history else None
     if tier is None:
-        history = state.get("taskHistory", {}).get(task.get("id"), [])
-        tier = history[-1].get("tier") if history else None
+        tier = task.get("tier")
     tier = {"fast": "light", "light": "light", "standard": "standard"}.get(tier, "heavy")
     return tier if tier != "heavy" else ("heavy+critic" if _had_critic(state, task) else "heavy")
 
@@ -313,6 +314,7 @@ def estimate(state, at, *, calibration=None, idle_probe=None):
     included = [row for row in ordered if row["status"] in ("pending", "running")]
     base = {"rows": ordered, "overrunning": overrunning, "unmeasuredTasks": unmeasured,
             "afterOverrun": bool(overrunning), "work": work, "notes": notes, "waitIncluded": False,
+            "completedTasks": sum(t.get("status") == "completed" for t in state["tasks"]),
             "waitingForBlockers": any(t.get("status") == "blocked" for t in state["tasks"])}
     if overrunning:
         notes.append("Идёт дольше обычного: %s; остаток считается после неё" % ", ".join(overrunning))

@@ -404,6 +404,12 @@ class PanelFieldsTests(unittest.TestCase):
         self.fx.state.setdefault("policy", {})["focusedReview"] = True
         self.assertEqual(self.view()["findings"], {"open": 0, "confirmed": 0, "fixed": 0, "remaining": 0})
 
+    def test_the_panel_knows_a_focused_run_so_it_never_promises_wave_checks(self):
+        self.fx.prepare()
+        self.assertIs(self.view()["focusedReview"], False)
+        self.fx.state.setdefault("policy", {})["focusedReview"] = True
+        self.assertIs(self.view()["focusedReview"], True)
+
     def test_decisions_keep_their_requirements_and_old_decisions_stay_plain(self):
         self.fx.state["notes"] = [{"at": "2026-10-28T10:00:00+00:00", "text": "Старое решение"},
                                   {"at": "2026-10-28T10:01:00+00:00", "text": "Решение по требованию",

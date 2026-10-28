@@ -156,6 +156,29 @@ class TaskRangeTests(unittest.TestCase):
         self.assertEqual(result["reason"], "insufficient_data")
         self.assertEqual(rows(result)["tasks"]["sampleCount"], 0)
 
+    def test_class_is_the_engine_weight_of_the_attempt_the_panel_shows(self):
+        # Blind acceptance: the plan said heavy, the engine weighed the attempt standard
+        # (balanced, no critic) and the panel shows standard — the estimate must agree.
+        attempt = {"tier": "standard", "plannedTier": "heavy", "criticRoles": ["worker"], "rounds": []}
+        state = run([task("T02", "running", "heavy", 3)], taskHistory={"T02": [attempt]})
+        self.assertEqual(measured_estimate.task_class(state, state["tasks"][0]), "standard")
+        promoted = {"tier": "heavy", "criticRoles": ["worker", "critic1", "critic2"], "rounds": []}
+        state = run([task("T03", "pending", "standard")], taskHistory={"T03": [promoted]})
+        self.assertEqual(measured_estimate.task_class(state, state["tasks"][0]), "heavy+critic")
+
+    def test_finished_tasks_of_another_class_are_counted_so_the_panel_does_not_wait_for_a_first_one(self):
+        state = run([task("T01", "completed", "heavy", 9, completionKind="critic_acceptance"),
+                     task("T02", "running", "heavy", 3)],
+                    taskHistory={"T01": [{"tier": "heavy", "criticRoles": ["worker", "critic1", "critic2"]}],
+                                 "T02": [{"tier": "standard", "plannedTier": "heavy", "criticRoles": ["worker"]}]})
+        result = measured_estimate.estimate(state, iso(10), calibration=[])
+        self.assertEqual(result["reason"], "insufficient_data")
+        self.assertEqual(rows(result)["tasks"]["sampleCount"], 0)
+        self.assertEqual(result["completedTasks"], 1)
+        self.assertEqual(result["unmeasuredTasks"], ["T02"])
+        empty = measured_estimate.estimate(run([task("T1")]), iso(10), calibration=[])
+        self.assertEqual(empty["completedTasks"], 0)
+
     def test_a_class_without_data_leaves_the_upper_bound_open_and_is_listed(self):
         state = run([task("A", "completed", "light", 100), task("N", "pending", "light"), task("H", "pending", "heavy")],
                     **stages_done())
