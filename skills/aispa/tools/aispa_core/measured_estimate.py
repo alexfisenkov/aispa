@@ -62,12 +62,16 @@ def _active(state):
     return state.get("status") == "running" and not _waiting(state)
 
 
-def task_class(state, task):
-    """The engine's weight of the latest attempt (what the panel shows); the plan tier only before one."""
+def weight_tier(state, task):
+    """The one source of a task's weight: the latest attempt's tier, the plan's tier before any attempt."""
     history = state.get("taskHistory", {}).get(task.get("id"), [])
     tier = history[-1].get("tier") if history else None
-    if tier is None:
-        tier = task.get("tier")
+    return tier if tier is not None else task.get("tier")
+
+
+def task_class(state, task):
+    """The engine's weight of the latest attempt (what the panel shows); the plan tier only before one."""
+    tier = weight_tier(state, task)
     tier = {"fast": "light", "light": "light", "standard": "standard"}.get(tier, "heavy")
     return tier if tier != "heavy" else ("heavy+critic" if _had_critic(state, task) else "heavy")
 

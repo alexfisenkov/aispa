@@ -85,6 +85,22 @@ class ProjectInstallTests(test_cli.CliTests):
         self.assertEqual(lines.count(".claude/skills/aispa/"), 1, "Второй init не дублирует строку")
         self.assertEqual(lines.count(".claude/agents/aispa-*.md"), 1)
 
+    def test_partly_tracked_install_is_named_and_gitignore_is_left_alone(self):
+        self.commit(".claude/skills/aispa/SKILL.md", ".claude/agents", message="only the skill text committed")
+        self.assertIn("?? .claude/", self.status())
+        before = (self.root / ".gitignore").exists()
+        result = subprocess.run([sys.executable, "-B", str(self.project_cli), "--root", str(self.root), *INIT],
+                                capture_output=True, text=True, encoding="utf-8", env=self.command_env, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        answer = json.loads(result.stdout)
+        self.assertEqual(self.ignore_lines(), [".aispa/"], "Частично учтённая установка .gitignore не меняет")
+        self.assertFalse(before)
+        note = answer["projectIgnore"]
+        self.assertEqual(note["added"], [])
+        self.assertEqual(note["partial"], [".claude/skills/aispa/"])
+        for phrase in ("Не все файлы", "остановят", "чистой копии", "закоммитьте", "уберите"):
+            self.assertIn(phrase, note["message"])
+
     def test_tracked_install_leaves_gitignore_without_new_lines(self):
         self.commit(".claude", message="skill committed with the project")
         self.init()

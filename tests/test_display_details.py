@@ -340,6 +340,20 @@ class PanelFieldsTests(unittest.TestCase):
         self.fx.state.setdefault("policy", {})["managedExecution"] = True
         return patch.object(participants, "list_participants", return_value=rows)
 
+    def test_a_task_without_an_attempt_shows_the_weight_the_estimate_counts(self):
+        fx = self.fx
+        fx.prepare()
+        task = fx.state["tasks"][0]
+        task["tier"] = "light"
+        fx.state["taskHistory"].pop(task["id"])
+        shown = next(row for row in self.view()["tasks"] if row["id"] == task["id"])
+        self.assertEqual(shown["tier"], "light")
+        self.assertEqual(measured_estimate.task_class(fx.state, task), "light")
+        fx.state["taskHistory"][task["id"]] = [{"tier": "standard", "plannedTier": "light", "rounds": []}]
+        shown = next(row for row in self.view()["tasks"] if row["id"] == task["id"])
+        self.assertEqual(shown["tier"], "standard")
+        self.assertEqual(measured_estimate.task_class(fx.state, task), "standard")
+
     def test_estimate_is_the_measured_output_only_with_measured_timing(self):
         fx = self.fx
         fx.prepare()

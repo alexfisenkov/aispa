@@ -251,7 +251,7 @@ def project(store, state):
         attempt = (state.get("taskHistory", {}).get(task["id"]) or [{}])[-1]
         light = task_tiers.worker_only(attempt)
         accepted = attempt.get("acceptance") or {}
-        tasks.append(dict(task, tier=attempt.get("tier", "heavy"), tierReason=attempt.get("tierReason", ""),
+        tasks.append(dict(task, tier=measured_estimate.weight_tier(state, task) or "heavy", tierReason=attempt.get("tierReason", ""),
                           plannedTier=attempt.get("plannedTier", task.get("tier", "heavy")),
                           deferred=check_modes.is_deferred(state, task, store),
                           completionKind="verified_completion" if attempt.get("verifiedCompletion") else (accepted.get("completionKind", "task_acceptance") if accepted else None),

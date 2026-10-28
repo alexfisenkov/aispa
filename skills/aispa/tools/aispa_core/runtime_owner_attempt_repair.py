@@ -22,7 +22,7 @@ EVENT = "runtime-repaired:owner-task-attempt-0.4.0"
 STEM = "owner-task-attempt-0.4.0-"
 SOURCE_HASHES = {
     # 0.5.0 build: the new-attempt parser and dispatch seams are the reviewed ones.
-    "tools/aispa.py": "19718ac3ea24fd29653b650f632669853ea7b4fd7c173fb9b5f9207d3ef3cc6f",
+    "tools/aispa.py": "dd5148d6cf0dc428676ea91d4e62168799dddef64cdc6492ede7f15cb0ada144",
     "tools/aispa_core/team.py": "443414cf5e20cfc512c59221b10acfa67e4b342953233f4679825ebafbf5b4eb",
     "tools/aispa_core/workflow.py": "1626a3976025d1051fc3cf08830eaa881f857acb960e80fb8f0c98df68501a0f",
     "tools/aispa_core/owner_task_attempt.py": "27cf4c2c480b65fb233c7db5dac4296186344b8722faf8bd81558346adba0b9a",
@@ -45,6 +45,10 @@ HISTORICAL_SOURCE_HASHES = (
     {"tools/aispa.py": "7bcfa1146363fcfc85c1c5a7afe684ea249919ac386a1724fb28075d0041a465",
      "tools/aispa_core/team.py": "0788ad62d24aafa866a9472aa5e7bb819c7674af1ebf35736225b4a366c247bc",
      "tools/aispa_core/workflow.py": "7c53f2f7ca48ccc80962d8123144dd9dd47344ac65142f4950c998982c3b678d",
+     "tools/aispa_core/owner_task_attempt.py": "27cf4c2c480b65fb233c7db5dac4296186344b8722faf8bd81558346adba0b9a"},
+    {"tools/aispa.py": "19718ac3ea24fd29653b650f632669853ea7b4fd7c173fb9b5f9207d3ef3cc6f",
+     "tools/aispa_core/team.py": "443414cf5e20cfc512c59221b10acfa67e4b342953233f4679825ebafbf5b4eb",
+     "tools/aispa_core/workflow.py": "1626a3976025d1051fc3cf08830eaa881f857acb960e80fb8f0c98df68501a0f",
      "tools/aispa_core/owner_task_attempt.py": "27cf4c2c480b65fb233c7db5dac4296186344b8722faf8bd81558346adba0b9a"},
 )
 OLD_HASHES = {

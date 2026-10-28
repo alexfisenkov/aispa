@@ -50,16 +50,17 @@ def project_install_ignores(store):
     return lines
 
 
-def emit_init(store, output, *, compact_mode):
-    """The compact init answer also names what init added to the project's .gitignore."""
-    if not compact_mode or "projectIgnore" not in output:
-        return emit(store, output, compact_mode=compact_mode)
-    from aispa_core.cli_output import compact
+def project_install_partial(store):
+    """The package path when only some of its files are tracked: the rest would stop the clean-clone finale."""
     try:
-        value = {**compact(store, output), "projectIgnore": output["projectIgnore"]}
-    except (Invalid, OSError):
-        return emit(store, output, compact_mode=True)
-    print(json.dumps(value, ensure_ascii=False, indent=2))
+        package = PACKAGE.resolve().relative_to(store.root).as_posix()
+    except ValueError:
+        return None
+    if package.split("/")[0] == ".aispa" or not store.git("ls-files", "-z", "--", package):
+        return None
+    if store.git("ls-files", "--others", "--exclude-standard", "-z", "--", package):
+        return package + "/"
+    return None
 
 
 def parser():
@@ -554,12 +555,18 @@ def execute(args):
                     raise
             if advice is not None:
                 output["coordinatorAdvice"] = advice
-            if installed:
+            partial = project_install_partial(store)
+            if partial:
+                output["projectIgnore"] = {"added": installed, "partial": [partial], "message": (
+                    "Не все файлы навыка AISpa в " + partial + " учтены в Git: часть закоммичена, часть нет. "
+                    ".gitignore я не менял. Незакоммиченные файлы навыка остановят финальную проверку чистой копии. "
+                    "Что сделать: закоммитьте установку целиком или уберите её из Git и поставьте навык заново.")}
+            elif installed:
                 output["projectIgnore"] = {"added": installed, "message": (
                     "Копия навыка AISpa лежит внутри проекта и не входит в Git, поэтому она добавлена в .gitignore: "
                     + ", ".join(installed) + ". Это не ваш код; иначе финальная проверка из чистого клона "
                     "остановилась бы на неучтённых файлах. Остальные строки .gitignore не тронуты.")}
-            emit_init(store, output, compact_mode=args.compact)
+            emit(store, output, compact_mode=args.compact)
             return 0
         state = store.load()
         previous_sequence = store.read_journal()["count"]

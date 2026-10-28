@@ -277,6 +277,20 @@ class CliOutputTests(unittest.TestCase):
         self.assertEqual(receipt["receipt"], {"inFullResponse": True, "jsonPointer": "/receipt"})
         self.assertEqual(self.full_response(receipt), original)
 
+    def test_compact_carries_the_gitignore_note_and_the_full_answer_keeps_it_too(self):
+        self.init()
+        store = Journal(self.root)
+        state = store.load()
+        note = {"added": [".claude/skills/aispa/"], "message": "Копия навыка не входит в Git."}
+        original = {"ok": True, "run": state["run"], "runDirectory": "runs/" + state["run"],
+                    "status": "running", "stage": "interview", "projectIgnore": note}
+        with store.lock():
+            receipt = compact(store, original)
+        self.assertEqual(receipt["projectIgnore"], note)
+        self.assertEqual(self.full_response(receipt)["projectIgnore"], note)
+        with store.lock():
+            self.assertNotIn("projectIgnore", compact(store, {key: original[key] for key in original if key != "projectIgnore"}))
+
     def test_failed_verify_keeps_exit_two_and_recoverable_failure_evidence(self):
         self.init()
         self.adopt_host_session()

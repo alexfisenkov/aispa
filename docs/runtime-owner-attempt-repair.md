@@ -71,13 +71,13 @@ manifest, CAS, отсутствии разрешения, ссылке и оши
 
 | Файл | Источник | Новая копия |
 | --- | --- | --- |
-| `tools/aispa.py` | `19718ac3ea24fd29653b650f632669853ea7b4fd7c173fb9b5f9207d3ef3cc6f` | `18373d83315de53a71a3c56b065831c6fe1e1fbe5ef4acaaa681cc7c679eceaf` |
+| `tools/aispa.py` | `dd5148d6cf0dc428676ea91d4e62168799dddef64cdc6492ede7f15cb0ada144` | `18373d83315de53a71a3c56b065831c6fe1e1fbe5ef4acaaa681cc7c679eceaf` |
 | `tools/aispa_core/team.py` | `443414cf5e20cfc512c59221b10acfa67e4b342953233f4679825ebafbf5b4eb` | `1763f4957292946e6b1381584f0d77ef88ef50bc02cfda3d1da3de65ab51b453` |
 | `tools/aispa_core/workflow.py` | `1626a3976025d1051fc3cf08830eaa881f857acb960e80fb8f0c98df68501a0f` | `0ac372f9676893419a954a98bd61be3cdf7fd570cf14be7154416ce2111e3392` |
 | `tools/aispa_core/owner_task_attempt.py` | `27cf4c2c480b65fb233c7db5dac4296186344b8722faf8bd81558346adba0b9a` | тот же SHA |
 
 Прежние наборы источников (`HISTORICAL_SOURCE_HASHES`) остаются допустимыми
-для уже подготовленных manifest: `aispa.py` `6f0687a7…`, `6bbd46c0…`, `7bcfa114…`;
+для уже подготовленных manifest: `aispa.py` `6f0687a7…`, `6bbd46c0…`, `7bcfa114…`, `19718ac3…`;
 `team.py` `0788ad62…`; `workflow.py` `0d7606ce…`, `7c53f2f7…`. Совпадение
 таблицы и закреплённых файлов пакета проверяет `tests/test_runtime_repair_pins.py`.
 
