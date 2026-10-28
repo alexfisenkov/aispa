@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,67 @@ from aispa_core.verified_reads import ResourceLimit
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+
+# Decision 16 of the 0.5.0 spec: 15 new entries and 11 rewritten; decision D07 rewrites pinned-runtime too (story 87).
+NEW_ENTRIES = {"scripts-instead-of-agents", "stopped-midway", "subagents-disabled", "decisions-after-brief",
+               "interview-length", "brief-size", "large-old-run", "small-change", "test-form", "dashboard-no-data",
+               "dashboard-stop", "when-to-use", "own-skills-and-rules", "backup", "how-to-launch"}
+REWRITTEN_ENTRIES = {"question-check-modes", "ordinary-autonomy", "audit-repair", "first-install", "parallel-projects",
+                     "updates-backup", "resume", "visible-controls", "models", "checks-and-cost", "evidence-boundaries",
+                     "pinned-runtime"}
+# sha256(answer) of every rewritten entry in the 0.4.0 canon:
+# git show b914fad:skills/aispa/references/support-faq.json
+PREVIOUS_ANSWER_SHA256 = {
+    "question-check-modes": "28b8c413113199c452c9238b69db710ea1cb7116d10d98eeee4b73b2411259e2",
+    "ordinary-autonomy": "eff405a341f14cb0179ea59cdb6be8a659a88102903c11b787bb0c500093f289",
+    "pinned-runtime": "44f70301248be1a213171585d5660d45103fa228ae3c6b5104d731f8feded7bb",
+    "audit-repair": "33540b6b890f46b39d279d4112a8dece95b55d641aaf3d3f0ac93cfbec576fb4",
+    "first-install": "9039b785597fc068b9856de69f71bac5271ea374fefcee60b8f6e029f4d473ac",
+    "parallel-projects": "d95a88ad2e1c5eaaf545413a6e92350dfe1d48cf00ac9f432468fc4c3c898910",
+    "updates-backup": "f8649fbd27cff67307a1f5da6754e2de0aaff6ba82d28162dbdd21d0af0d7b9a",
+    "resume": "a82c2e8f760157363a1b7a397f383648e8a49bb1d89c8ab02e6af7c12c1dbb3a",
+    "visible-controls": "f8bc85389853799baca69104944c3c5a46c7eb44bdfe49edf76663610b05f21b",
+    "models": "79b9f11571cdcd6fece05c8d5b7aedc0c8d0f67ee12b86fb8be414252b0c740c",
+    "checks-and-cost": "0225b6c53dee8af5f010b617f968a3e1185643b8e4629e6708c2ad1885b84a78",
+    "evidence-boundaries": "75b235ef0bb9babb67e9bd5100ae30f14b8c68ab8eb1d2770d457b9f1ab674c8",
+}
+# Files the answers speak about (story 96 and decision 16).
+BOUND_FILES = {"tools/aispa_core/__init__.py", "SKILL.md", "prompts/worker.md", "phases/04-build.md",
+               "references/model-routing.md", "references/updates.md", "tools/aispa_core/updates.py", "tools/aispa.py",
+               "tools/aispa_core/preflight.py", "tools/aispa_core/autonomy.py", "phases/06-continuity.md",
+               "references/dashboard-opening.md", "phases/02-product.md", "prompts/brief-analyst.md"}
+HASH = re.compile(r"(?<![0-9a-fA-F])(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?![0-9a-fA-F])")
+INTERNAL_ID = re.compile(r"(?<![\w-])[A-Z]\d{2}(?:\.\d+)?(?![\w])")
+NICKNAME = re.compile(r"(?<![\w.])@[A-Za-z0-9_]{2,}")
+JARGON = re.compile(r"(?i)\b(?:basis|receipts?|gates?|packets?|verdicts?|zoneChanges|closure)\b")
+# Engine words a learner should not have to decode (story 87, decision D07).
+ENGINE_WORDS = re.compile(r"(?i)\b(?:runtime|policy|policies|source\s+SHA|prechangeExecution)\b|контракт")
+# Facts each answer must state, taken from the acceptance column of its story in the 0.5.0 spec.
+STORY_FACTS = {
+    "checks-and-cost": ("«Быстро»", "прогон", "лимит"),
+    "scripts-instead-of-agents": ("командой или скриптом",),
+    "stopped-midway": ("«продолжай»", "доступа или полномочия"),
+    "subagents-disabled": ("настройках Codex", "Agent", "CLAUDE.md", "новый чат"),
+    "interview-length": ("длительность", "допущения"),
+    "brief-size": ("одно требование",),
+    "large-old-run": ("256", "init", "тем же брифом"),
+    "small-change": ("init", "«Быстро»"),
+    "test-form": ("до первой правки", "один раз", "отклонит"),
+    "pinned-runtime": ("закреплённой копией", "новый прогон"),
+    "dashboard-stop": ("dashboard stop",),
+    "resume": ("update-check", "resume"),
+    "when-to-use": ("нескольких связанных", "видео", "обычным чатом"),
+    "first-install": ("аккаунт", "токен", "gh", "PAT", "120", "терминал"),
+    "parallel-projects": ("один корень Git — один прогон",),
+    "updates-backup": ("после вашего выбора", "update-agents --confirm", "новом сеансе"),
+    "backup": ("--tag", "MIT", "официальн", ".aispa/"),
+    "audit-repair": ("осмотр", "адресный ремонт", "копи", "боевых ключей"),
+    "how-to-launch": ("Claude Code", "/aispa", "Codex", "$aispa"),
+    "question-check-modes": ("«Сбалансированно»", "по умолчанию"),
+    "models": ("Fable", "Astra", "неизвестно"),
+    "visible-controls": ("кнопк", "правильный ввод"),
+}
 
 
 class SupportFaqTests(unittest.TestCase):
@@ -174,6 +236,57 @@ class SupportFaqTests(unittest.TestCase):
         self.assertIn("самостоятель", entries["ordinary-autonomy"]["answer"].lower())
         self.assertIn("закрепл", entries["pinned-runtime"]["answer"].lower())
         self.assertIn("поручен", entries["audit-repair"]["answer"].lower())
+
+    def canonical_entries(self):
+        # Content checks read the canon directly; select() and its source binding are checked above.
+        canonical = json.loads((PACKAGE / "references/support-faq.json").read_text(encoding="utf-8"))
+        return {row["id"]: row for row in canonical["entries"]}
+
+    def test_actual_canonical_entries_follow_decision_16(self):
+        entries = self.canonical_entries()
+        self.assertEqual(set(entries), NEW_ENTRIES | REWRITTEN_ENTRIES | {"pinned-runtime"})
+        self.assertEqual(len(entries), 27)
+        self.assertEqual(len(NEW_ENTRIES), 15)
+        self.assertEqual(set(PREVIOUS_ANSWER_SHA256), REWRITTEN_ENTRIES)
+        for row_id, previous in PREVIOUS_ANSWER_SHA256.items():
+            with self.subTest(rewritten=row_id):
+                self.assertNotEqual(sha(entries[row_id]["answer"].encode("utf-8")), previous,
+                                    "Запись должна быть переписана относительно канона 0.4.0")
+
+    def test_actual_canonical_binds_files_its_answers_describe(self):
+        canonical = json.loads((PACKAGE / "references/support-faq.json").read_text(encoding="utf-8"))
+        paths = {row["path"] for row in canonical["source"]["files"]}
+        self.assertLessEqual(BOUND_FILES, paths)
+        self.assertLessEqual(len(paths), 48)
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue((PACKAGE / path).is_file())
+
+    def test_actual_canonical_answers_use_plain_language(self):
+        for row_id, row in self.canonical_entries().items():
+            text = row["question"] + "\n" + row["answer"]
+            with self.subTest(entry=row_id):
+                self.assertIsNone(HASH.search(text), "Хеши — не для ответа ученику")
+                self.assertIsNone(INTERNAL_ID.search(text), "ID требований и задач — не для ответа ученику")
+                self.assertIsNone(NICKNAME.search(text), "Ники в справочник не попадают")
+                self.assertIsNone(JARGON.search(text), "Внутренние термины движка — не для ответа ученику")
+                self.assertIsNone(ENGINE_WORDS.search(text), "Слова движка — не для ответа ученику")
+
+    def test_actual_canonical_answers_cover_their_stories(self):
+        entries = self.canonical_entries()
+        for row_id, fragments in STORY_FACTS.items():
+            answer = entries[row_id]["answer"].casefold()
+            for fragment in fragments:
+                with self.subTest(entry=row_id, fragment=fragment):
+                    self.assertIn(fragment.casefold(), answer)
+
+    def test_repo_markdown_is_generated_from_actual_canon(self):
+        canonical = json.loads((PACKAGE / "references/support-faq.json").read_text(encoding="utf-8"))
+        selected = {"packageVersion": canonical["packageVersion"], "canonicalSha256": "", "sourceSha256": "",
+                    "source": canonical["source"], "entries": canonical["entries"]}
+        rendered = self.module().render(selected, format="markdown")
+        self.assertEqual((ROOT / "docs/support-faq.md").read_bytes(), rendered["text"].encode("utf-8"),
+                         "docs/support-faq.md пересобирается только tools/render_support_faq.py")
 
     def test_root_renderer_uses_same_canon_and_checks_generated_drift(self):
         self.module()

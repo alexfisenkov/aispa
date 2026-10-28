@@ -36,15 +36,20 @@ python3 -B skills/aispa/tools/repair_final_retry.py --root PROJECT apply \
 изменения исходника теста T05.
 
 При подготовке копируются все 98 файлов выбранного runtime; меняется только
-`tools/aispa_core/workflow.py`. Из source-файла с SHA-256
-`0d7606ce9273b1f79933489aad98818d11badd705461320051c6a0ae833dfe03`
+`tools/aispa_core/workflow.py`. Из текущего source-файла с SHA-256
+`1626a3976025d1051fc3cf08830eaa881f857acb960e80fb8f0c98df68501a0f`
+(`runtime_final_retry_repair.SOURCE_HASHES`, перезакреплён в сборке 0.5.0)
 извлекаются два адресных guard-вызова и методы проверки финального повтора.
 Остальные отличия рабочей ветки в закреплённую копию не попадают.
-Исторический owner-attempt manifest сохраняет прежний source SHA. Его
-maintenance-проверка теперь допускает ровно два известных source SHA
-`workflow.py`: первоначальный `7c53f2f7ca48ccc80962d8123144dd9dd47344ac65142f4950c998982c3b678d`
-и указанный выше новый. Новый source допустим для повторения прежнего моста
-только потому, что его точный выходной workflow SHA остаётся прежним
+Исторический source `0d7606ce9273b1f79933489aad98818d11badd705461320051c6a0ae833dfe03`
+остаётся в `HISTORICAL_SOURCE_HASHES`: manifest, уже подготовленный по нему,
+проверку сохраняет. Исторический owner-attempt manifest сохраняет свой source
+SHA. Его maintenance-проверка допускает известные source SHA `workflow.py`:
+первоначальный `7c53f2f7ca48ccc80962d8123144dd9dd47344ac65142f4950c998982c3b678d`,
+исторический `0d7606ce…` и текущий `1626a3976025…` (таблица —
+[runtime-owner-attempt-repair.md](runtime-owner-attempt-repair.md)). Более
+поздний source допустим для повторения прежнего моста только потому, что его
+точный выходной workflow SHA остаётся прежним
 `0ac372f9676893419a954a98bd61be3cdf7fd570cf14be7154416ce2111e3392`.
 SHA-256 изменённого файла: старый
 `0ac372f9676893419a954a98bd61be3cdf7fd570cf14be7154416ce2111e3392`,
