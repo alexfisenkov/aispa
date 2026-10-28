@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import shlex
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -501,6 +500,26 @@ class CompareTests(ToolCase):
         axes = self.axes(result)
         self.assertEqual((axes["interventions"]["verdict"], axes["questions_stops"]["verdict"]), ("хуже", "лучше"))
 
+    # Parity has absolute conditions: no substituted way, 0 interventions, a result on disk on every run.
+    # One breach on the AISpa side in the group is «хуже», even when Autopilot has the same.
+    def test_one_substituted_way_on_the_aispa_side_is_worse_even_against_the_same_count(self):
+        code, result = self.compare([pair_record()], [verdict_record(aispa={"substitutions": 1},
+                                                                     autopilot={"substitutions": 1})])
+        self.assertEqual(self.axes(result)["substitutions"]["verdict"], "хуже")
+        self.assertEqual((result["verdict"], code), ("хуже", 1))
+
+    def test_one_intervention_on_the_aispa_side_is_worse_even_against_the_same_count(self):
+        code, result = self.compare([pair_record(aispa={"interventions": 1}, autopilot={"interventions": 1})],
+                                    [verdict_record()])
+        self.assertEqual(self.axes(result)["interventions"]["verdict"], "хуже")
+        self.assertEqual((result["verdict"], code), ("хуже", 1))
+
+    def test_one_undelivered_aispa_run_in_the_group_is_worse_even_against_the_same_pattern(self):
+        pairs = [pair_record(), pair_record(aispa={"delivered": False}, autopilot={"delivered": False})]
+        code, result = self.compare(pairs, [verdict_record(), verdict_record()])
+        self.assertEqual(self.axes(result)["delivered"]["verdict"], "хуже")
+        self.assertEqual((result["verdict"], code), ("хуже", 1))
+
     def test_a_run_that_was_not_delivered_is_worse_than_one_that_was(self):
         code, result = self.compare([pair_record(aispa={"delivered": False})], [verdict_record()])
         self.assertEqual(self.axes(result)["delivered"]["verdict"], "хуже")
@@ -808,10 +827,11 @@ print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 5, "output
         (self.skill / "agents" / "claude-code" / "aispa-worker.md").write_text("agent")
 
     def program(self, name, template, doubled=False):
-        path = self.tmp / name
+        # A `.py` stand-in without the execute bit: the wrapper starts it with the current Python,
+        # as Windows (no shebang, no execute bit) needs on every OS of the CI matrix.
+        path = self.tmp / (name + ".py")
         text = template.replace("{python}", sys.executable)
         path.write_text(text.replace("{{", "{").replace("}}", "}") if doubled else text)
-        path.chmod(path.stat().st_mode | stat.S_IEXEC)
         return path
 
     def wrapper(self, *args, claude=None, codex=None, extra_env=None):

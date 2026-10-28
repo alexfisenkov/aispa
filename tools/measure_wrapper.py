@@ -7,7 +7,8 @@
 The environment comes from measure.py: AISPA_MEASURE_REQUEST (the request text, the same for both
 skills), _REPO, _EVENTS, _FINAL, _INSTALL (project|global), _MODE (run|continue), _AUTOPILOT_SHA;
 the working directory is the repository. Optional: AISPA_MEASURE_CLAUDE and AISPA_MEASURE_CODEX name
-the command-line programs.
+the command-line programs; a name ending in `.py` is started with the current Python (on Windows a
+script cannot be started by itself).
 
 Install: "project" copies the skill from --skill-src into the project (both skills the same way; the
 AISpa agents for Claude Code too); "global" copies nothing. A skill source that is a git checkout of
@@ -82,9 +83,14 @@ def keep_line(item):
     return item.get("type") in KEPT_CODEX
 
 
+def program(variable, default):
+    name = os.environ.get(variable, default)
+    return [sys.executable, name] if name.lower().endswith(".py") else [name]
+
+
 def run_turn(runtime, prompt, session, log, model, effort):
     if runtime == "claude":
-        cmd = [os.environ.get("AISPA_MEASURE_CLAUDE", "claude"), "-p", prompt, "--output-format", "json",
+        cmd = [*program("AISPA_MEASURE_CLAUDE", "claude"), "-p", prompt, "--output-format", "json",
                "--dangerously-skip-permissions", "--model", model]
         cmd += ["--resume", session] if session else []
         out = subprocess.run(cmd, capture_output=True, text=True)
@@ -97,8 +103,8 @@ def run_turn(runtime, prompt, session, log, model, effort):
     last = log.with_suffix(".last.txt")
     flags = ["--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", str(last),
              "-m", model, "-c", 'model_reasoning_effort="%s"' % effort]
-    codex = os.environ.get("AISPA_MEASURE_CODEX", "codex")
-    cmd = [codex, "exec", "resume", session, prompt, *flags] if session else [codex, "exec", *flags, prompt]
+    codex = program("AISPA_MEASURE_CODEX", "codex")
+    cmd = [*codex, "exec", "resume", session, prompt, *flags] if session else [*codex, "exec", *flags, prompt]
     out = subprocess.run(cmd, capture_output=True, text=True)
     log.write_text(out.stdout + "\n--- stderr\n" + out.stderr, encoding="utf-8")
     keep = []

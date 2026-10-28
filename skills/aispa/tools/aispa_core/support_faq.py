@@ -31,9 +31,14 @@ def _file(root, name):
         _need(not is_link(path), "source links are forbidden")
     _need(path.is_file() and path.stat().st_size <= MAX_BYTES, "source missing or too large")
     import os  # local: the rest of this file stays byte for byte as in 0.5
+    import stat
     try:
-        # No link may be swapped in between the checks above and the read.
-        with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)), "rb") as stream:
+        # No link may be swapped in between the checks above and the read; a FIFO or device swapped in
+        # opens without blocking (O_NONBLOCK) and is refused by fstat on the descriptor actually opened.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            info = os.fstat(stream.fileno())
+            _need(stat.S_ISREG(info.st_mode) and info.st_size <= MAX_BYTES, "source is not a regular file or too large")
             data = stream.read(MAX_BYTES + 1)
     except OSError as error:
         raise Invalid("AISpa read: missing or unreadable input") from error

@@ -60,7 +60,7 @@ It receives every `*-brief.md` in `dir`, oldest first, **whole, `## Дополн
 Record it in one call — `ap.py blind checked=N matched=M --mismatch "…" --mismatch "…"`, one `--mismatch` per 🔴. A drift found here is the run working; hiding it is the failure. Then it is repaired — one round, no more:
 
 1. **Every drift that code can close goes into one ticket, `F2`**, by the path of `F1` (`phases/6-review.md`): the drifted requirements, the checker's lines as its acceptance criteria verbatim, the zone of the tickets that built them; one executor, the check, one re-review in mode «ремонт», one commit.
-2. **Then one repeat blind check** of only the items that drifted, with the same prompt, from a fresh clone; record it again — `ap.py blind checked=N matched=M --mismatch "…"` over the whole count, with what still drifts.
+2. **Then one repeat blind check** of only the items that drifted, from a fresh clone: the same prompt and the same brief files, plus the lines for the drifted items copied from the first verdict — still no manifest and no spec — and one more sentence in the prompt: «Верни вердикт только по этим пунктам». Record it again — `ap.py blind checked=N matched=M --mismatch "…"` over the whole count, with what still drifts.
 3. **Into the report goes only** what cannot be fixed without the user — their fact, an access, an account — and what is still off after this round.
 
 **A build nobody has launched is a build nobody has seen work** — if it cannot be run here at all, that goes to «Что нужно от тебя», not into the accepted column.
@@ -89,6 +89,11 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 | Запустить / Где что лежит | `memoryFile`, `briefFile`, the commands the memory agent verified |
 
 ```markdown
+## Решения, принятые за тебя
+
+- Заявки складываются в Google Таблицу: где их хранить, ты не сказал. Нужно в другое место — скажи.
+- Отложено: цвета студии — ты сказал «цвета потом, сначала чтобы работало».
+
 ## Готово
 
 <Что теперь работает — 3–6 строк обычным языком, от лица пользователя.>

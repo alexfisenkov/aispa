@@ -225,6 +225,14 @@ class Run(unittest.TestCase):
         self.assertEqual(len(self.dropped_lines(out)), 1, out)
         self.assertFalse(self.state()["gates"]["G3"]["ok"])
 
+    def test_check_plan_flags_a_drop_quoting_only_the_requirement_itself(self):
+        # Цитата из ячейки «Из брифа» этой же строки — слова требования, а не отказ пользователя.
+        self.plan()
+        self.write("manifest.md", MANIFEST.replace("| dropped | «не надо» |", "| dropped | «SMS» — не просили |"))
+        code, out = self.ap("check-plan")
+        self.assertEqual(len(self.dropped_lines(out)), 1, out)
+        self.assertFalse(self.state()["gates"]["G3"]["ok"])
+
     def test_check_plan_flags_a_drop_without_a_quote(self):
         self.plan()
         self.write("manifest.md", MANIFEST.replace("| dropped | «не надо» |", "| dropped | пользователь отказался |"))

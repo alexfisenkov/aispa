@@ -132,6 +132,32 @@ class SupportFaqTests(unittest.TestCase):
             self.assertEqual(rendered["receipt"]["outputSha256"], sha(rendered["text"].encode("utf-8")))
             self.assertNotIn("canonicalSha256", value)
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "нет mkfifo в этой ОС")
+    def test_a_fifo_swapped_in_after_the_checks_is_refused_and_never_hangs(self):
+        # Подмена файла на FIFO между проверкой is_file() и открытием: чтение не виснет, ответ — Invalid.
+        script = (
+            "import sys, pathlib\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from aispa_core import support_faq\n"
+            "from aispa_core.store import Invalid\n"
+            "pathlib.Path.is_file = lambda self: True\n"
+            "try:\n"
+            "    support_faq.select(pathlib.Path(sys.argv[2]), version='1.0.0')\n"
+            "    print('ACCEPTED')\n"
+            "except Invalid as error:\n"
+            "    print('INVALID', error)\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, path = self.fixture(root)
+            path.unlink()
+            os.mkfifo(path)
+            try:
+                done = subprocess.run([sys.executable, "-I", "-c", script, str(PACKAGE / "tools"), str(root)],
+                                      capture_output=True, text=True, timeout=15)
+            except subprocess.TimeoutExpired:
+                self.fail("чтение FIFO зависло")
+            self.assertTrue(done.stdout.startswith("INVALID"), done.stdout + done.stderr)
+
     def test_wrong_version_sha_ids_schema_tamper_and_private_metadata_are_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

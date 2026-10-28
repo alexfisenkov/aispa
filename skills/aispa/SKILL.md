@@ -90,7 +90,8 @@ Phase files are read one at a time, so every subagent's route lives here. In Cla
 
 | Role | Claude Code (agent · model · effort) | Codex (ID · effort) |
 |---|---|---|
-| judge: G2 reader, point and repair reviewer, branch reviewer, blind acceptance; executor of a ticket with `Ревью: да — <риск>` or `сильная` | `aispa-judge` / `aispa-sensitive-worker` — Opus · high | `gpt-6.1-sol` · high |
+| judge (checks, writes no code): G2 reader, point and repair reviewer, branch reviewer, blind acceptance | `aispa-judge` — Opus · high | `gpt-6.1-sol` · high |
+| strong executor: a ticket with `Ревью: да — <риск>` or `сильная`, `F1` and `F2`, a relaunch after a failure | `aispa-sensitive-worker` — Opus · high | `gpt-6.1-sol` · high |
 | executor `обычная`, code researcher (`3-spec`), memory agent, ADR, history reading (`0-preflight` §5) | `aispa-worker` — Sonnet · medium | `gpt-6.1-terra` · medium |
 | `механика-скрипт` | `aispa-mechanic-scripted` — Haiku · low | `gpt-6-luna` · low |
 | `механика` | `aispa-mechanic` — Sonnet · low | `gpt-6.1-terra` · low |

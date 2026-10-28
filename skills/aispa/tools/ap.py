@@ -326,6 +326,7 @@ def manifest_table(state):
         cells = [c.strip().strip("`*") for c in raw]
         if len(cells) >= 3 and ROW_ID.match(cells[0]):
             rows.append({"id": cells[0], "text": plain(raw[1]) if len(raw) > 1 else "",
+                         "cell": raw[1] if len(raw) > 1 else "",
                          "status": cells[2].split()[0].lower() if cells[2] else "open",
                          "why": plain(raw[3]) if len(raw) > 3 else "",
                          "basis": raw[3].replace("\\|", "|") if len(raw) > 3 else ""})
@@ -468,7 +469,10 @@ def check_plan(state):
             problems.append("требование %s (%s) не попало ни в один таск" % (rid, st))
     # Снять требование может только пользователь: в «Основании» строки dropped — его
     # слова «…», дословно из какого-нибудь файла брифа (целиком, с «Дополнениями»).
+    # Цитата, которая есть в ячейке «Из брифа» этой же строки, — слова самого требования,
+    # а не отказ от него: она не считается.
     squash = lambda s: " ".join(s.split())
+    bare = lambda s: squash(re.sub(r"[«»*`]", " ", s.replace("\\|", "|")))
     briefs = []
     for p in sorted(glob.glob(os.path.join(run_dir(state), "*-brief.md"))):
         try:
@@ -476,7 +480,9 @@ def check_plan(state):
         except OSError:
             pass
     for r in manifest_table(state) or []:
-        quotes = [squash(q) for q in re.findall(r"«([^»]+)»", r["basis"]) if q.strip()]
+        own = bare(r["cell"])
+        quotes = [squash(q) for q in re.findall(r"«([^»]+)»", r["basis"])
+                  if q.strip() and bare(q) not in own]
         if r["status"] == "dropped" and not any(q in b for q in quotes for b in briefs):
             problems.append("требование %s снято без слов пользователя: в «Основании» нет цитаты «…», "
                             "которая дословно есть в файле брифа" % r["id"])

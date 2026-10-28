@@ -35,7 +35,7 @@ Before each round goes out: `ap.py ask briefing --note "три вопроса �
 | **interview · manual** | all of them, plus everything the adversarial pass opened |
 
 - **Everything else you decide yourself** — error wording, retry policy, defaults, naming, layout — in every mode. But a decision goes back to the user, not to you, if it **costs money or ties them to a vendor**, **changes what they see or can do**, **means rebuilding rather than editing to undo**, or **encodes a rule about their business** — prices, deadlines, who may do what, what happens to someone's data. Unsure which side it falls on → ask.
-- **Nothing open → say so and go:** «Вопросов нет — в задаче всё однозначно, пишу спецификацию», and `ap.py stage briefing skip --note "вопросов не потребовалось"`.
+- **Nothing open → say so and go:** «Вопросов нет — в задаче всё однозначно, пишу описание», and `ap.py stage briefing skip --note "вопросов не потребовалось"`.
 
 Calibration, not a target: semi usually lands at one or two rounds; interview and manual at three to six on a real project. What makes an interview bad is padding, never length. Say once, if it will be long, that it will be — and do not apologise for the count as you go.
 
@@ -87,4 +87,4 @@ No interview: `ap.py stage briefing skip --note "полный автомат —
 
 ## Closing
 
-Gate **G1**: every row has a status; nothing `open` without a recorded reason. Then one line — «Понял. Пишу спецификацию» — and Phase 3. Do not summarise the interview back to the user.
+Gate **G1**: every row has a status; nothing `open` without a recorded reason. Then one line — «Понял. Пишу описание» — and Phase 3. Do not summarise the interview back to the user.

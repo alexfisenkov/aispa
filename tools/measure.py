@@ -443,7 +443,7 @@ def _both(valid, mine, theirs):
 def _row(axis, values, kind="count", forced=False):
     """One axis. count: fewer is better; more: more is better; ratio: PARITY times the other side is on par."""
     if not values:
-        return {"axis": axis, "aispa": None, "autopilot": None, "verdict": NO_DATA}
+        return {"axis": axis, "aispa": None, "autopilot": None, "verdict": WORSE if forced else NO_DATA}
     mine, theirs = (statistics.median(column) for column in zip(*values))
     row = {"axis": axis, "aispa": mine, "autopilot": theirs}
     if kind == "ratio":
@@ -497,11 +497,19 @@ def group_axes(items):
     def tokens(side):
         return lambda r: (r[side].get("tokens") or {}).get("total") if isinstance(r[side].get("tokens"), dict) else None
 
+    def breached(values):
+        # Absolute parity conditions for AISpa — no substituted way, no intervention, a result on every run:
+        # one breach in the group is «хуже», whatever the medians say
+        return any(type(v) in (int, float) and v > 0 for v in values)
+
     slower = any(r["aispa"].get("timedOut") and not r["autopilot"].get("timedOut") for r in valid)
-    return [_row("unmet", judged("unmet")), _row("substitutions", judged("substitutions")),
+    substituted = breached(verdict_of("aispa", "substitutions")(r) for r in valid)
+    intervened = breached(r["aispa"].get("interventions") for r in valid)
+    undelivered = any(not r["aispa"].get("delivered") for r in valid)
+    return [_row("unmet", judged("unmet")), _row("substitutions", judged("substitutions"), forced=substituted),
             _row("delivered", [(int(bool(r["aispa"].get("delivered"))), int(bool(r["autopilot"].get("delivered"))))
-                               for r in valid], "more"),
-            _row("interventions", per_side("interventions")),
+                               for r in valid], "more", forced=undelivered),
+            _row("interventions", per_side("interventions"), forced=intervened),
             _row("questions_stops", _both(valid, stops("aispa"), stops("autopilot"))),
             _row("additions", judged("additions")),
             _row("time", per_side("seconds"), "ratio", forced=slower),
