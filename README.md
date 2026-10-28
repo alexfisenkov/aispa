@@ -419,7 +419,23 @@ For the agent to see the new version, **restart the session** — skills are loa
 
 At the start of every build AISpa compares its version with this repository and, if a new one is out, tells you in one line, with the command to update. What changed is in [CHANGELOG.md](CHANGELOG.md). The skill never updates in the middle of a build.
 
-The check is one request to GitHub per build, sending no data at all; without internet it stays silent. To turn it off: the environment variable `AISPA_NO_UPDATE_CHECK=1`.
+If AISpa was installed not by `npx skills` but from a GitHub Release (every 0.x version was), it updates itself: at the start of a build it says "a new version is out", and after the report, when you say "обнови AISpa" (update AISpa), it shows what will change and installs the new version only after your "install". It can be rolled back the same way.
+
+The check is one to three requests to GitHub per build, sending no data at all; without internet it stays silent. To turn it off: the environment variable `AISPA_NO_UPDATE_CHECK=1`.
+
+### If you have AISpa 0.x
+
+Nothing to do. The next time you run `/aispa`, the old version offers the update itself — choose "Установить обновление" (install the update). The agent moves to the new version in the same session and starts the build you asked for; later updates arrive the same way. The previous version stays beside it in a hidden `.aispa-backup-…` folder, so the agent can roll the update back if you ask.
+
+An unfinished build of the old version (an `.aispa/` folder in the project) is not continued by the new one: AISpa says so in one line and starts the build again. It never touches `.aispa/`.
+
+If the old version refused to update (for example, the skill folder is inside a git repository) or does not offer an update at all, install the new one with one command (Node.js 22 or newer):
+
+```bash
+npx skills add alexfisenkov/aispa --skill aispa -g -y -a claude-code codex
+```
+
+It replaces the folder `~/.claude/skills/aispa` whole: if you edited files there by hand, copy them first. If Codex then shows AISpa twice, delete the old folder `~/.codex/skills/aispa`.
 
 ---
 
@@ -450,10 +466,14 @@ skills/aispa/
 │   ├── executor.md             how to write code and tests, what to return
 │   └── review.md               what the reviewer judges by: three axes and security
 └── tools/
-    └── ap.py                   build bookkeeping: state, dashboard, server — one command per event
+    ├── ap.py                   build bookkeeping: state, dashboard, server — one command per event
+    ├── aispa.py                the updater of copies installed from a GitHub Release (and the bridge from 0.x)
+    └── aispa_core/             its code: release checks, checksums, replace with undo
 
 docs/autopilot/design.md     ← why it's built this way, with measurements
 tools/measure-run.py             ← measuring a real run from Claude Code logs
+tools/собрать-выпуск.py          ← the release files for GitHub: aispa.zip, aispa-update.json, install.py
+tools/install.py                 ← first install from a Release (for the old latest/download/install.py link)
 CHANGELOG.md                     ← what's new, by version
 ```
 
@@ -465,7 +485,31 @@ It's all plain markdown. You can open it and read it: [skills/aispa/SKILL.md](sk
 
 ## How to change it yourself
 
-This repository is an exact copy of the base with AISpa branding, so you can change it point by point. Every file is plain text: the rules of each phase live in `skills/aispa/phases/`, the prompts for subagents in `skills/aispa/prompts/`, the orchestrator in `skills/aispa/SKILL.md`, the instruments in `skills/aispa/tools/ap.py`, the dashboard page in `skills/aispa/phases/dashboard-template.html`. Change one rule or one file, run `python3 -B -m unittest discover -s tests`, raise `metadata.version` in `skills/aispa/SKILL.md`, commit and push to `main`, then update the install with `npx skills update aispa -g`. Without a new version `update` answers "already up to date": it compares versions, not files.
+This repository is an exact copy of the base with AISpa branding, so you can change it point by point. Every file is plain text: the rules of each phase live in `skills/aispa/phases/`, the prompts for subagents in `skills/aispa/prompts/`, the orchestrator in `skills/aispa/SKILL.md`, the instruments in `skills/aispa/tools/ap.py`, the dashboard page in `skills/aispa/phases/dashboard-template.html`. Change one rule or one file, run `python3 -B -m unittest discover -s tests`, raise the version (where — below), commit and push to `main`, then update the install with `npx skills update aispa -g`. Without a new version `update` answers "already up to date": it compares versions, not files.
+
+### How to release a new version
+
+`npx skills` installs get a new version from `main` right after the push. Copies installed from a GitHub Release — all former 0.x — see it only in a **Release carrying three files**. So every new version is five steps:
+
+1. **The version in three places, the same:** `metadata.version` in `skills/aispa/SKILL.md`, `VERSION` in `skills/aispa/tools/aispa_core/__init__.py`, and a new `## X.Y.Z` line at the top of `CHANGELOG.md`. The tests check that all three match.
+2. **Tests and commit:** `python3 -B -m unittest discover -s tests`, then commit and `git push origin main`.
+3. **Release files:** `python3 tools/собрать-выпуск.py`. It takes the files of the last commit (not of the working folder), puts three files into `dist/` — `aispa.zip`, `aispa-update.json`, `install.py` — and checks them the same way the updater will. If it complains, do not release until it is fixed. Build **after** the last commit: its hash goes into the manifest and must equal the commit of the tag.
+4. **A tag on that same commit:** `git tag vX.Y.Z && git push origin vX.Y.Z`.
+5. **The Release with the files:**
+
+   ```bash
+   gh release create vX.Y.Z dist/aispa.zip dist/aispa-update.json dist/install.py \
+     --title "AISpa X.Y.Z" --notes "what's new — CHANGELOG.md" --latest
+   ```
+
+Four rules; break one and updates stop for everyone who installed from a Release:
+
+- **Every Release carries these three files**, a pre-release included. The updater takes the newest Release and checks the files only there: a Release without them stops the update for everyone until it is fixed.
+- **A regular version is not a pre-release and is marked Latest** (`--latest`). Trial versions (`1.1.0-beta.1`) are seen only by those who have a trial version installed.
+- **A published Release is never re-uploaded.** A mistake means a new version with a new number.
+- **Never delete or rename `skills/aispa/tools/aispa.py` and `skills/aispa/tools/aispa_core/`:** Release copies update through them, and the 0.x installers load them from the tag's commit. The tests check this.
+
+The `v1.0.0` Release was published without files. It does not stop 0.x from updating (the newer one is taken), but the old `install.py` and the `releases/latest/download/install.py` link stumble on it until it is marked pre-release or the Release itself is removed (the tag can stay).
 
 ## License
 

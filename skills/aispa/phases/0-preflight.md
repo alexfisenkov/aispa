@@ -7,7 +7,10 @@ Configure the repo, pick the project memory, raise the instruments. Decide which
 | `state.js` with `finishedAt: null`, `updatedAt` under five minutes old **and** the server in `.aispa-work/serve.pid` answering | **the run is going on in another window** | nothing — say so in one line and ask which window carries on |
 | `state.js` with `finishedAt: null` | **resume** | read `phases/0-resume.md` and follow it instead of this file |
 | `state.js` with `finishedAt` set | **new feature in a configured repo** | everything below; `init` archives the finished run's state into its own directory |
+| no `.aispa-work/state.js`, but a `.aispa/` folder | **a run of AISpa 0.x** | one honest line, then a new run — below |
 | no `.aispa-work/state.js` | **new run** | everything below, in order |
+
+**A run of AISpa 0.x** (`.aispa/`, often with `.aispa/active.json`) was made by another engine; this version cannot continue it. Say so before the start choices, in one line, and offer to start over: «В проекте есть незаконченный прогон старой AISpa 0.x (`.aispa/`). Эта версия его не продолжает — начну сборку заново; папку не трогаю.» — plus, when the call carried no brief (a bare `/aispa`, «продолжи»), «Что строим? Можно тем же текстом, что в прошлый раз». Then everything below, as a new run. `.aispa/` is never moved, edited or deleted; the brief of the old run is used only if the user asks for it, read from there and treated as their words. A `AISPA_CONTEXT_BEGIN_V1` block in `AGENTS.md` or `CLAUDE.md` is that version's too: the file counts as the user's own (`phases/0-memory.md`).
 
 The first case needs both marks: two sessions writing one `state.js` overwrite each other, and the first to finish freezes the other's dashboard. One mark alone is an ordinary interruption — a resume.
 

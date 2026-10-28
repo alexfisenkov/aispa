@@ -705,12 +705,41 @@ def skill_version(skill_dir):
     return None
 
 
+def release_check(skill):
+    """Ответ обновителя пакета (`tools/aispa.py update-check`, JSON) или None.
+    Он сам знает, кто ставил копию: «release» — выпуск GitHub, обновляется им же;
+    «skills-cli» — `npx skills`, тогда сеть он не трогает."""
+    tool = os.path.join(skill, "tools", "aispa.py")
+    if not os.path.isfile(tool):
+        return None
+    try:
+        r = subprocess.run([sys.executable, "-B", tool, "update-check"], capture_output=True,
+                           text=True, encoding="utf-8", timeout=15, stdin=subprocess.DEVNULL)
+        value = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def release_note(found):
+    """Строка ↑ для копии из выпуска GitHub: обновляет агент после сборки, по слову пользователя."""
+    if found.get("status") != "available":
+        return None
+    release = found.get("release") or {}
+    return ("вышла версия AISpa %s (у тебя %s): обновлю после сборки, если скажешь «обнови AISpa» · "
+            "что нового — %s" % (release.get("version"), found.get("installedVersion"),
+                                 release.get("url") or "github.com/%s/releases" % REPO))
+
+
 def check_update(state):
-    """Строка, если на GitHub навык новее. Без сети — молчит.
-    AISPA_NO_UPDATE_CHECK=1 выключает."""
+    """Строка, если навык новее. Без сети — молчит. AISPA_NO_UPDATE_CHECK=1 выключает.
+    Копия из выпуска GitHub сверяется с выпусками; остальные (npx skills, клон) — с main."""
     if os.environ.get("AISPA_NO_UPDATE_CHECK"):
         return None
     skill = state.get("skillDir") or ""
+    found = release_check(skill) if skill else None
+    if found and found.get("manager") == "release" and found.get("installAllowed"):
+        return release_note(found)
     try:
         local = _version(open(os.path.join(skill, "SKILL.md"), encoding="utf-8").read())
     except OSError:
@@ -845,6 +874,9 @@ def cmd_init(opt):
     ensure_gitignore()
     register_row(state, "в работе", None)
     notes.append("папка прогона: .aispa-work/%s" % state["dir"])
+    if os.path.isdir(os.path.join(ROOT, ".aispa")):
+        notes.append("! в проекте есть .aispa/ — прогон AISpa 0.x: эта версия его не продолжает, "
+                     "папка не тронута")
     return state, notes
 
 

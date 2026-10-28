@@ -173,7 +173,7 @@ Placeholders and empty variables are not repeated here — they are in the repor
 In this order, so the report names paths that exist:
 
 1. The memory file (or its proposal), the ADRs, the glossary and the progress file are written.
-2. `python3 .aispa-work/ap.py finish --result "<одна строка: что теперь есть>"` — closes every stage, sets `finishedAt`, renames `<dir>--wip` to `<dir>` with `git mv`, closes the run's row in `.aispa-work/README.md`, and puts the server out twelve seconds later, after the page has fetched the final picture. A `!` line about the rename means the name was taken or the index dirty: leave it, the run is not undone by a cosmetic suffix.
+2. `python3 .aispa-work/ap.py finish --result "<одна строка: что теперь есть>" --check-update` — closes every stage, sets `finishedAt`, renames `<dir>--wip` to `<dir>` with `git mv`, closes the run's row in `.aispa-work/README.md`, and puts the server out twelve seconds later, after the page has fetched the final picture. A `!` line about the rename means the name was taken or the index dirty: leave it, the run is not undone by a cosmetic suffix.
 3. **The final commit** — exactly what this skill wrote since the plan commit, never the rest of the tree, where the user may have work of their own:
 
    ```bash
@@ -182,6 +182,6 @@ In this order, so the report names paths that exist:
    ```
 
    Leave out of both lists any path that does not exist, and the memory file if it is the user's own. **The subject stays exactly «AISpa: сборка сдана»** — the next run and every plain session find the landing by it. The code itself went in ticket by ticket. `git status` afterwards: a changed file outside everything any ticket owned is not committed by you — it goes in the report as «осталось незакоммиченным».
-4. The report.
+4. The report. If `finish` printed a `↑` line, it is the report's last line, as it is; «обнови AISpa» from the user then goes by `SKILL.md`, «Updating AISpa».
 
 The dashboard freezes on the final numbers and carries them inside the page, so it reopens by double-click long after the server is gone. Say nothing about any of this.

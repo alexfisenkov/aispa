@@ -1,5 +1,13 @@
 # What's new in AISpa
 
+## 1.0.1 — 2026-10-28
+
+- Copies of AISpa 0.x installed from a GitHub Release move to 1.0 through their own updater: the next `/aispa` offers «Установить обновление», and after that the copy keeps updating from Releases the same way.
+- `tools/aispa.py` now only updates the package (`update-check`, `update-prepare`, `update-apply`, `update-rollback`, `--version`); any 0.x run command answers in one line that AISpa is 1.0 now and starts again with `/aispa`.
+- A project with a 0.x run folder `.aispa/` is told plainly that the new version does not continue that run; the folder is never touched.
+- Choice of start mode and depth: two separate questions; the dashboard lost the yellow banner.
+- Releases carry `aispa.zip`, `aispa-update.json` and `install.py`, built by `python3 tools/собрать-выпуск.py`.
+
 ## 1.0.0 — 2026-10-28
 
 - A copy of Autopilot 2.2.0 with AISpa branding.

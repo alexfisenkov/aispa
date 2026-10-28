@@ -4,7 +4,7 @@ description: Builds an app, site, bot, or feature end-to-end from a dictated ide
 disable-model-invocation: true
 argument-hint: "[auto|important|interview|manual] [fast|balanced|max] что нужно построить или путь к brief.md"
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # AISpa
@@ -127,6 +127,17 @@ Numbers in this skill — tiers, question counts, wave widths — are **calibrat
 3. **A fact about the user is never invented.** Prices, texts, addresses, accounts stay visible placeholders.
 4. **An irreversible or outward-facing action is a question** — deploy, publish, pay, message a third party, delete data, rewrite history.
 5. **The orchestrator does not write the project's code.** Its keyboard reaches `.aispa-work/`, the memory files, `.gitignore`, `.env.example` and git; everything else goes to a subagent (`phases/5-subagents.md`).
+
+## Updating AISpa
+
+Never mid-run. `init --check-update` prints a `↑` line when a newer version is out, and the line names the way for this copy:
+
+- **`npx skills update aispa …`** — the user's own command: say it as it is.
+- **«обнови AISpa»** — this copy came from a GitHub Release and updates itself. After the report, or whenever the user asks outside a run: `python3 "<skillDir>/tools/aispa.py" update-prepare`; show the installed and the new version, the release link and how many files change; ask «Установить обновление» / «Оставить как есть». Only on «установить»: `update-apply --candidate <candidateId> --confirm`, then re-read this file — the next run follows the new version. Undo, also only on the user's word: `update-rollback --backup <backupId> --confirm`.
+
+A refused or failed step is one line to the user; the installed version keeps working. The folders `.aispa-update-*` and `.aispa-backup-*` beside the skill are the updater's — never touch them.
+
+**Coming from AISpa 0.x.** An agent that has just updated 0.x into this version in the same session: the 0.x commands (`tools/aispa.py init`, `status`, `dashboard`, `resume`, …) are gone — `tools/aispa.py` only updates the package now. Start Phase 0 of this file for the request the user already gave. A `.aispa/` folder in the project is a 0.x run — `phases/0-preflight.md`.
 
 ## When to use it
 

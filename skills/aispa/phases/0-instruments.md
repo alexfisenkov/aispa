@@ -9,7 +9,7 @@ Runs on every flight — new repo, new feature, resume alike. Every line is idem
 ```bash
 A=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)/.aispa-work
 TPL=$(find -L ~/.claude/skills ~/.agents/skills ~/.claude/plugins .claude/skills .agents/skills \
-        -maxdepth 6 -name dashboard-template.html 2>/dev/null | head -1)
+        -maxdepth 6 -path '*/aispa/phases/dashboard-template.html' 2>/dev/null | head -1)
 [ -n "$TPL" ] && TPL=$(cd "$(dirname "$TPL")" && pwd -P)/dashboard-template.html
 command -v cygpath >/dev/null && TPL=$(cygpath -m "$TPL")   # Windows: C:/…, а не /c/…
 echo "skillDir = ${TPL%/phases/*}"
@@ -18,7 +18,7 @@ cp "${TPL%/phases/*}/tools/ap.py" "$A/ap.py"
 ```
 
 - **`skillDir` is what every subagent contract hangs on** — `prompts/executor.md` and `prompts/review.md` go down as paths built from it. It goes into `init` below and lives in `state.js`, never only in your context.
-- `find -L` and no `*` in it: skills are installed through symlinks, which a plain `find` does not follow, and an unmatched glob aborts the whole line in zsh. Empty output → widen the search once by hand and carry on.
+- `find -L` and no bare `*` in it: skills are installed through symlinks, which a plain `find` does not follow, and an unmatched glob aborts the whole line in zsh (the quoted `-path` pattern is find's, not the shell's). `-path …/aispa/phases/` keeps out another skill's template and the copies an update leaves beside the skill (`.aispa-backup-*/package/`). Empty output → widen the search once by hand and carry on.
 - **`python3` not a working interpreter** — on Windows it can be the Microsoft Store stub → use `python` or `py -3` wherever this skill says `python3`.
 - `index.html` is a symlink so the server answers `/` with the dashboard instead of a directory listing.
 - Never regenerate the template, never read it into context, never edit it.
@@ -33,7 +33,9 @@ python3 .aispa-work/ap.py init --slug telegram-repair-bot --title "Телегр�
 
 It creates the run directory `<YYYY-MM-DD>-<slug>--wip/` with `tickets/` inside, writes `state.js` with all eight stages (`preflight` active), adds the run's row to `.aispa-work/README.md` (writing the file on a new repo), puts `.aispa-work/serve.*` into `.gitignore`, raises the server and prints its address. A finished run's `state.js` is archived into that run's directory first; an unfinished one means this is a resume, and `init` refuses (`phases/0-resume.md`).
 
-A line starting with **`↑`** means a newer AISpa is out: put it into the opening block as it is — one line, not a question, never an update mid-run.
+A line starting with **`↑`** means a newer AISpa is out: put it into the opening block as it is — one line, not a question, never an update mid-run. When it says «обнови AISpa», this copy came from a GitHub Release and updates itself after the report — `SKILL.md`, «Updating AISpa».
+
+A line starting with **`!`** about `.aispa/` means the project holds a run of AISpa 0.x (`phases/0-preflight.md`, the old-run case): if the user has not been told yet, say it in the opening block in one line. Never move, edit or delete `.aispa/`.
 
 ## 3. Open it once, yourself
 
