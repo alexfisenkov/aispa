@@ -69,7 +69,7 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 |---|---|
 | Решения, принятые за тебя *(auto: first in the report)* | `manifest.md` — every `ASSUMPTION` |
 | Готово | **the blind checker's verdict**, not the manifest's `done` rows |
-| Что нужно от тебя | `placeholder` rows + `state.js` → `debt`; plus the AI Design hint line (see below) |
+| Что нужно от тебя | `placeholder` rows + `state.js` → `debt`; plus the AI Design hint line — only on its condition (see below) |
 | Что не вошло | `deferred` and `dropped` rows, with their quotes |
 | Что я добавил сверх заказанного | `state.js` → `additions`, checked against the spec's `A##` |
 | Что пошло не по плану | every `D##` row, every failed ticket |
@@ -91,7 +91,7 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 
 1. Впиши в `.env` — `TELEGRAM_BOT_TOKEN`, `GOOGLE_SHEETS_ID`. Образец — `.env.example` рядом.
 2. Замени заглушки: цены и тексты писем. Сейчас там видимые метки `[ВПИШИ]`, не выдуманные значения.
-3. Хочешь, чтобы сайт выглядел дорого и не шаблонно, — запусти /aidesign (в Codex $aidesign): он причешет дизайн и оставит правила.
+3. Хочешь, чтобы сайт выглядел дорого и не шаблонно, — запусти /aidesign (в Codex $aidesign): он причешет дизайн и оставит правила.   ← only on the condition in «The AI Design hint» below; otherwise there is no such line
 
 ## Что не вошло
 
