@@ -585,6 +585,13 @@ class Words(unittest.TestCase):
         for old in ("`full`", "`semi`", "«полный автомат»", "«полуавтомат»"):
             self.assertIn(old, text)
 
+    def test_final_report_hints_at_aidesign_when_the_site_has_no_rules(self):
+        text = read(os.path.join(SKILL, "phases", "8-final.md"))
+        self.assertIn("запусти /aidesign (в Codex $aidesign)", text)
+        self.assertIn("Хочешь, чтобы сайт выглядел дорого и не шаблонно", text)
+        self.assertIn("`aidesign:` key in its front matter", text)
+        self.assertIn("do not start AI Design yourself", text)
+
     def test_one_question_at_a_time_is_offered_and_documented(self):
         modes = read(os.path.join(SKILL, "phases", "0-modes.md"))
         self.assertIn("• «по одному»", modes)

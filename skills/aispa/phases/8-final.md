@@ -69,7 +69,7 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 |---|---|
 | Решения, принятые за тебя *(auto: first in the report)* | `manifest.md` — every `ASSUMPTION` |
 | Готово | **the blind checker's verdict**, not the manifest's `done` rows |
-| Что нужно от тебя | `placeholder` rows + `state.js` → `debt` |
+| Что нужно от тебя | `placeholder` rows + `state.js` → `debt`; plus the AI Design hint line (see below) |
 | Что не вошло | `deferred` and `dropped` rows, with their quotes |
 | Что я добавил сверх заказанного | `state.js` → `additions`, checked against the spec's `A##` |
 | Что пошло не по плану | every `D##` row, every failed ticket |
@@ -91,6 +91,7 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 
 1. Впиши в `.env` — `TELEGRAM_BOT_TOKEN`, `GOOGLE_SHEETS_ID`. Образец — `.env.example` рядом.
 2. Замени заглушки: цены и тексты писем. Сейчас там видимые метки `[ВПИШИ]`, не выдуманные значения.
+3. Хочешь, чтобы сайт выглядел дорого и не шаблонно, — запусти /aidesign (в Codex $aidesign): он причешет дизайн и оставит правила.
 
 ## Что не вошло
 
@@ -123,6 +124,8 @@ Run the check once more first, truncated, and record it — `ap.py tests N/M`. T
 - Прогресс и цифры — `.aispa-work/dashboard.html`
 - Твой бриф, требования, спецификация — `.aispa-work/<папка сборки>/`
 ```
+
+**The AI Design hint.** Add the third line of «Что нужно от тебя» (the one about `/aidesign`) only when this run built a visible page or site (a landing, a site, a web app screen, an HTML presentation) **and** the project has no `DESIGN.md` carrying the `aidesign:` key in its front matter. Check it from the files, not from memory: read the top of `DESIGN.md` if it exists. Never add the line for a bot, an API or a script with nothing to look at, and never when `DESIGN.md` already has `aidesign:` — the rules are there and the build followed them. In Codex the command is written `$aidesign`. It is a hint: do not start AI Design yourself.
 
 - **Заглушки и пустые переменные — обязательный раздел**, даже пустой: «всё заполнено».
 - **«Что не вошло» пишется всегда**, даже когда вошло всё — одной строкой.

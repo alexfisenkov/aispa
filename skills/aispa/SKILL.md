@@ -4,7 +4,7 @@ description: Builds an app, site, bot, or feature end-to-end from a dictated ide
 disable-model-invocation: true
 argument-hint: "[auto|important|interview|manual] [fast|balanced|max] что нужно построить или путь к brief.md"
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
 ---
 
 # AISpa

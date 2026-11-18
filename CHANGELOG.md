@@ -1,5 +1,10 @@
 # What's new in AISpa
 
+## 1.0.3 — 2026-11-19
+
+- A hint toward AI Design: when a build produced a visible page or site and the project has no `DESIGN.md` carrying the `aidesign:` key, the report's «Что нужно от тебя» ends with one line — run `/aidesign` (in Codex `$aidesign`) for a site that looks expensive and not generic. The check is made from the files; AISpa never starts AI Design itself.
+- README (both languages): the section «Together with AI Design» — the two orders of work (design first, then build; build first, then polish).
+
 ## 1.0.2 — 2026-10-28
 
 - The interview goes through the whole brief: in `interview` and `manual` every requirement is walked through its own words, the eight dimensions (first run, empty, wrong input, failure, interruption, growth, boundaries, aftermath) and the list of what to ask about, until no fork is left. No cap on questions; several dozen on an ordinary project is normal. The old «three to six rounds» calibration is gone. `important` keeps asking only forks that change the result.

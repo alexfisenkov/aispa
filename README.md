@@ -377,6 +377,17 @@ If you do send a key in the chat, it **won't end up in any file**: before anythi
 
 ---
 
+## Together with AI Design
+
+[AI Design](https://github.com/alexfisenkov/aidesign) is a sister skill from the same family: it handles how a site looks — your references, an interview about taste, three live previews and rounds until you like one. They work separately; each can be used alone. Together there are two orders:
+
+- **Design first, then build.** Run `/aidesign`, choose the look, then `/aispa`. AI Design leaves `DESIGN.md` and a block in `AGENTS.md` / `CLAUDE.md`; AISpa already reads those files, so the build continues in the same style with nothing to adjust.
+- **Build first, then polish.** Run `/aispa`. If the build produced a visible page or site and the project has no `DESIGN.md` from AI Design (the `aidesign:` key in its front matter), the report ends «Что нужно от тебя» with one line: run `/aidesign` (in Codex `$aidesign`) to make the site look expensive and not generic. AISpa only says so; it never starts it.
+
+One thing to know: in an empty folder AI Design creates `AGENTS.md` containing only its own block, and AISpa treats an existing `AGENTS.md` as the user's file — it does not write into it and offers additions at the end instead.
+
+---
+
 ## Updating and removing
 
 **Only `update` updates.** Don't reinstall the skill with the command from "Installation" — that one is for the first install; updating has its own command:
